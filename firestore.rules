@@ -3,19 +3,16 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // ===============================================================
-    // Helper Functions
-    // ===============================================================
     function isAuthenticated() {
       return request.auth != null;
     }
 
     function isOwner(userId) {
-      return (isAuthenticated() && request.auth.uid == userId) || userId == 'demo-user-123';
+      return isAuthenticated() && request.auth.uid == userId;
     }
 
-    function hasRequiredFields(fields) {
-      return request.resource.data.keys().hasAll(fields);
+    function hasRequiredFields(data, fields) {
+      return data.keys().hasAll(fields);
     }
 
     function isValidEmail(email) {
@@ -23,85 +20,105 @@ service cloud.firestore {
         email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
     }
 
-    // ===============================================================
-    // Domain Validators
-    // ===============================================================
     function isValidUser(data) {
-      return hasRequiredFields(['email', 'createdAt']) &&
-             isValidEmail(data.email) &&
-             data.createdAt is timestamp &&
-             (!('location' in data) || data.location is string) &&
-             (!('profession' in data) || data.profession is string) &&
-             (!('interests' in data) || data.interests is list);
+      return hasRequiredFields(data, ['email', 'createdAt']) &&
+        isValidEmail(data.email) &&
+        data.createdAt is timestamp &&
+        (!('location' in data) || data.location is string) &&
+        (!('profession' in data) || data.profession is string) &&
+        (!('displayName' in data) || data.displayName is string) &&
+        (!('photoURL' in data) || data.photoURL is string) &&
+        (!('interests' in data) || data.interests is list);
     }
 
     function isValidCard(data) {
-      return hasRequiredFields(['card_id', 'title', 'createdAt']) &&
-             data.card_id is string &&
-             data.title is string &&
-             data.createdAt is timestamp;
+      return hasRequiredFields(data, ['card_id', 'title', 'createdAt']) &&
+        data.card_id is string &&
+        data.title is string &&
+        data.createdAt is timestamp;
     }
 
     function isValidWatchlistItem(data) {
-      return hasRequiredFields(['entity', 'type', 'createdAt']) &&
-             data.entity is string &&
-             data.type is string &&
-             data.createdAt is timestamp;
+      return hasRequiredFields(data, ['entity', 'type', 'createdAt']) &&
+        data.entity is string &&
+        data.type is string &&
+        data.createdAt is timestamp;
     }
 
-    // ===============================================================
-    // Rules
-    // ===============================================================
+    function isValidSavedQuote(data) {
+      return hasRequiredFields(data, ['quote_id', 'text', 'author', 'context', 'analysis', 'date', 'savedAt']) &&
+        data.quote_id is string &&
+        data.text is string &&
+        data.author is string &&
+        data.context is string &&
+        data.date is string &&
+        data.savedAt is timestamp &&
+        data.analysis is map &&
+        data.analysis.keys().hasAll(['title', 'full_text', 'drivers', 'impact', 'historical_parallel']) &&
+        data.analysis.title is string &&
+        data.analysis.full_text is string &&
+        data.analysis.drivers is list &&
+        data.analysis.impact is string &&
+        data.analysis.historical_parallel is string;
+    }
+
     match /test/connection {
       allow read: if true;
     }
 
     match /system_cache/{document=**} {
-      allow read, write: if true;
+      allow read, write: if false;
     }
 
     match /facts/{document=**} {
-      allow read, write: if true;
+      allow read, write: if false;
     }
 
     match /trust_layer/{document=**} {
-      allow read, write: if true;
+      allow read, write: if false;
     }
 
-    match /cached_cards/{document=**} {
-      allow read, write: if true;
+    match /historical_20y_summaries/{document=**} {
+      allow read, write: if false;
     }
 
     match /pipeline_logs/{document=**} {
-      allow read, write: if true;
+      allow read, write: if false;
+    }
+
+    match /cached_cards/{domain}/{city}/{cardId} {
+      allow read: if isAuthenticated();
+      allow write: if false;
     }
 
     match /users/{userId} {
-      // Allow the demo user full access even if unauthenticated
-      allow read, write: if userId == 'demo-user-123';
-      
-      // Standard rules for authenticated users
       allow read: if isOwner(userId);
       allow create: if isOwner(userId) && isValidUser(request.resource.data);
       allow update: if isOwner(userId) && isValidUser(request.resource.data) &&
-                    request.resource.data.createdAt == resource.data.createdAt;
+        request.resource.data.createdAt == resource.data.createdAt;
       allow delete: if isOwner(userId);
 
       match /cards/{cardId} {
-        allow read, write: if userId == 'demo-user-123';
         allow read: if isOwner(userId);
         allow create: if isOwner(userId) && isValidCard(request.resource.data);
         allow update: if isOwner(userId) && isValidCard(request.resource.data) &&
-                      request.resource.data.createdAt == resource.data.createdAt;
+          request.resource.data.createdAt == resource.data.createdAt;
         allow delete: if isOwner(userId);
       }
 
       match /watchlist/{itemId} {
-        allow read, write: if userId == 'demo-user-123';
         allow read: if isOwner(userId);
         allow create: if isOwner(userId) && isValidWatchlistItem(request.resource.data);
         allow update: if isOwner(userId) && isValidWatchlistItem(request.resource.data) &&
-                      request.resource.data.createdAt == resource.data.createdAt;
+          request.resource.data.createdAt == resource.data.createdAt;
+        allow delete: if isOwner(userId);
+      }
+
+      match /saved_quotes/{quoteId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidSavedQuote(request.resource.data);
+        allow update: if isOwner(userId) && isValidSavedQuote(request.resource.data) &&
+          request.resource.data.savedAt == resource.data.savedAt;
         allow delete: if isOwner(userId);
       }
     }
