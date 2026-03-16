@@ -1,0 +1,109 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return (isAuthenticated() && request.auth.uid == userId) || userId == 'demo-user-123';
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function isValidEmail(email) {
+      return email is string &&
+        email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+    function isValidUser(data) {
+      return hasRequiredFields(['email', 'createdAt']) &&
+             isValidEmail(data.email) &&
+             data.createdAt is timestamp &&
+             (!('location' in data) || data.location is string) &&
+             (!('profession' in data) || data.profession is string) &&
+             (!('interests' in data) || data.interests is list);
+    }
+
+    function isValidCard(data) {
+      return hasRequiredFields(['card_id', 'title', 'createdAt']) &&
+             data.card_id is string &&
+             data.title is string &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidWatchlistItem(data) {
+      return hasRequiredFields(['entity', 'type', 'createdAt']) &&
+             data.entity is string &&
+             data.type is string &&
+             data.createdAt is timestamp;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+    match /test/connection {
+      allow read: if true;
+    }
+
+    match /system_cache/{document=**} {
+      allow read, write: if true;
+    }
+
+    match /facts/{document=**} {
+      allow read, write: if true;
+    }
+
+    match /trust_layer/{document=**} {
+      allow read, write: if true;
+    }
+
+    match /cached_cards/{document=**} {
+      allow read, write: if true;
+    }
+
+    match /pipeline_logs/{document=**} {
+      allow read, write: if true;
+    }
+
+    match /users/{userId} {
+      // Allow the demo user full access even if unauthenticated
+      allow read, write: if userId == 'demo-user-123';
+      
+      // Standard rules for authenticated users
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidUser(request.resource.data);
+      allow update: if isOwner(userId) && isValidUser(request.resource.data) &&
+                    request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if isOwner(userId);
+
+      match /cards/{cardId} {
+        allow read, write: if userId == 'demo-user-123';
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidCard(request.resource.data);
+        allow update: if isOwner(userId) && isValidCard(request.resource.data) &&
+                      request.resource.data.createdAt == resource.data.createdAt;
+        allow delete: if isOwner(userId);
+      }
+
+      match /watchlist/{itemId} {
+        allow read, write: if userId == 'demo-user-123';
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidWatchlistItem(request.resource.data);
+        allow update: if isOwner(userId) && isValidWatchlistItem(request.resource.data) &&
+                      request.resource.data.createdAt == resource.data.createdAt;
+        allow delete: if isOwner(userId);
+      }
+    }
+  }
+}
