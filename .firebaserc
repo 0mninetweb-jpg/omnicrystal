@@ -1,5 +1,15 @@
 {
   "projects": {
-    "default": "gen-lang-client-0951618022"
-  }
+    "default": "omnicrystal-3b286"
+  },
+  "targets": {
+    "omnicrystal-3b286": {
+      "hosting": {
+        "live": [
+          "omnicrystal-3b286"
+        ]
+      }
+    }
+  },
+  "etags": {}
 }
