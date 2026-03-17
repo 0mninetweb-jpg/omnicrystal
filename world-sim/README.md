@@ -58,10 +58,17 @@ On Windows PowerShell:
 
 ```powershell
 cd world-sim
-python -m venv .venv
+powershell -ExecutionPolicy Bypass -File .\validate-local.ps1
+```
+
+Or, if you want the manual path:
+
+```powershell
+$env:CRYSTAL_PYTHON_EXE="C:\Users\Fiorenza\AppData\Local\Programs\Python\Python312\python.exe"
+& $env:CRYSTAL_PYTHON_EXE -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-python app.py
+& $env:CRYSTAL_PYTHON_EXE app.py
 ```
 
 Then point Crystal Functions to it with:
@@ -84,7 +91,7 @@ If Python is installed locally, you can run the adapter validation script:
 
 ```powershell
 cd world-sim
-.\validate-local.ps1
+powershell -ExecutionPolicy Bypass -File .\validate-local.ps1
 ```
 
 This script:

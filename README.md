@@ -53,5 +53,5 @@ Then copy the resulting values into:
 
 Current blocker from this machine:
 
-- `Cloud Run` / `Secret Manager` operations require the Firebase project to be on `Blaze`
-- `gcloud` is not installed yet on this PC
+- the project is on `Blaze`, but `gcloud` still needs an authenticated account before VM / Cloud Run deploy
+- the real runtime secrets (`LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL_NAME`, `ZEP_API_KEY`) still need to be filled before the original MiroFish VM can go fully live

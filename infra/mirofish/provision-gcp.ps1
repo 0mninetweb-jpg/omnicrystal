@@ -15,19 +15,40 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-if (-not (Get-Command gcloud -ErrorAction SilentlyContinue)) {
+function Get-GcloudExecutable {
+  $cmd = Get-Command gcloud.cmd -ErrorAction SilentlyContinue
+  if ($cmd) {
+    return $cmd.Source
+  }
+
+  $exe = Get-Command gcloud.exe -ErrorAction SilentlyContinue
+  if ($exe) {
+    return $exe.Source
+  }
+
+  $fallback = Get-Command gcloud -ErrorAction SilentlyContinue
+  if ($fallback -and $fallback.Source -notlike "*.ps1") {
+    return $fallback.Source
+  }
+
   throw "gcloud non trovato. Installa Google Cloud SDK prima di eseguire questo script."
 }
 
+$gcloud = Get-GcloudExecutable
+$activeAccount = (& $gcloud auth list "--filter=status:ACTIVE" "--format=value(account)" 2>$null | Select-Object -First 1)
+if (-not $activeAccount) {
+  throw "Nessun account gcloud autenticato. Esegui 'cmd /c gcloud auth login' e riprova."
+}
+
 Write-Host "Imposto il progetto gcloud su $ProjectId..."
-gcloud config set project $ProjectId | Out-Null
+& $gcloud config set project $ProjectId | Out-Null
 
 Write-Host "Abilito le API necessarie..."
-gcloud services enable compute.googleapis.com vpcaccess.googleapis.com run.googleapis.com | Out-Null
+& $gcloud services enable compute.googleapis.com vpcaccess.googleapis.com run.googleapis.com | Out-Null
 
 $connectorExists = $true
 try {
-  gcloud compute networks vpc-access connectors describe $ConnectorName --region $Region | Out-Null
+  & $gcloud compute networks vpc-access connectors describe $ConnectorName --region $Region | Out-Null
 } catch {
   $connectorExists = $false
 }
@@ -43,7 +64,7 @@ if (-not $connectorExists) {
   if (-not [string]::IsNullOrWhiteSpace($Subnetwork)) {
     $connectorArgs += @("--subnet", $Subnetwork)
   }
-  & gcloud @connectorArgs | Out-Null
+  & $gcloud @connectorArgs | Out-Null
 } else {
   Write-Host "VPC connector $ConnectorName gia presente."
 }
@@ -51,14 +72,14 @@ if (-not $connectorExists) {
 $firewallRuleName = "allow-mirofish-from-$($ConnectorName.ToLower())"
 $firewallExists = $true
 try {
-  gcloud compute firewall-rules describe $firewallRuleName | Out-Null
+  & $gcloud compute firewall-rules describe $firewallRuleName | Out-Null
 } catch {
   $firewallExists = $false
 }
 
 if (-not $firewallExists) {
   Write-Host "Creo la firewall rule $firewallRuleName per la porta $RuntimePort..."
-  gcloud compute firewall-rules create $firewallRuleName `
+  & $gcloud compute firewall-rules create $firewallRuleName `
     --network $Network `
     --direction INGRESS `
     --action ALLOW `
@@ -71,7 +92,7 @@ if (-not $firewallExists) {
 
 $instanceExists = $true
 try {
-  gcloud compute instances describe $InstanceName --zone $Zone | Out-Null
+  & $gcloud compute instances describe $InstanceName --zone $Zone | Out-Null
 } catch {
   $instanceExists = $false
 }
@@ -95,13 +116,13 @@ if (-not $instanceExists) {
   } else {
     $instanceArgs += @("--network", $Network)
   }
-  & gcloud @instanceArgs | Out-Null
+  & $gcloud @instanceArgs | Out-Null
 } else {
   Write-Host "VM $InstanceName gia presente."
 }
 
-$internalIp = gcloud compute instances describe $InstanceName --zone $Zone --format "value(networkInterfaces[0].networkIP)"
-$externalIp = gcloud compute instances describe $InstanceName --zone $Zone --format "value(networkInterfaces[0].accessConfigs[0].natIP)"
+$internalIp = & $gcloud compute instances describe $InstanceName --zone $Zone --format "value(networkInterfaces[0].networkIP)"
+$externalIp = & $gcloud compute instances describe $InstanceName --zone $Zone --format "value(networkInterfaces[0].accessConfigs[0].natIP)"
 
 Write-Host ""
 Write-Host "Provisioning completato."

@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { Check, Gem, Lock, Sparkles, X, Zap } from 'lucide-react';
 import { cn } from './CrystalCard';
 import { formatCredits, formatPrice, getPlanLabel, getWorldSimPlanTier, PLAN_OFFERS } from '../lib/crystalPlans';
-import { PRODUCT_BRAND, WORLD_SIM_BRAND } from '../content/brand';
+import { PLAN_COPY, PRODUCT_BRAND, WORLD_SIM_BRAND } from '../content/brand';
 import type { BillingInterval, EntitlementSnapshot, PlanId, UpgradeIntent } from '../types/entitlements';
 
 export function UpgradeModal({
@@ -79,10 +79,10 @@ export function UpgradeModal({
               <div className="mt-8 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                 <div className="inline-flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-bold text-slate-200">
                   <Sparkles className="h-4 w-4 text-sky-400" />
-                  Piano attuale: {isGuest ? 'Guest Preview' : getPlanLabel(entitlements.plan)}
+                  {PLAN_COPY.currentPlanLabel}: {isGuest ? 'Guest Preview' : getPlanLabel(entitlements.plan)}
                   {!isGuest && (
                     <span className="rounded-full bg-sky-500/10 px-2.5 py-1 text-[11px] uppercase tracking-wider text-sky-300">
-                      {entitlements.creditsBalance} crediti
+                      {entitlements.creditsBalance} credits
                     </span>
                   )}
                 </div>
@@ -98,7 +98,7 @@ export function UpgradeModal({
                         interval === value ? 'bg-white text-black shadow-xl' : 'text-slate-400 hover:text-white'
                       )}
                     >
-                      {value === 'month' ? 'Mensile' : 'Annuale'}
+                      {value === 'month' ? PLAN_COPY.monthlyLabel : PLAN_COPY.yearlyLabel}
                     </button>
                   ))}
                 </div>
@@ -129,7 +129,7 @@ export function UpgradeModal({
                       </div>
                       {isRecommended && (
                         <span className="rounded-full border border-sky-500/20 bg-sky-500/10 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-sky-300">
-                          Consigliato
+                          {PLAN_COPY.recommendedLabel}
                         </span>
                       )}
                     </div>
@@ -138,7 +138,7 @@ export function UpgradeModal({
                       <span className="text-4xl font-display font-bold text-white">{formatPrice(plan, interval)}</span>
                       {interval === 'year' && (
                         <span className="rounded-full bg-emerald-500/10 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-emerald-300">
-                          Risparmi rispetto al mensile
+                          {PLAN_COPY.yearlySavingsLabel}
                         </span>
                       )}
                     </div>
@@ -146,15 +146,15 @@ export function UpgradeModal({
                     <div className="mb-8 space-y-3">
                       <div className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm font-bold text-white">
                         <Zap className="h-4 w-4 text-sky-400" />
-                        {offer.creditsPerCycle} crediti / mese
+                        {offer.creditsPerCycle} credits / month
                       </div>
                       <div className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm font-bold text-white">
                         <Lock className="h-4 w-4 text-sky-400" />
-                        Watchlist fino a {offer.watchlistLimit}
+                        Watchlist up to {offer.watchlistLimit}
                       </div>
                       <div className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm font-bold text-white">
                         <Sparkles className="h-4 w-4 text-rose-300" />
-                        WorldSim {worldSimTier.depthLabel} · {worldSimTier.agentCount} agenti
+                        WorldSim {worldSimTier.depthLabel} - {worldSimTier.agentCount} agents
                       </div>
                     </div>
 
@@ -166,7 +166,7 @@ export function UpgradeModal({
                         </div>
                       ))}
                       <div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm font-bold text-rose-200">
-                        {WORLD_SIM_BRAND.name} fa parte di ogni piano. Cambiano risoluzione, coda e profondita: {worldSimTier.monthlyRunsLabel}, {worldSimTier.queueLabel.toLowerCase()}.
+                        {WORLD_SIM_BRAND.name} is part of every plan. Resolution, queue, and depth change by tier: {worldSimTier.monthlyRunsLabel}, {worldSimTier.queueLabel.toLowerCase()}.
                       </div>
                     </div>
 
@@ -176,7 +176,7 @@ export function UpgradeModal({
                         onClick={onLogin}
                         className="w-full rounded-2xl bg-white px-6 py-4 text-sm font-bold text-black transition-colors hover:bg-slate-100"
                       >
-                        Accedi gratis
+                        {PLAN_COPY.guestButton}
                       </button>
                     ) : (
                       <button
@@ -192,7 +192,7 @@ export function UpgradeModal({
                               : 'border border-white/10 bg-white/5 text-white hover:bg-white/10'
                         )}
                       >
-                        {isCurrent ? 'Piano attuale' : `Passa a ${getPlanLabel(plan)}`}
+                        {isCurrent ? PLAN_COPY.currentPlanButton : `Move to ${getPlanLabel(plan)}`}
                       </button>
                     )}
                   </div>
@@ -203,7 +203,7 @@ export function UpgradeModal({
             <div className="relative border-t border-white/10 px-8 py-6 text-sm font-medium text-slate-400 md:px-10">
               <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                 <span>
-                  Le azioni premium consumano crediti solo se la generazione va a buon fine. Esempi: Forecast standard {formatCredits(1)}, Nextletter personal {formatCredits(3)}.
+                  Premium actions use credits only when the generation succeeds. Examples: standard Forecast {formatCredits(1)}, Personal Edition {formatCredits(3)}.
                 </span>
                 {checkoutError && <span className="font-bold text-rose-300">{checkoutError}</span>}
               </div>

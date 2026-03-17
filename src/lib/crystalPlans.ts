@@ -39,8 +39,8 @@ export const PLAN_OFFERS: Record<PlanId, BillingOffer> = {
     yearlyEquivalentMonthly: 0,
     creditsPerCycle: 15,
     watchlistLimit: 5,
-    headline: 'Il modo piu semplice per provare Forecast e WorldSim con un budget leggero ma reale.',
-    features: ['15 crediti / mese', '5 entita in watchlist', 'WorldSim Lite incluso'],
+    headline: 'The easiest way to try Forecast and WorldSim with a real but lightweight usage budget.',
+    features: ['15 credits / month', 'Up to 5 watchlist entities', 'WorldSim Lite included'],
   },
   plus: {
     monthlyPrice: 12,
@@ -48,8 +48,8 @@ export const PLAN_OFFERS: Record<PlanId, BillingOffer> = {
     yearlyEquivalentMonthly: 8.25,
     creditsPerCycle: 120,
     watchlistLimit: 25,
-    headline: 'Il piano giusto se vuoi usare Crystal ogni settimana con un WorldSim piu continuo.',
-    features: ['120 crediti / mese', '25 entita in watchlist', 'Forecast fino a 6 mesi', 'WorldSim Plus incluso'],
+    headline: 'The everyday plan if you want to use Crystal weekly with a steadier WorldSim layer.',
+    features: ['120 credits / month', 'Up to 25 watchlist entities', 'Forecast up to 6 months', 'WorldSim Plus included'],
   },
   pro: {
     monthlyPrice: 29,
@@ -57,16 +57,16 @@ export const PLAN_OFFERS: Record<PlanId, BillingOffer> = {
     yearlyEquivalentMonthly: 20.75,
     creditsPerCycle: 400,
     watchlistLimit: 100,
-    headline: 'Per forecast piu profondi, orizzonti lunghi e la massima risoluzione simulativa.',
-    features: ['400 crediti / mese', '100 entita in watchlist', '12 mesi + Massimo Rigore', 'WorldSim Deep incluso'],
+    headline: 'For deeper forecasts, longer horizons, and the highest simulation resolution.',
+    features: ['400 credits / month', 'Up to 100 watchlist entities', '12 months + Rigorous mode', 'WorldSim Deep included'],
   },
 };
 
 export const WORLD_SIM_PLAN_TIERS: Record<PlanId, WorldSimPlanTier> = {
   free: {
     agentCount: 120,
-    monthlyRunsLabel: 'Prove leggere e qualche run personale',
-    queueLabel: 'Queue condivisa',
+    monthlyRunsLabel: 'Light trials and a few personal runs',
+    queueLabel: 'Shared queue',
     depthLabel: 'Lite simulation',
     matrixBranchLimit: 2,
     matrixCategories: ['marketing_attention', 'media_narrative', 'pricing_product'],
@@ -74,8 +74,8 @@ export const WORLD_SIM_PLAN_TIERS: Record<PlanId, WorldSimPlanTier> = {
   },
   plus: {
     agentCount: 400,
-    monthlyRunsLabel: 'Uso continuo per Forecast e Nextletter',
-    queueLabel: 'Queue prioritaria standard',
+    monthlyRunsLabel: 'Steady use across Forecast and Nextletter',
+    queueLabel: 'Standard priority queue',
     depthLabel: 'Expanded simulation',
     matrixBranchLimit: 5,
     matrixCategories: [
@@ -89,8 +89,8 @@ export const WORLD_SIM_PLAN_TIERS: Record<PlanId, WorldSimPlanTier> = {
   },
   pro: {
     agentCount: 1000,
-    monthlyRunsLabel: 'Uso intenso e chamber completa',
-    queueLabel: 'Queue prioritaria alta',
+    monthlyRunsLabel: 'Heavy use and the full chamber',
+    queueLabel: 'High-priority queue',
     depthLabel: 'Deep simulation',
     matrixBranchLimit: 12,
     matrixCategories: [
@@ -116,14 +116,14 @@ export const ACTION_CATALOG: Record<MeteredAction, MeteredActionSpec> = {
     action: 'dashboard_add_card_standard',
     cost: 1,
     requiredPlan: 'free',
-    label: 'Crea forecast',
+    label: 'Create forecast',
     accent: 'sky',
   },
   dashboard_add_card_extended: {
     action: 'dashboard_add_card_extended',
     cost: 2,
     requiredPlan: 'plus',
-    label: 'Crea forecast',
+    label: 'Create forecast',
     accent: 'amber',
   },
   dashboard_add_card_oracle: {
@@ -137,14 +137,14 @@ export const ACTION_CATALOG: Record<MeteredAction, MeteredActionSpec> = {
     action: 'nextletter_personal',
     cost: 3,
     requiredPlan: 'free',
-    label: 'Genera',
+    label: 'Generate',
     accent: 'amber',
   },
   profile_ai_message: {
     action: 'profile_ai_message',
     cost: 1,
     requiredPlan: 'free',
-    label: 'Invia',
+    label: 'Send',
     accent: 'sky',
   },
 };
@@ -252,7 +252,7 @@ export function getWorldSimPlanTier(plan: PlanId) {
 
 export function formatPrice(plan: PlanId, interval: BillingInterval) {
   const offer = PLAN_OFFERS[plan];
-  return interval === 'year' ? `EUR ${offer.yearlyPrice}/anno` : `EUR ${offer.monthlyPrice}/mese`;
+  return interval === 'year' ? `EUR ${offer.yearlyPrice}/year` : `EUR ${offer.monthlyPrice}/month`;
 }
 
 export function getPlanPrice(plan: Exclude<PlanId, 'free'>, interval: BillingInterval) {
@@ -261,7 +261,7 @@ export function getPlanPrice(plan: Exclude<PlanId, 'free'>, interval: BillingInt
 }
 
 export function formatCredits(cost: number) {
-  return `${cost} ${cost === 1 ? 'credito' : 'crediti'}`;
+  return `${cost} ${cost === 1 ? 'credit' : 'credits'}`;
 }
 
 export function getPredictActionSpec(

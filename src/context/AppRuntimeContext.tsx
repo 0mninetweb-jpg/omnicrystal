@@ -9,8 +9,11 @@ const defaultCapabilities: RuntimeCapabilities = {
   apiAvailable: false,
   forecastAvailable: false,
   worldSimAvailable: false,
+  runtimeMode: 'preview',
   forecastMode: 'preview',
   worldSimMode: 'preview',
+  statusLabel: RUNTIME_COPY.runtimePreviewTitle,
+  statusDetail: RUNTIME_COPY.runtimePreviewDetail,
   message: RUNTIME_COPY.forecastPreview,
 };
 
@@ -71,19 +74,40 @@ async function probeRuntimeCapabilities(): Promise<RuntimeCapabilities> {
     const forecastAvailable = apiAvailable || clientFallback;
     const worldSimFlag = import.meta.env.VITE_WORLDSIM_AVAILABLE === 'true';
     const worldSimAvailable = apiAvailable && (healthPayload?.worldSim?.asyncJobs === true || worldSimFlag);
+    const runtimeMode: RuntimeCapabilities['runtimeMode'] = worldSimAvailable
+      ? 'live'
+      : forecastAvailable
+        ? 'limited'
+        : 'preview';
+    const statusLabel =
+      runtimeMode === 'live'
+        ? RUNTIME_COPY.runtimeLiveTitle
+        : runtimeMode === 'limited'
+          ? RUNTIME_COPY.runtimeLimitedTitle
+          : RUNTIME_COPY.runtimePreviewTitle;
+    const statusDetail =
+      runtimeMode === 'live'
+        ? RUNTIME_COPY.runtimeLiveDetail
+        : runtimeMode === 'limited'
+          ? RUNTIME_COPY.runtimeLimitedDetail
+          : RUNTIME_COPY.runtimePreviewDetail;
 
     const capabilities: RuntimeCapabilities = {
       isChecking: false,
       apiAvailable,
       forecastAvailable,
       worldSimAvailable,
+      runtimeMode,
       forecastMode: apiAvailable ? 'live' : clientFallback ? 'limited' : 'preview',
       worldSimMode: worldSimAvailable ? 'live' : 'preview',
-      message: !forecastAvailable
-        ? RUNTIME_COPY.forecastPreview
-        : !worldSimAvailable
-          ? RUNTIME_COPY.worldSimPreview
-          : RUNTIME_COPY.worldSimLive,
+      statusLabel,
+      statusDetail,
+      message:
+        runtimeMode === 'live'
+          ? RUNTIME_COPY.worldSimLive
+          : runtimeMode === 'limited'
+            ? RUNTIME_COPY.forecastLimited
+            : RUNTIME_COPY.forecastPreview,
     };
 
     cachedCapabilities = capabilities;
@@ -111,6 +135,9 @@ export function AppRuntimeProvider({ children }: { children: React.ReactNode }) 
           setCapabilities({
             ...defaultCapabilities,
             isChecking: false,
+            runtimeMode: 'preview',
+            statusLabel: RUNTIME_COPY.runtimePreviewTitle,
+            statusDetail: RUNTIME_COPY.runtimePreviewDetail,
             message: RUNTIME_COPY.forecastPreview,
           });
         }

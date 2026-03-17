@@ -23,26 +23,26 @@ export function WorldSimInlineCard({
   ctaLabel = WORLD_SIM_BRAND.enterLabel,
 }: WorldSimInlineCardProps) {
   return (
-    <section className={cn('oracle-panel overflow-hidden rounded-[32px] p-5 md:p-6', className)}>
+    <section className={cn('oracle-panel overflow-hidden rounded-[36px] p-5 md:p-6', className)}>
       <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
         <div className="max-w-2xl">
           <div className="flex flex-wrap items-center gap-2">
             <span className="section-kicker !text-rose-200">{data.kicker}</span>
             <span
-            className={cn(
+              className={cn(
                 'rounded-full border px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em]',
                 job && job.status !== 'completed'
                   ? 'border-sky-300/30 bg-sky-300/10 text-sky-100'
                   : data.mode === 'live'
-                  ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-200'
-                  : 'border-amber-300/25 bg-amber-300/10 text-amber-100'
+                    ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-200'
+                    : 'border-amber-300/25 bg-amber-300/10 text-amber-100'
               )}
             >
               {job && job.status !== 'completed' ? job.status : data.mode === 'live' ? 'Live' : 'Preview'}
             </span>
             {job && (
               <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-200">
-                {Math.round((job.progress || 0) * 100)}% · {job.agentCount} agents
+                {Math.round((job.progress || 0) * 100)}% - {job.agentCount} agents
               </span>
             )}
             {job?.depth && (
@@ -87,12 +87,12 @@ export function WorldSimInlineCard({
           </div>
 
           <div className="rounded-[24px] border border-white/10 bg-white/5 p-4">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">What the layer adds</div>
-          <p className="mt-3 text-sm leading-7 text-slate-200">
-            {job?.statusMessage || WORLD_SIM_BRAND.honestNote}
-          </p>
+            <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">What the layer adds</div>
+            <p className="mt-3 text-sm leading-7 text-slate-200">
+              {job?.statusMessage || WORLD_SIM_BRAND.honestNote}
+            </p>
+          </div>
         </div>
-      </div>
       </div>
 
       <div className="mt-5 flex flex-wrap gap-2">
@@ -110,7 +110,7 @@ export function WorldSimInlineCard({
         <div className="mt-5 flex items-center gap-3 text-xs font-medium text-slate-400">
           <span>{data.sourceLabel}</span>
           <ArrowRight className="h-3.5 w-3.5 text-rose-200" />
-          <span>Interroga il sistema con prompt guidati e leggi la simulazione dall alto.</span>
+          <span>Read the system from above with guided prompts and a clearer simulation view.</span>
         </div>
       )}
     </section>

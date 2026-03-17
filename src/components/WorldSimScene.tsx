@@ -17,11 +17,13 @@ import { isTerminalWorldSimJobStatus as isWorldSimJobTerminal } from '../types/w
 import { cancelMatrixSimulationJob, cancelWorldSimJob, createMatrixSimulationJob, getMatrixSimulationJobResult, getWorldSimJobResult } from '../services/geminiService';
 import { useCrystalPlan } from '../context/CrystalPlanContext';
 import { useAppRuntime } from '../context/AppRuntimeContext';
+import { useAppShell } from '../context/AppShellContext';
 import { formatProbabilityLabel, formatSignedDelta, getMarketSignalLabel, getMarketSignalState } from '../lib/predictionMarket';
 import { createMatrixSimulationPreviewResult, createSimulationBranch, createWorldSimSceneData } from '../lib/worldSimScene';
 import { getWorldSimPlanTier } from '../lib/crystalPlans';
 import { WORLD_SIM_BRAND } from '../content/brand';
 import { cn } from './CrystalCard';
+import { RuntimeStatusSurface } from './RuntimeStatusSurface';
 
 interface WorldSimSceneProps {
   open: boolean;
@@ -95,8 +97,10 @@ function duplicateBranchPayload(payload: MatrixInterventionPayload): MatrixInter
 
 export function WorldSimScene({ open, mode, data, job, onClose }: WorldSimSceneProps) {
   const capabilities = useAppRuntime();
+  const { isPhone, isTablet, motionMode } = useAppShell();
   const { entitlements } = useCrystalPlan();
   const worldSimTier = useMemo(() => getWorldSimPlanTier(entitlements.plan), [entitlements.plan]);
+  const shouldAnimate = motionMode !== 'minimal';
   const [selectedPromptId, setSelectedPromptId] = useState<string>(data.prompts[0]?.id || '');
   const [jobDetail, setJobDetail] = useState<WorldSimJobDetail | null>((job as WorldSimJobDetail | null) || null);
   const [jobDigest, setJobDigest] = useState<WorldSimDigest | null>(null);
@@ -211,14 +215,27 @@ export function WorldSimScene({ open, mode, data, job, onClose }: WorldSimSceneP
     });
   }, [activeBranchId, allowedInterventions, branches, data, job, jobDetail, jobDigest, mode, viewMode, worldSimTier.matrixBranchLimit]);
 
+  const displayNodes = useMemo(() => {
+    if (isPhone) return activeData.nodes.slice(0, 4);
+    if (isTablet) return activeData.nodes.slice(0, 6);
+    return activeData.nodes;
+  }, [activeData.nodes, isPhone, isTablet]);
+
   const links = useMemo(
     () =>
-      activeData.links.map((link) => {
-        const from = findPoint(link.from, activeData.nodes);
-        const to = findPoint(link.to, activeData.nodes);
+      activeData.links
+        .filter(
+          (link) =>
+            link.from === 'core' ||
+            link.to === 'core' ||
+            (displayNodes.some((node) => node.id === link.from) && displayNodes.some((node) => node.id === link.to))
+        )
+        .map((link) => {
+        const from = findPoint(link.from, displayNodes);
+        const to = findPoint(link.to, displayNodes);
         return { ...link, from, to };
       }),
-    [activeData.links, activeData.nodes]
+    [activeData.links, displayNodes]
   );
 
   const selectedPrompt: WorldSimScenePrompt | undefined = useMemo(
@@ -253,7 +270,14 @@ export function WorldSimScene({ open, mode, data, job, onClose }: WorldSimSceneP
               ? {
                   ...item,
                   jobId: result.job.jobId,
-                  status: result.job.status === 'completed' ? 'completed' : result.job.status === 'failed' ? 'failed' : result.job.status === 'canceled' ? 'canceled' : 'running',
+                  status:
+                    result.job.status === 'completed'
+                      ? 'completed'
+                      : result.job.status === 'failed'
+                        ? 'failed'
+                        : result.job.status === 'canceled'
+                          ? 'canceled'
+                          : 'running',
                   result: result.matrix || item.result,
                 }
               : item
@@ -295,7 +319,7 @@ export function WorldSimScene({ open, mode, data, job, onClose }: WorldSimSceneP
   const handleRunBranch = async () => {
     if (!draftPayload) return;
     if (branches.length >= worldSimTier.matrixBranchLimit) {
-      setBranchError(`Hai raggiunto il limite di ${worldSimTier.matrixBranchLimit} branch per il piano ${entitlements.plan}.`);
+      setBranchError(`You have reached the ${worldSimTier.matrixBranchLimit}-branch limit for the ${entitlements.plan} plan.`);
       return;
     }
 
@@ -340,7 +364,7 @@ export function WorldSimScene({ open, mode, data, job, onClose }: WorldSimSceneP
       setActiveBranchId(branch.id);
     } catch (branchRunError) {
       console.error('Matrix Simulation run error:', branchRunError);
-      setBranchError(branchRunError instanceof Error ? branchRunError.message : 'Impossibile avviare la simulazione.');
+      setBranchError(branchRunError instanceof Error ? branchRunError.message : 'Unable to start the simulation.');
     } finally {
       setIsRunningBranch(false);
     }
@@ -349,7 +373,7 @@ export function WorldSimScene({ open, mode, data, job, onClose }: WorldSimSceneP
   const handleDuplicateBranch = () => {
     if (!selectedBranch) return;
     if (branches.length >= worldSimTier.matrixBranchLimit) {
-      setBranchError(`Hai raggiunto il limite di ${worldSimTier.matrixBranchLimit} branch per il piano ${entitlements.plan}.`);
+      setBranchError(`You have reached the ${worldSimTier.matrixBranchLimit}-branch limit for the ${entitlements.plan} plan.`);
       return;
     }
     const duplicated = duplicateBranchPayload(selectedBranch.payload);
@@ -375,26 +399,45 @@ export function WorldSimScene({ open, mode, data, job, onClose }: WorldSimSceneP
     viewMode === 'intervene' && selectedBranch?.result
       ? selectedBranch.result.interventionDigest?.narrative_arc || activeData.narrativeArc
       : activeData.narrativeArc;
+  const chamberClassName = isPhone
+    ? 'observatory-shell relative flex h-[100dvh] w-full max-w-none flex-col overflow-hidden border-0 text-white shadow-none'
+    : isTablet
+      ? 'observatory-shell relative flex h-[94vh] w-full max-w-[1220px] flex-col overflow-hidden rounded-[32px] border border-white/10 text-white shadow-[0_30px_110px_rgba(2,6,23,0.38)]'
+      : 'observatory-shell relative flex h-[min(92vh,980px)] w-full max-w-[1500px] flex-col overflow-hidden rounded-[36px] border border-white/10 text-white shadow-[0_40px_140px_rgba(2,6,23,0.45)]';
+  const stageGridClassName = isPhone
+    ? 'relative flex min-h-0 flex-1 flex-col'
+    : isTablet
+      ? 'relative grid min-h-0 flex-1 lg:grid-cols-[1fr_0.96fr]'
+      : 'relative grid min-h-0 flex-1 lg:grid-cols-[1.1fr_0.9fr]';
+  const stagePanelClassName = isPhone
+    ? 'relative min-h-[300px] overflow-hidden border-b border-white/10 p-4'
+    : 'relative min-h-[360px] overflow-hidden border-b border-white/10 p-5 md:p-7 lg:border-b-0 lg:border-r';
+  const stageViewportClassName = isPhone
+    ? 'relative mt-5 h-[34vh] min-h-[280px] overflow-hidden rounded-[26px] border border-white/10 bg-[radial-gradient(circle_at_center,rgba(30,41,59,0.3),rgba(2,6,23,0.96))] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]'
+    : 'relative mt-6 h-[46vh] min-h-[360px] overflow-hidden rounded-[30px] border border-white/10 bg-[radial-gradient(circle_at_center,rgba(30,41,59,0.3),rgba(2,6,23,0.96))] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]';
+  const railClassName = isPhone
+    ? 'min-h-0 overflow-y-auto border-t border-white/10 bg-[rgba(255,255,255,0.03)] px-4 py-4'
+    : 'matrix-rail min-h-0 overflow-y-auto p-5 md:p-7';
 
   return (
     <AnimatePresence>
       {open && (
-        <div className="fixed inset-0 z-[140] flex items-center justify-center p-3 md:p-6">
+        <div className={cn('fixed inset-0 z-[140] flex items-center justify-center', isPhone ? 'p-0' : 'p-3 md:p-6')}>
           <motion.button
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
+            initial={shouldAnimate ? { opacity: 0 } : undefined}
+            animate={shouldAnimate ? { opacity: 1 } : undefined}
+            exit={shouldAnimate ? { opacity: 0 } : undefined}
             onClick={onClose}
             className="absolute inset-0 bg-[rgba(2,6,23,0.76)] backdrop-blur-xl"
-            aria-label="Chiudi WorldSim"
+            aria-label="Close WorldSim"
           />
 
           <motion.div
-            initial={{ opacity: 0, y: 24, scale: 0.98 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 24, scale: 0.98 }}
-            transition={{ duration: 0.24, ease: 'easeOut' }}
-            className="relative flex h-[min(92vh,980px)] w-full max-w-[1500px] flex-col overflow-hidden rounded-[36px] border border-white/10 bg-[#050814] text-white shadow-[0_40px_140px_rgba(2,6,23,0.45)]"
+            initial={shouldAnimate ? { opacity: 0, y: 24, scale: 0.98 } : undefined}
+            animate={shouldAnimate ? { opacity: 1, y: 0, scale: 1 } : undefined}
+            exit={shouldAnimate ? { opacity: 0, y: 24, scale: 0.98 } : undefined}
+            transition={{ duration: 0.2, ease: 'easeOut' }}
+            className={chamberClassName}
           >
             <div className="world-sim-grid pointer-events-none absolute inset-0 opacity-80" />
             <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(244,63,94,0.14),transparent_22%),radial-gradient(circle_at_left,rgba(59,130,246,0.14),transparent_28%),radial-gradient(circle_at_bottom,rgba(16,185,129,0.12),transparent_24%)]" />
@@ -432,6 +475,15 @@ export function WorldSimScene({ open, mode, data, job, onClose }: WorldSimSceneP
                   </div>
                 </div>
                 <h2 className="mt-2 text-2xl font-display font-semibold text-white md:text-3xl">{activeData.title}</h2>
+                <div className="mt-3 max-w-3xl">
+                  <RuntimeStatusSurface
+                    mode={capabilities.runtimeMode}
+                    label={capabilities.statusLabel}
+                    detail={capabilities.statusDetail}
+                    isChecking={capabilities.isChecking}
+                    compact
+                  />
+                </div>
               </div>
 
               <button
@@ -442,18 +494,18 @@ export function WorldSimScene({ open, mode, data, job, onClose }: WorldSimSceneP
               </button>
             </div>
 
-            <div className="relative grid min-h-0 flex-1 lg:grid-cols-[1.1fr_0.9fr]">
-              <div className="relative min-h-[360px] overflow-hidden border-b border-white/10 p-5 md:p-7 lg:border-b-0 lg:border-r">
+            <div className={stageGridClassName}>
+              <div className={stagePanelClassName}>
                 <div className="flex flex-wrap items-start justify-between gap-4">
                   <div className="max-w-2xl">
                     <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">{activeData.sourceLabel}</div>
                     <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-300">
                       {viewMode === 'observe'
                         ? activeData.subtitle
-                        : `Matrix Simulation testa un intervento strutturato e mostra Baseline world, Intervention world e Delta. ${WORLD_SIM_BRAND.matrixPreviewNote}`}
+                        : `Matrix Simulation tests a structured intervention and shows Baseline world, Intervention world, and Delta. ${WORLD_SIM_BRAND.matrixPreviewNote}`}
                     </p>
                   </div>
-                  <div className="rounded-[20px] border border-white/10 bg-white/5 px-4 py-3 text-xs leading-6 text-slate-300">
+                  <div className="glass-panel rounded-[20px] px-4 py-3 text-xs leading-6 text-slate-300">
                     <div className="font-semibold text-white">Truth layer</div>
                     <div className="mt-1">{viewMode === 'observe' ? activeData.truthNote : WORLD_SIM_BRAND.matrixPreviewNote}</div>
                   </div>
@@ -482,7 +534,7 @@ export function WorldSimScene({ open, mode, data, job, onClose }: WorldSimSceneP
                   </div>
                 )}
 
-                <div className="relative mt-6 h-[46vh] min-h-[360px] overflow-hidden rounded-[30px] border border-white/10 bg-[radial-gradient(circle_at_center,rgba(30,41,59,0.34),rgba(2,6,23,0.96))]">
+                <div className={stageViewportClassName}>
                   <div className="world-sim-scan pointer-events-none absolute inset-0 opacity-60" />
                   <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(56,189,248,0.08),transparent_28%),radial-gradient(circle_at_center,rgba(244,63,94,0.08),transparent_46%)]" />
                   <svg className="absolute inset-0 h-full w-full">
@@ -516,14 +568,14 @@ export function WorldSimScene({ open, mode, data, job, onClose }: WorldSimSceneP
                     </div>
                   </div>
 
-                  {activeData.nodes.map((node, index) => {
+                  {displayNodes.map((node, index) => {
                     const position = getNodePosition(node);
                     return (
                       <motion.div
                         key={node.id}
-                        initial={{ opacity: 0, scale: 0.9 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        transition={{ duration: 0.35, delay: index * 0.05 }}
+                        initial={shouldAnimate ? { opacity: 0, scale: 0.9 } : undefined}
+                        animate={shouldAnimate ? { opacity: 1, scale: 1 } : undefined}
+                        transition={{ duration: 0.28, delay: shouldAnimate ? index * 0.04 : 0 }}
                         className="absolute -translate-x-1/2 -translate-y-1/2"
                         style={{ left: `${position.x}%`, top: `${position.y}%` }}
                       >
@@ -539,8 +591,8 @@ export function WorldSimScene({ open, mode, data, job, onClose }: WorldSimSceneP
                     );
                   })}
 
-                  <div className="absolute inset-x-4 bottom-4 md:inset-x-6">
-                    <div className="rounded-[24px] border border-white/10 bg-[rgba(2,6,23,0.62)] px-4 py-4 backdrop-blur-md">
+                  <div className={cn('absolute inset-x-4 bottom-4 md:inset-x-6', isPhone && 'inset-x-3 bottom-3')}>
+                    <div className="glass-panel rounded-[24px] px-4 py-4">
                       <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
                         {viewMode === 'observe' ? 'Narrative arc' : 'Active branch reading'}
                       </div>
@@ -550,16 +602,16 @@ export function WorldSimScene({ open, mode, data, job, onClose }: WorldSimSceneP
                 </div>
               </div>
 
-              <div className="min-h-0 overflow-y-auto bg-[rgba(2,6,23,0.18)] p-5 md:p-7">
+              <div className={railClassName}>
                 {viewMode === 'observe' ? (
                   <div className="space-y-6">
-                    <section className="rounded-[28px] border border-white/10 bg-white/5 p-5">
+                    <section className="glass-panel rounded-[28px] p-5">
                       <div className="section-kicker !text-slate-400">God mode question</div>
                       <h3 className="mt-3 text-xl font-display font-semibold text-white">{activeData.question}</h3>
                     </section>
 
                     <section className="space-y-3">
-                      {activeData.prompts.map((prompt) => (
+                      {(isPhone ? activeData.prompts.slice(0, 2) : activeData.prompts).map((prompt) => (
                         <button
                           key={prompt.id}
                           onClick={() => setSelectedPromptId(prompt.id)}
@@ -577,7 +629,7 @@ export function WorldSimScene({ open, mode, data, job, onClose }: WorldSimSceneP
                     </section>
 
                     {selectedPrompt && (
-                      <section className="rounded-[28px] border border-white/10 bg-[rgba(15,23,42,0.55)] p-5">
+                      <section className="glass-panel rounded-[28px] p-5">
                         <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-rose-200">
                           <Sparkles className="h-4 w-4" />
                           System reading
@@ -595,7 +647,7 @@ export function WorldSimScene({ open, mode, data, job, onClose }: WorldSimSceneP
                       ))}
                     </section>
 
-                    <section className="rounded-[28px] border border-white/10 bg-white/5 p-5">
+                    <section className="glass-panel rounded-[28px] p-5">
                       <div className="section-kicker !text-slate-400">Pivotal actors</div>
                       <div className="mt-4 flex flex-wrap gap-2">
                         {activeData.actors.map((actor) => (
@@ -606,7 +658,7 @@ export function WorldSimScene({ open, mode, data, job, onClose }: WorldSimSceneP
                       </div>
                     </section>
 
-                    <section className="rounded-[28px] border border-white/10 bg-white/5 p-5">
+                    <section className="glass-panel rounded-[28px] p-5">
                       <div className="section-kicker !text-slate-400">Scenario spread</div>
                       <div className="mt-4 space-y-3">
                         {activeData.scenarios.map((scenario) => (
@@ -629,7 +681,7 @@ export function WorldSimScene({ open, mode, data, job, onClose }: WorldSimSceneP
                     </section>
 
                     {activeData.marketFrame?.outcome && (
-                      <section className="rounded-[28px] border border-white/10 bg-white/5 p-5">
+                      <section className="glass-panel rounded-[28px] p-5">
                         <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
                           <ShieldAlert className="h-4 w-4 text-amber-200" />
                           Market consensus
@@ -660,19 +712,19 @@ export function WorldSimScene({ open, mode, data, job, onClose }: WorldSimSceneP
                   </div>
                 ) : (
                   <div className="space-y-6">
-                    <section className="rounded-[28px] border border-white/10 bg-white/5 p-5">
+                    <section className="glass-panel rounded-[28px] p-5">
                       <div className="section-kicker !text-rose-200">{WORLD_SIM_BRAND.matrixName}</div>
                       <h3 className="mt-3 text-xl font-display font-semibold text-white">Inject a move, then compare the world before and after.</h3>
                       <p className="mt-3 text-sm leading-7 text-slate-300">
-                        Usa interventi strutturati, non prompt liberi. La simulazione resta ipotetica: non e una previsione certa e non e istruzione operativa reale.
+                        Use structured interventions, not open-ended prompts. The simulation stays hypothetical: it is not certainty and it is not operational instruction.
                       </p>
                     </section>
 
-                    <section className="rounded-[28px] border border-white/10 bg-white/5 p-5">
+                      <section className="glass-panel rounded-[28px] p-5">
                       <div className="flex items-center justify-between gap-3">
                         <div>
                           <div className="section-kicker !text-slate-400">Intervention cards</div>
-                          <p className="mt-2 text-sm text-slate-300">{worldSimTier.matrixLabel} · {worldSimTier.agentCount} agents · {worldSimTier.matrixBranchLimit} branch max</p>
+                          <p className="mt-2 text-sm text-slate-300">{worldSimTier.matrixLabel} - {worldSimTier.agentCount} agents - {worldSimTier.matrixBranchLimit} branch max</p>
                         </div>
                       </div>
                       <div className="mt-4 grid gap-3">
@@ -709,7 +761,9 @@ export function WorldSimScene({ open, mode, data, job, onClose }: WorldSimSceneP
                               max="1"
                               step="0.05"
                               value={draftPayload.intensity}
-                              onChange={(event) => setDraftPayload((current) => current ? { ...current, intensity: Number(event.target.value) } : current)}
+                              onChange={(event) =>
+                                setDraftPayload((current) => (current ? { ...current, intensity: Number(event.target.value) } : current))
+                              }
                               className="mt-3 w-full"
                             />
                             <span className="mt-2 block text-xs text-slate-400">{Math.round(draftPayload.intensity * 100)}%</span>
@@ -725,7 +779,9 @@ export function WorldSimScene({ open, mode, data, job, onClose }: WorldSimSceneP
                               <input
                                 type="text"
                                 value={(draftPayload as any)[key]}
-                                onChange={(event) => setDraftPayload((current) => current ? { ...current, [key]: event.target.value } : current)}
+                                onChange={(event) =>
+                                  setDraftPayload((current) => (current ? { ...current, [key]: event.target.value } : current))
+                                }
                                 className="mt-2 w-full rounded-[16px] border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none"
                               />
                             </label>
@@ -762,11 +818,11 @@ export function WorldSimScene({ open, mode, data, job, onClose }: WorldSimSceneP
                       </section>
                     )}
 
-                    <section className="rounded-[28px] border border-white/10 bg-white/5 p-5">
+                    <section className="glass-panel rounded-[28px] p-5">
                       <div className="section-kicker !text-slate-400">Branches</div>
                       <div className="mt-4 space-y-3">
                         {branches.length === 0 ? (
-                          <p className="text-sm leading-7 text-slate-300">Nessun branch salvato ancora. Parti da un intervento e confronta il mondo baseline con il ramo alternativo.</p>
+                          <p className="text-sm leading-7 text-slate-300">No branches saved yet. Start with one intervention, then compare the baseline world with the alternate branch.</p>
                         ) : (
                           branches.map((branch) => (
                             <button
@@ -780,7 +836,7 @@ export function WorldSimScene({ open, mode, data, job, onClose }: WorldSimSceneP
                               <div className="flex flex-wrap items-center justify-between gap-3">
                                 <div>
                                   <div className="text-sm font-semibold text-white">{branch.label}</div>
-                                  <div className="mt-1 text-xs text-slate-400">{branch.payload.geography} · {branch.payload.duration} · {Math.round(branch.payload.intensity * 100)}%</div>
+                                  <div className="mt-1 text-xs text-slate-400">{branch.payload.geography} - {branch.payload.duration} - {Math.round(branch.payload.intensity * 100)}%</div>
                                 </div>
                                 <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-white">{branch.status}</span>
                               </div>

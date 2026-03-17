@@ -47,7 +47,7 @@ export function Profile({ user, isGuest, onLogin }: ProfileProps) {
         {
           role: 'model',
           content:
-            "Ciao, sono l'assistente di Crystal. Per partire bene mi bastano tre cose: dove ti trovi, cosa fai e quali temi o asset segui di piu.",
+            "Hi, I'm Crystal's profile assistant. To get started well, I only need three things: where you are, what you do, and which themes or assets you follow most closely.",
         },
       ]);
     }
@@ -102,7 +102,7 @@ export function Profile({ user, isGuest, onLogin }: ProfileProps) {
           : await runMeteredAction(ACTION_CATALOG.profile_ai_message, () => chatWithProfileBot(nextMessages), {
               sourceView: 'profile',
               insufficientCreditsMessage:
-                'Dopo i primi messaggi gratuiti, il profilo AI usa 1 credito per messaggio. Passa a Plus o Pro per continuare.',
+                'After the first free messages, the AI profile assistant uses 1 credit per message. Move to Plus or Pro to keep going.',
             });
 
       const jsonMatch = response.match(/```json\n([\s\S]*?)\n```/);
@@ -116,7 +116,7 @@ export function Profile({ user, isGuest, onLogin }: ProfileProps) {
           if (typeof extractedData.interests === 'string') setInterests(extractedData.interests);
           if (Array.isArray(extractedData.interests)) setInterests(extractedData.interests.join(', '));
           botText = response.replace(/```json\n[\s\S]*?\n```/, '').trim();
-          setMessage('Ho estratto i dati dalla conversazione. Puoi salvarli subito o rifinirli a mano.');
+          setMessage('I pulled structured profile data from the conversation. You can save it now or refine it manually.');
         } catch (parseError) {
           console.error('Failed to parse JSON from bot', parseError);
         }
@@ -129,7 +129,7 @@ export function Profile({ user, isGuest, onLogin }: ProfileProps) {
       console.error('Chat error:', error);
       setChatMessages((current) => [
         ...current,
-        { role: 'model', content: 'Ho perso il filo per un attimo. Ripeti pure la tua risposta e riprendiamo da li.' },
+        { role: 'model', content: 'I lost the thread for a second. Send your answer again and we will pick it up from there.' },
       ]);
     } finally {
       setIsChatLoading(false);
@@ -159,10 +159,10 @@ export function Profile({ user, isGuest, onLogin }: ProfileProps) {
         },
         { merge: true }
       );
-      setMessage('Profilo aggiornato: Crystal usera questo contesto nei forecast e nella Nextletter personale.');
+      setMessage('Profile updated. Crystal will reuse this context across Forecast and Personal Edition.');
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `users/${user.uid}`);
-      setMessage('Errore durante il salvataggio.');
+      setMessage('There was an issue while saving.');
     } finally {
       setIsSaving(false);
     }
@@ -178,7 +178,7 @@ export function Profile({ user, isGuest, onLogin }: ProfileProps) {
 
   return (
     <div className="space-y-6">
-      <section className="editorial-panel rounded-[32px] p-6 md:p-7">
+      <section className="editorial-panel rounded-[36px] p-6 md:p-7">
         <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr] lg:items-end">
           <div>
             <div className="section-kicker">{SECTION_COPY.profile.heroKicker}</div>
@@ -188,23 +188,23 @@ export function Profile({ user, isGuest, onLogin }: ProfileProps) {
             <p className="mt-4 max-w-2xl text-base leading-8 text-slate-600">{SECTION_COPY.profile.heroBody}</p>
           </div>
 
-          <div className="rounded-[28px] border border-slate-200 bg-white p-5">
+          <div className="signal-board rounded-[30px] p-5">
             <div className="section-kicker">Profile Progress</div>
             <div className="mt-3 flex items-center gap-3">
               <span className="rounded-full bg-slate-950 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-white">
                 {isGuest ? 'Guest' : getPlanLabel(entitlements.plan)}
               </span>
-              <span className="text-sm font-semibold text-slate-700">{profileProgress}% completato</span>
+              <span className="text-sm font-semibold text-slate-700">{profileProgress}% complete</span>
             </div>
             <div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-100">
               <div className="h-full rounded-full bg-[#1453e8] transition-all" style={{ width: `${profileProgress}%` }} />
             </div>
             <div className="mt-4 text-sm leading-7 text-slate-500">
               {isGuest
-                ? 'Accedi per attivare il profilo intelligente e i primi messaggi gratuiti.'
+                ? 'Sign in to unlock the smart profile and the first free messages.'
                 : entitlements.profileAiFreeMessagesRemaining > 0
-                  ? `${entitlements.profileAiFreeMessagesRemaining} messaggi AI gratuiti rimasti.`
-                  : `Messaggi AI a ${formatCredits(ACTION_CATALOG.profile_ai_message.cost)}.`}
+                  ? `${entitlements.profileAiFreeMessagesRemaining} free AI messages left.`
+                  : `AI messages cost ${formatCredits(ACTION_CATALOG.profile_ai_message.cost)}.`}
             </div>
             {!capabilities.forecastAvailable && (
               <div className="mt-4 rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-600">
@@ -216,21 +216,21 @@ export function Profile({ user, isGuest, onLogin }: ProfileProps) {
       </section>
 
       <section className="grid gap-5 xl:grid-cols-[0.95fr_1.05fr]">
-        <div className="editorial-panel rounded-[32px] p-6">
+        <div className="editorial-panel rounded-[34px] p-6">
           <div className="section-kicker">Why This Matters</div>
           <div className="mt-5 space-y-3">
             {[
               {
                 title: 'Location',
-                text: 'Crystal capisce quando un segnale globale ha un impatto locale sul tuo contesto.',
+                text: 'Crystal can tell when a global signal turns into a local impact for your own context.',
               },
               {
                 title: 'Profession',
-                text: 'Le azioni consigliate cambiano se lavori in energia, marketing, immobiliare o prodotto.',
+                text: 'The useful next move changes if you work in energy, marketing, real estate, or product.',
               },
               {
                 title: 'Interests / Assets',
-                text: 'Nextletter e watchlist diventano piu rilevanti e meno generiche.',
+                text: 'Nextletter and Watchlist become more relevant and less generic.',
               },
             ].map((item) => (
               <div key={item.title} className="rounded-[24px] border border-slate-200 bg-white p-5">
@@ -261,14 +261,14 @@ export function Profile({ user, isGuest, onLogin }: ProfileProps) {
                 </div>
                 <div>
                   <div className="text-lg font-semibold">
-                    {isGuest ? 'Accedi per usare l assistente AI' : !capabilities.forecastAvailable ? 'Assistente AI in preview' : 'Configura con l assistente AI'}
+                    {isGuest ? 'Sign in to use the AI assistant' : !capabilities.forecastAvailable ? 'AI assistant in preview' : 'Set up with the AI assistant'}
                   </div>
                   <div className="mt-1 text-sm text-slate-300">
                     {isGuest
-                      ? 'I primi 10 messaggi sono inclusi nel profilo.'
+                      ? 'The first 10 messages are included in the profile experience.'
                       : !capabilities.forecastAvailable
-                        ? 'Il backend live non e ancora collegato in questa versione.'
-                        : 'Ti guida passo dopo passo e riempie il profilo per te.'}
+                        ? 'The live backend is not connected in this version yet.'
+                        : 'It guides you step by step and fills the profile with you.'}
                   </div>
                 </div>
               </div>
@@ -281,10 +281,10 @@ export function Profile({ user, isGuest, onLogin }: ProfileProps) {
                   <div className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-950 text-white">
                     <User className="h-4 w-4" />
                   </div>
-                  <div className="text-sm font-semibold text-slate-950">Assistente Crystal</div>
+                  <div className="text-sm font-semibold text-slate-950">Crystal assistant</div>
                 </div>
                 <button onClick={() => setShowChat(false)} className="text-sm font-semibold text-slate-500 transition hover:text-slate-950">
-                  Chiudi
+                  Close
                 </button>
               </div>
 
@@ -319,7 +319,7 @@ export function Profile({ user, isGuest, onLogin }: ProfileProps) {
                     type="text"
                     value={chatInput}
                     onChange={(event) => setChatInput(event.target.value)}
-                    placeholder="Scrivi la tua risposta..."
+                    placeholder="Write your answer..."
                     className="flex-1 rounded-[18px] border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-900 outline-none transition focus:border-[#1453e8]"
                   />
                   <button
@@ -335,22 +335,22 @@ export function Profile({ user, isGuest, onLogin }: ProfileProps) {
           )}
         </div>
 
-        <form onSubmit={handleSave} className="editorial-panel rounded-[32px] p-6">
+        <form onSubmit={handleSave} className="editorial-panel rounded-[34px] p-6">
           <div className="section-kicker">Manual Setup</div>
-          <h3 className="mt-3 text-2xl font-display font-semibold text-slate-950">Rifinisci il profilo in modo semplice.</h3>
+          <h3 className="mt-3 text-2xl font-display font-semibold text-slate-950">Refine the profile in a simple way.</h3>
 
           <div className="mt-6 space-y-5">
             <div className="rounded-[24px] border border-slate-200 bg-white p-5">
               <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
                 <MapPin className="h-4 w-4 text-[#1453e8]" />
-                Posizione geografica
+                Geography
               </label>
-              <p className="mt-2 text-xs leading-6 text-slate-500">Serve per pesare meglio impatto locale, segnali di citta e watchlist.</p>
+              <p className="mt-2 text-xs leading-6 text-slate-500">This helps weigh local impact, city signals, and watchlist relevance.</p>
               <input
                 type="text"
                 value={location}
                 onChange={(event) => setLocation(event.target.value)}
-                placeholder="Es: Milano, Italia"
+                placeholder="Example: Milan, Italy"
                 className="mt-4 w-full rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-900 outline-none transition focus:border-[#1453e8] focus:bg-white"
               />
             </div>
@@ -358,14 +358,14 @@ export function Profile({ user, isGuest, onLogin }: ProfileProps) {
             <div className="rounded-[24px] border border-slate-200 bg-white p-5">
               <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
                 <Briefcase className="h-4 w-4 text-[#1453e8]" />
-                Professione o settore
+                Profession or sector
               </label>
-              <p className="mt-2 text-xs leading-6 text-slate-500">Aiuta Crystal a trasformare un segnale generale in una decisione utile per il tuo lavoro.</p>
+              <p className="mt-2 text-xs leading-6 text-slate-500">This helps Crystal turn a general signal into something more useful for your work.</p>
               <input
                 type="text"
                 value={profession}
                 onChange={(event) => setProfession(event.target.value)}
-                placeholder="Es: Founder, analista, freelance, retail..."
+                placeholder="Example: Founder, analyst, freelancer, retail..."
                 className="mt-4 w-full rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-900 outline-none transition focus:border-[#1453e8] focus:bg-white"
               />
             </div>
@@ -373,16 +373,16 @@ export function Profile({ user, isGuest, onLogin }: ProfileProps) {
             <div className="rounded-[24px] border border-slate-200 bg-white p-5">
               <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
                 <Tag className="h-4 w-4 text-[#1453e8]" />
-                Interessi e asset
+                Interests and assets
               </label>
               <p className="mt-2 text-xs leading-6 text-slate-500">
-                Inserisci temi, mercati o asset separati da virgola. Servono per briefing, watchlist e personal output.
+                Add themes, markets, or assets separated by commas. They help shape your briefings, watchlist, and personal outputs.
               </p>
               <input
                 type="text"
                 value={interests}
                 onChange={(event) => setInterests(event.target.value)}
-                placeholder="Es: energia, AI, immobiliare, crypto..."
+                placeholder="Example: energy, AI, real estate, crypto..."
                 className="mt-4 w-full rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-900 outline-none transition focus:border-[#1453e8] focus:bg-white"
               />
             </div>
@@ -408,7 +408,7 @@ export function Profile({ user, isGuest, onLogin }: ProfileProps) {
               className="inline-flex items-center justify-center gap-2 rounded-full bg-[#1453e8] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#1248c8] disabled:opacity-70"
             >
               {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-              Salva profilo
+              Save profile
             </button>
           </div>
         </form>

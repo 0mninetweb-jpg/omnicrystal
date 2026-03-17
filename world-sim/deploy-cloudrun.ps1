@@ -19,8 +19,29 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-if (-not (Get-Command gcloud -ErrorAction SilentlyContinue)) {
+function Get-GcloudExecutable {
+  $cmd = Get-Command gcloud.cmd -ErrorAction SilentlyContinue
+  if ($cmd) {
+    return $cmd.Source
+  }
+
+  $exe = Get-Command gcloud.exe -ErrorAction SilentlyContinue
+  if ($exe) {
+    return $exe.Source
+  }
+
+  $fallback = Get-Command gcloud -ErrorAction SilentlyContinue
+  if ($fallback -and $fallback.Source -notlike "*.ps1") {
+    return $fallback.Source
+  }
+
   throw "gcloud non trovato. Installa Google Cloud SDK prima di eseguire questo script."
+}
+
+$gcloud = Get-GcloudExecutable
+$activeAccount = (& $gcloud auth list "--filter=status:ACTIVE" "--format=value(account)" 2>$null | Select-Object -First 1)
+if (-not $activeAccount) {
+  throw "Nessun account gcloud autenticato. Esegui 'cmd /c gcloud auth login' e riprova."
 }
 
 if ([string]::IsNullOrWhiteSpace($WorldSimApiKey)) {
@@ -32,13 +53,13 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $imageUri = "$Region-docker.pkg.dev/$ProjectId/cloud-run-source-deploy/$ImageName"
 
 Write-Host "Imposto il progetto gcloud su $ProjectId..."
-gcloud config set project $ProjectId | Out-Null
+& $gcloud config set project $ProjectId | Out-Null
 
 Write-Host "Abilito le API necessarie..."
-gcloud services enable run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com vpcaccess.googleapis.com
+& $gcloud services enable run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com vpcaccess.googleapis.com
 
 Write-Host "Build dell'immagine Cloud Run..."
-gcloud builds submit $scriptDir --tag $imageUri
+& $gcloud builds submit $scriptDir --tag $imageUri
 
 if ([string]::IsNullOrWhiteSpace($MirofishBackendUrl)) {
   Write-Host "MIROFISH_BACKEND_URL non impostato: l'adapter andra in fallback mode." -ForegroundColor Yellow
@@ -81,9 +102,9 @@ if (-not [string]::IsNullOrWhiteSpace($ServiceAccountEmail)) {
 }
 
 Write-Host "Deploy del servizio $ServiceName..."
-& gcloud @deployArgs
+& $gcloud @deployArgs
 
-$serviceUrl = gcloud run services describe $ServiceName --region $Region --format "value(status.url)"
+$serviceUrl = & $gcloud run services describe $ServiceName --region $Region --format "value(status.url)"
 
 Write-Host ""
 Write-Host "Deploy completato."

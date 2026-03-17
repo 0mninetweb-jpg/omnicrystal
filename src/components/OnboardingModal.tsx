@@ -47,7 +47,7 @@ export function OnboardingModal({ open, onClose, onStartForecast }: OnboardingMo
       {open && (
         <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 md:p-8">
           <motion.button
-            aria-label="Chiudi tutorial"
+            aria-label="Close tutorial"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -105,8 +105,7 @@ export function OnboardingModal({ open, onClose, onStartForecast }: OnboardingMo
               <div className="rounded-[28px] ink-panel p-6">
                 <div className="section-kicker !text-slate-400">{PRODUCT_BRAND.name}</div>
                 <p className="mt-3 text-sm leading-7 text-slate-300">
-                  Non serve capire tutto in una volta. Ti basta vedere una risposta chiara, capire perche esiste e sapere
-                  cosa guardare dopo.
+                  You do not need to understand everything at once. You only need one clear answer, the reason behind it, and a sense of what to watch next.
                 </p>
 
                 <div className="mt-6 rounded-[24px] border border-white/10 bg-white/5 p-4">
@@ -127,27 +126,27 @@ export function OnboardingModal({ open, onClose, onStartForecast }: OnboardingMo
                 </div>
 
                 <div className="mt-6 text-xs leading-6 text-slate-400">
-                  Il tutorial resta sempre richiamabile dall header con <span className="font-semibold text-slate-200">{PRODUCT_BRAND.tutorialLabel}</span>.
+                  The tutorial always stays available from the header through <span className="font-semibold text-slate-200">{PRODUCT_BRAND.tutorialLabel}</span>.
                 </div>
               </div>
             </div>
 
             <div className="relative flex flex-col gap-3 border-t border-slate-200/80 bg-white/70 px-6 py-5 md:flex-row md:items-center md:justify-between md:px-8">
               <div className="text-sm font-medium text-slate-500">
-                Bastano pochi passaggi per capire come leggere il prodotto.
+                It only takes a few steps to understand how to read the product.
               </div>
               <div className="flex items-center gap-3">
                 <button
                   onClick={handleClose}
                   className="rounded-full border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                 >
-                  Chiudi
+                  Close
                 </button>
                 <button
                   onClick={handleNext}
                   className="inline-flex items-center gap-2 rounded-full bg-[#1453e8] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#1248c8]"
                 >
-                  {activeStep === STEPS.length - 1 ? 'Apri Forecast' : 'Continua'}
+                  {activeStep === STEPS.length - 1 ? 'Open Forecast' : 'Continue'}
                   <ArrowRight className="h-4 w-4" />
                 </button>
               </div>

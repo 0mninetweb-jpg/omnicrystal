@@ -11,9 +11,10 @@ import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { Loader2 } from 'lucide-react';
 import { CrystalPlanProvider } from './context/CrystalPlanContext';
 import { AppRuntimeProvider } from './context/AppRuntimeContext';
+import { AppShellProvider } from './context/AppShellContext';
 import { createDefaultEntitlementFields } from './lib/crystalPlans';
+import { scheduleIdleTask } from './lib/scheduleIdle';
 import { OnboardingModal } from './components/OnboardingModal';
-import { WorldSimScene } from './components/WorldSimScene';
 import { getDefaultWorldSimPreviewDataset } from './lib/worldSimScene';
 import {
   defaultOnboardingState,
@@ -29,15 +30,43 @@ const Search = lazy(async () => ({ default: (await import('./components/Search')
 const Watchlist = lazy(async () => ({ default: (await import('./components/Watchlist')).Watchlist }));
 const Profile = lazy(async () => ({ default: (await import('./components/Profile')).Profile }));
 const Nextletter = lazy(async () => ({ default: (await import('./components/Nextletter')).Nextletter }));
+const WorldSimScene = lazy(async () => ({ default: (await import('./components/WorldSimScene')).WorldSimScene }));
 
 type AppView = 'home' | 'forecast' | 'watchlist' | 'profile' | 'nextletter';
+
+function getUserSyncPayload(
+  data: Record<string, any> | undefined,
+  currentUser: User,
+  defaults: ReturnType<typeof createDefaultEntitlementFields>
+) {
+  const payload: Record<string, any> = {};
+
+  const nextEmail = currentUser.email || 'no-email@example.com';
+  const nextDisplayName = currentUser.displayName || 'User';
+  const nextPhotoURL = currentUser.photoURL || '';
+
+  if (data?.email !== nextEmail) payload.email = nextEmail;
+  if (data?.displayName !== nextDisplayName) payload.displayName = nextDisplayName;
+  if (data?.photoURL !== nextPhotoURL) payload.photoURL = nextPhotoURL;
+  if (typeof data?.plan !== 'string') payload.plan = defaults.plan;
+  if (typeof data?.planStatus !== 'string') payload.planStatus = defaults.planStatus;
+  if (typeof data?.creditsBalance !== 'number') payload.creditsBalance = defaults.creditsBalance;
+  if (typeof data?.creditsCycleAmount !== 'number') payload.creditsCycleAmount = defaults.creditsCycleAmount;
+  if (!data?.creditsResetAt) payload.creditsResetAt = defaults.creditsResetAt;
+  if (typeof data?.profileAiFreeMessagesRemaining !== 'number') {
+    payload.profileAiFreeMessagesRemaining = defaults.profileAiFreeMessagesRemaining;
+  }
+  if (typeof data?.watchlistLimit !== 'number') payload.watchlistLimit = defaults.watchlistLimit;
+
+  return Object.keys(payload).length > 0 ? payload : null;
+}
 
 function ViewLoader() {
   return (
     <div className="flex min-h-[45vh] items-center justify-center">
       <div className="inline-flex items-center gap-3 rounded-full border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 shadow-[0_16px_35px_rgba(15,23,42,0.08)]">
         <Loader2 className="h-4 w-4 animate-spin text-[#1453e8]" />
-        Caricamento vista...
+        Loading view...
       </div>
     </div>
   );
@@ -112,26 +141,11 @@ export default function App() {
             });
           } else {
             const data = userDoc.data();
-            await setDoc(
-              doc(db, 'users', currentUser.uid),
-              {
-                email: currentUser.email || 'no-email@example.com',
-                displayName: currentUser.displayName || 'User',
-                photoURL: currentUser.photoURL || '',
-                plan: data.plan || defaults.plan,
-                planStatus: data.planStatus || defaults.planStatus,
-                creditsBalance: typeof data.creditsBalance === 'number' ? data.creditsBalance : defaults.creditsBalance,
-                creditsCycleAmount:
-                  typeof data.creditsCycleAmount === 'number' ? data.creditsCycleAmount : defaults.creditsCycleAmount,
-                creditsResetAt: data.creditsResetAt || defaults.creditsResetAt,
-                profileAiFreeMessagesRemaining:
-                  typeof data.profileAiFreeMessagesRemaining === 'number'
-                    ? data.profileAiFreeMessagesRemaining
-                    : defaults.profileAiFreeMessagesRemaining,
-                watchlistLimit: typeof data.watchlistLimit === 'number' ? data.watchlistLimit : defaults.watchlistLimit,
-              },
-              { merge: true }
-            );
+            const payload = getUserSyncPayload(data, currentUser, defaults);
+
+            if (payload) {
+              await setDoc(doc(db, 'users', currentUser.uid), payload, { merge: true });
+            }
           }
         } catch (error) {
           console.error('Firestore error during user setup:', error);
@@ -173,6 +187,15 @@ export default function App() {
       });
     }
   }, [currentView]);
+
+  useEffect(() => {
+    const isDesktopViewport = typeof window !== 'undefined' && window.innerWidth >= 1280;
+    if (!isAuthReady || !isDesktopViewport) return;
+
+    return scheduleIdleTask(() => {
+      void import('./components/Search');
+    }, 1200);
+  }, [isAuthReady]);
 
   const handleLogout = async () => {
     await logout();
@@ -224,78 +247,84 @@ export default function App() {
   }
 
   return (
-    <AppRuntimeProvider>
-      <CrystalPlanProvider user={user} isGuest={isGuest} onLogin={loginWithGoogle}>
-        <Layout
-          currentView={currentView}
-          setCurrentView={setCurrentView}
-          onOpenTutorial={() => setIsOnboardingOpen(true)}
-          onOpenWorldSimScene={() => openWorldSimScene()}
-          user={user}
-          isGuest={isGuest}
-          onLogin={loginWithGoogle}
-          onLogout={handleLogout}
-        >
-          <Suspense fallback={<ViewLoader />}>
-            {currentView === 'home' && (
-              <Home
-                user={user}
-                isGuest={isGuest}
-                onLogin={loginWithGoogle}
-                onNavigate={setCurrentView}
-                onForecastIntent={openForecast}
-                onOpenTutorial={() => setIsOnboardingOpen(true)}
-                onOpenWorldSimScene={openWorldSimScene}
-                onboardingState={onboardingState}
-              />
-            )}
-            {currentView === 'forecast' && (
-              <Search
-                user={user}
-                isGuest={isGuest}
-                onLogin={loginWithGoogle}
-                initialQuery={forecastSeed}
-                onForecastComplete={() => markChecklist('firstForecast')}
-                onOpenWorldSimScene={openWorldSimScene}
-              />
-            )}
-            {currentView === 'nextletter' && (
-              <Nextletter
-                user={user}
-                isGuest={isGuest}
-                onLogin={loginWithGoogle}
-                onGenerateCard={(query) => openForecast(query)}
-                onOpenWorldSimScene={openWorldSimScene}
-              />
-            )}
-            {currentView === 'watchlist' && (
-              <Watchlist
-                user={user}
-                isGuest={isGuest}
-                onLogin={loginWithGoogle}
-                onChecklistComplete={() => markChecklist('firstWatchlist')}
-              />
-            )}
-            {currentView === 'profile' && <Profile user={user} isGuest={isGuest} onLogin={loginWithGoogle} />}
-          </Suspense>
-        </Layout>
+    <AppShellProvider>
+      <AppRuntimeProvider>
+        <CrystalPlanProvider user={user} isGuest={isGuest} onLogin={loginWithGoogle}>
+          <Layout
+            currentView={currentView}
+            setCurrentView={setCurrentView}
+            onOpenTutorial={() => setIsOnboardingOpen(true)}
+            onOpenWorldSimScene={() => openWorldSimScene()}
+            user={user}
+            isGuest={isGuest}
+            onLogin={loginWithGoogle}
+            onLogout={handleLogout}
+          >
+            <Suspense fallback={<ViewLoader />}>
+              {currentView === 'home' && (
+                <Home
+                  user={user}
+                  isGuest={isGuest}
+                  onLogin={loginWithGoogle}
+                  onNavigate={setCurrentView}
+                  onForecastIntent={openForecast}
+                  onOpenTutorial={() => setIsOnboardingOpen(true)}
+                  onOpenWorldSimScene={openWorldSimScene}
+                  onboardingState={onboardingState}
+                />
+              )}
+              {currentView === 'forecast' && (
+                <Search
+                  user={user}
+                  isGuest={isGuest}
+                  onLogin={loginWithGoogle}
+                  initialQuery={forecastSeed}
+                  onForecastComplete={() => markChecklist('firstForecast')}
+                  onOpenWorldSimScene={openWorldSimScene}
+                />
+              )}
+              {currentView === 'nextletter' && (
+                <Nextletter
+                  user={user}
+                  isGuest={isGuest}
+                  onLogin={loginWithGoogle}
+                  onGenerateCard={(query) => openForecast(query)}
+                  onOpenWorldSimScene={openWorldSimScene}
+                />
+              )}
+              {currentView === 'watchlist' && (
+                <Watchlist
+                  user={user}
+                  isGuest={isGuest}
+                  onLogin={loginWithGoogle}
+                  onChecklistComplete={() => markChecklist('firstWatchlist')}
+                />
+              )}
+              {currentView === 'profile' && <Profile user={user} isGuest={isGuest} onLogin={loginWithGoogle} />}
+            </Suspense>
+          </Layout>
 
-        <OnboardingModal
-          open={isOnboardingOpen}
-          onClose={completeTutorial}
-          onStartForecast={() => {
-            completeTutorial();
-            openForecast('Quanto e probabile un aumento dei costi energetici in Italia nei prossimi 30 giorni?');
-          }}
-        />
-        <WorldSimScene
-          open={worldSimSceneOpen}
-          mode={worldSimSceneMode}
-          data={worldSimPreviewDataset}
-          job={worldSimJobRef}
-          onClose={() => setWorldSimSceneOpen(false)}
-        />
-      </CrystalPlanProvider>
-    </AppRuntimeProvider>
+          <OnboardingModal
+            open={isOnboardingOpen}
+            onClose={completeTutorial}
+            onStartForecast={() => {
+              completeTutorial();
+              openForecast('How likely is an energy cost spike in Italy over the next 30 days?');
+            }}
+          />
+          {worldSimSceneOpen && (
+            <Suspense fallback={null}>
+              <WorldSimScene
+                open={worldSimSceneOpen}
+                mode={worldSimSceneMode}
+                data={worldSimPreviewDataset}
+                job={worldSimJobRef}
+                onClose={() => setWorldSimSceneOpen(false)}
+              />
+            </Suspense>
+          )}
+        </CrystalPlanProvider>
+      </AppRuntimeProvider>
+    </AppShellProvider>
   );
 }

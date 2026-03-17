@@ -1,13 +1,16 @@
 export const PRODUCT_BRAND = {
   name: 'Crystal',
-  shellLabel: 'Read what may happen next',
-  tagline: 'Previsioni leggibili, senza rumore inutile.',
+  shellLabel: 'A clearer read on what may happen next',
+  tagline: 'Clear forecasts, useful context, no extra noise.',
+  primaryCta: 'Run a forecast',
+  secondaryCta: 'See how it works',
   tutorialLabel: 'How it works',
   tutorialReplayLabel: 'Replay tutorial',
   plansLabel: 'Plans',
   plansTitle: 'Crystal Plans',
   guestLabel: 'Guest preview',
-};
+  savedLabel: 'Saved',
+} as const;
 
 export const WORLD_SIM_BRAND = {
   name: 'WorldSim',
@@ -15,55 +18,59 @@ export const WORLD_SIM_BRAND = {
   matrixName: 'Matrix Simulation',
   observeLabel: 'Observe',
   interveneLabel: 'Intervene',
-  shortDescription: 'Una simulation chamber premium per leggere attori, attriti e reazioni a catena.',
-  honestNote: 'Usa lo stesso motore per tutti i piani: cambiano profondita, coda e numero di agenti. Non sostituisce il forecast base.',
-  previewNote: 'Preview mode: la scena e pronta, ma il backend live non e ancora collegato.',
-  liveNote: 'Live mode: questa scena sta leggendo il digest corrente del layer simulativo.',
+  shortDescription: 'A premium simulation observatory for actors, pressure, and chain reactions.',
+  honestNote:
+    'Every plan uses the same engine. Depth, queue priority, and agent budget change by tier. WorldSim enriches the forecast; it does not replace it.',
+  previewNote: 'Preview mode: the observatory is designed and ready, but the live backend is not connected yet.',
+  liveNote: 'Live mode: this chamber is reading the current simulation digest.',
   matrixPreviewNote:
-    'Matrix Simulation usa interventi strutturati e una simulazione ipotetica. Finche il runtime completo non e live, i branch restano una preview guidata.',
-  enterLabel: 'Apri la simulation chamber',
-};
+    'Matrix Simulation runs structured interventions and compares a baseline world with an alternate branch. Until the full runtime is connected, some runs stay in guided preview.',
+  enterLabel: 'Open the observatory',
+  teaserTitle: 'A simulation observatory for questions that need more than a single number.',
+  teaserBody:
+    'Use it when the answer depends on actors, pressure, second-order effects, and how a system reacts over time.',
+} as const;
 
 export const SECTION_COPY = {
   home: {
-    navDescription: 'Il punto di partenza: segnali chiave, temi salvati e una lettura rapida di quello che conta oggi.',
-    headerDescription: 'Una vista semplice dei segnali da seguire, dei temi salvati e di cosa merita attenzione adesso.',
+    navDescription: "Your starting point: today's signals, saved themes, and a quick read on what deserves attention.",
+    headerDescription: 'A calm overview of what matters now, what you are tracking, and where to go next.',
     heroKicker: 'Start here',
-    heroTitle: 'Capisci piu in fretta cosa potrebbe succedere dopo.',
+    heroTitle: 'See what may matter next, faster.',
     heroBody:
-      'Fai una domanda chiara e Crystal la traduce in una lettura semplice: cosa puo succedere, perche e plausibile e cosa conviene guardare adesso.',
+      'Ask a clear question and Crystal turns it into a readable answer: what may happen, why it looks plausible, and what to watch now.',
   },
   forecast: {
-    navDescription: 'Fai una domanda e ottieni una risposta chiara, i motivi dietro il numero e cosa osservare dopo.',
-    headerDescription: 'Trasforma una domanda in una previsione leggibile, con contesto, motivi principali e prossimi segnali.',
+    navDescription: 'Turn a question into a clear answer, the reasoning behind it, and the next signals worth watching.',
+    headerDescription: 'A calmer way to turn uncertainty into a readable forecast, useful context, and next steps.',
     heroKicker: 'Forecast',
-    heroTitle: 'Una domanda chiara. Una risposta chiara.',
+    heroTitle: 'One clear question. One clear read.',
     heroBody:
-      'Crystal ordina un tema complesso in tre livelli semplici: cosa puo succedere, perche sembra plausibile e quando vale la pena entrare nel layer WorldSim.',
+      'Crystal keeps the flow simple: what may happen, why it looks plausible, and when it is worth opening the WorldSim layer.',
   },
   nextletter: {
-    navDescription: 'La tua lettura del giorno: segnali, contesto e mosse possibili, senza tono teatrale.',
-    headerDescription: 'Una lettura quotidiana piu utile: segnali, contesto e cosa fare dopo in una forma semplice.',
+    navDescription: 'A daily read that keeps signals, context, and next moves in one useful place.',
+    headerDescription: 'A more useful daily read: signals, context, and next moves without the theater.',
     heroKicker: 'Nextletter',
-    heroTitle: 'La lettura quotidiana, resa piu utile.',
+    heroTitle: 'Your daily read, made more useful.',
     heroBody:
-      'Usa la Global Edition per orientarti in pochi minuti. Usa la Personal Edition per rileggere i segnali piu vicini ai tuoi interessi.',
+      'Use Global Edition to orient quickly. Use Personal Edition to turn your themes into a more focused daily briefing.',
   },
   watchlist: {
-    navDescription: 'Tieni sotto controllo citta, paesi e temi in una lista ordinata, con stato e pulse sempre leggibili.',
-    headerDescription: 'Salva i temi che contano per te e rileggi il loro stato in modo semplice, senza rumore.',
+    navDescription: 'Keep cities, countries, and themes in one calm pulse board with clear status and less noise.',
+    headerDescription: 'Save the things you care about and read their pulse in a cleaner, steadier way.',
     heroKicker: 'Watchlist',
-    heroTitle: 'Tieni sotto osservazione le cose giuste.',
+    heroTitle: 'Keep the right things in view.',
     heroBody:
-      'Salva una citta, un paese o un tema. Crystal li riusa in Home, Forecast e Nextletter per darti un contesto piu personale.',
+      'Save a city, country, sector, or theme. Crystal reuses that context across Home, Forecast, and Nextletter.',
   },
   profile: {
-    navDescription: 'Bastano pochi dettagli su di te per rendere Forecast e Nextletter piu pertinenti.',
-    headerDescription: 'Un po di contesto rende l app piu utile: posizione, lavoro e interessi bastano per personalizzare il prodotto.',
+    navDescription: 'A little context makes Forecast and Nextletter more personal, relevant, and useful.',
+    headerDescription: 'A few details about you make the product more relevant without turning it into a long setup.',
     heroKicker: 'Profile',
-    heroTitle: 'Pochi dettagli, forecast piu utili.',
+    heroTitle: 'A little context. Better reads.',
     heroBody:
-      'Aggiungi il minimo che serve: dove sei, cosa fai e cosa segui. Crystal usa questo contesto per rendere le risposte piu rilevanti.',
+      'Add only what matters: where you are, what you do, and what you follow. Crystal uses that context to make each read more relevant.',
   },
 } as const;
 
@@ -71,44 +78,69 @@ export const TUTORIAL_STEPS = [
   {
     id: 'what',
     kicker: 'What Crystal does',
-    title: 'Crystal prende una domanda sul futuro e la rende leggibile.',
+    title: 'Crystal turns a question about the future into something you can actually read.',
     description:
-      'Invece di restituirti solo testo, prova a darti un punto di vista chiaro: cosa puo succedere, perche e plausibile e cosa osservare adesso.',
+      'Instead of giving you only text, it tries to give you a clear position: what may happen, why it looks plausible, and what to watch next.',
     bullets: [
-      'Ricevi una risposta diretta, non solo un riassunto.',
-      'Vedi i motivi principali dietro al forecast.',
-      'Puoi salvare temi e rileggere i segnali nel tempo.',
+      'You get a direct answer, not only a summary.',
+      'You see the main drivers behind the forecast.',
+      'You can save themes and revisit signals over time.',
     ],
   },
   {
     id: 'layers',
     kicker: 'Forecast vs WorldSim',
-    title: 'Il forecast risponde. WorldSim apre la camera di simulazione.',
+    title: 'Forecast answers first. WorldSim opens the deeper simulation layer.',
     description:
-      'La previsione base produce la risposta leggibile. WorldSim entra solo quando servono attori, attriti e reazioni a catena.',
+      'The base forecast gives you the readable answer. WorldSim comes in when actors, pressure, and chain reactions matter.',
     bullets: [
-      'Forecast: risposta, probabilita, rischio e prossimi segnali.',
-      'WorldSim: attori chiave, punti di svolta e scenari piu profondi.',
-      'WorldSim aggiunge contesto: non sostituisce il motore base.',
+      'Forecast: answer, probability, risk, and next signals.',
+      'WorldSim: pivotal actors, turning points, and deeper scenarios.',
+      'WorldSim adds context. It does not replace the base engine.',
     ],
   },
   {
     id: 'action',
     kicker: 'Your first move',
-    title: 'Parti da una domanda concreta.',
+    title: 'Start with one concrete question.',
     description:
-      'Il modo piu veloce per capire il prodotto e fare una prima previsione semplice, poi salvare un tema in Watchlist e aprire Nextletter.',
+      'The fastest way to understand the product is to run a simple forecast, save one theme in Watchlist, and then open Nextletter.',
     bullets: [
-      'Prova una domanda a 30 giorni.',
-      'Salva un tema o una citta in Watchlist.',
-      'Apri Nextletter per vedere il lato briefing del prodotto.',
+      'Try a short-horizon question first.',
+      'Save one city, country, or theme in Watchlist.',
+      'Open Nextletter to see the briefing side of the product.',
     ],
   },
 ] as const;
 
+export const PLAN_COPY = {
+  defaultUpgradeTitle: `Unlock the next layer of ${PRODUCT_BRAND.name}`,
+  defaultUpgradeDescription: 'More credits, more continuity, and easier access to premium layers when they matter.',
+  loginTitle: `Sign in to unlock ${PRODUCT_BRAND.name}`,
+  loginDescription: 'Create a free account to save themes, use monthly credits, and activate personal surfaces.',
+  checkoutError: 'Unable to open checkout.',
+  currentPlanLabel: 'Current plan',
+  monthlyLabel: 'Monthly',
+  yearlyLabel: 'Yearly',
+  yearlySavingsLabel: 'Save vs monthly',
+  recommendedLabel: 'Recommended',
+  currentPlanButton: 'Current plan',
+  guestButton: 'Sign in for free',
+} as const;
+
 export const RUNTIME_COPY = {
   forecastPreview:
-    'Le previsioni live complete richiedono ancora il backend attivo. Intanto puoi esplorare il prodotto e vedere come sono organizzate le risposte.',
+    'The full live forecast needs the backend to be active. For now you can still explore the product and see how the answers are structured.',
+  forecastLimited:
+    'Forecast is available in a lighter mode. The live simulation backend is still in preview, so deeper layers stay guided for now.',
   worldSimPreview: WORLD_SIM_BRAND.previewNote,
   worldSimLive: WORLD_SIM_BRAND.liveNote,
-};
+  runtimeLiveTitle: 'Live runtime',
+  runtimeLiveDetail: 'Forecast and WorldSim are connected to the live backend.',
+  runtimeLimitedTitle: 'Limited runtime',
+  runtimeLimitedDetail:
+    'Forecast is available, but the deeper simulation backend is still in preview. You can read the product normally and open guided WorldSim layers.',
+  runtimePreviewTitle: 'Preview runtime',
+  runtimePreviewDetail:
+    'The live backend is not connected yet. You can still explore the product structure and preview the premium layers.',
+} as const;

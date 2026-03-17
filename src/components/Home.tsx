@@ -24,6 +24,7 @@ import { useAppRuntime } from '../context/AppRuntimeContext';
 import { PRODUCT_BRAND, RUNTIME_COPY, SECTION_COPY, WORLD_SIM_BRAND } from '../content/brand';
 import { getDefaultWorldSimPreviewDataset } from '../lib/worldSimScene';
 import { formatProbabilityLabel, getMarketSignalLabel, getMarketSignalState, hasPredictionMarketFrame } from '../lib/predictionMarket';
+import { scheduleIdleTask } from '../lib/scheduleIdle';
 import { cn } from './CrystalCard';
 import type { WorldSimSceneData } from '../types/worldSim';
 
@@ -48,26 +49,26 @@ type WatchlistPulseItem = {
 };
 
 const HERO_EXAMPLES = [
-  'Quanto e probabile un aumento delle bollette in Italia nei prossimi 30 giorni?',
-  'Roma rischia un nuovo picco di over-tourism entro l estate?',
-  'L automazione AI nei contact center accelerera entro 6 mesi?',
+  'How likely is an energy price jump in Italy over the next 30 days?',
+  'Will Rome face another overtourism spike by this summer?',
+  'Will AI automation in contact centers accelerate within 6 months?',
 ];
 
 const SIGNALS_TO_WATCH = [
-  { id: 'hazard-1', title: 'Stress energetico europeo', region: 'Europa', probability: 72, horizon: '90d' },
-  { id: 'hazard-2', title: 'Rallentamento logistica retail', region: 'Europa centrale', probability: 58, horizon: '30d' },
-  { id: 'hazard-3', title: 'Shock reputazionale piattaforme AI', region: 'Globale', probability: 41, horizon: '14d' },
+  { id: 'hazard-1', title: 'European energy pressure', region: 'Europe', probability: 72, horizon: '90d' },
+  { id: 'hazard-2', title: 'Retail logistics slowdown', region: 'Central Europe', probability: 58, horizon: '30d' },
+  { id: 'hazard-3', title: 'AI platform trust shock', region: 'Global', probability: 41, horizon: '14d' },
 ];
 
 const CITY_PULSE: Array<{ city: string; signal: string; score: number; trend: 'up' | 'down' | 'flat' }> = [
-  { city: 'Milano', signal: 'Repricing immobiliare', score: 94, trend: 'up' },
-  { city: 'Roma', signal: 'Turismo e mobilita sotto pressione', score: 89, trend: 'up' },
-  { city: 'Torino', signal: 'Manifattura in transizione', score: 77, trend: 'flat' },
+  { city: 'Milan', signal: 'Housing repricing pressure', score: 94, trend: 'up' },
+  { city: 'Rome', signal: 'Tourism and mobility under pressure', score: 89, trend: 'up' },
+  { city: 'Turin', signal: 'Manufacturing in transition', score: 77, trend: 'flat' },
 ];
 
 const GUEST_WATCHLIST: WatchlistPulseItem[] = [
-  { id: 'guest-1', entity: 'Roma', type: 'City', pulse: 'Hot mobility', trend: 'up', domains: ['Tourism', 'Transit'] },
-  { id: 'guest-2', entity: 'Italia', type: 'Country', pulse: 'Macro under watch', trend: 'flat', domains: ['Inflation', 'Energy'] },
+  { id: 'guest-1', entity: 'Rome', type: 'City', pulse: 'Hot mobility', trend: 'up', domains: ['Tourism', 'Transit'] },
+  { id: 'guest-2', entity: 'Italy', type: 'Country', pulse: 'Macro under watch', trend: 'flat', domains: ['Inflation', 'Energy'] },
   { id: 'guest-3', entity: 'AI orchestration', type: 'Industry', pulse: 'Acceleration', trend: 'up', domains: ['Hiring', 'Adoption'] },
 ];
 
@@ -105,19 +106,21 @@ export function Home({
   const worldSimMode = capabilities.worldSimAvailable ? 'live' : 'preview';
 
   useEffect(() => {
-    const fetchQuotes = async () => {
-      setIsLoadingQuotes(true);
-      try {
-        const result = await generateCrystalQuotes();
-        setQuotes((result.quotes || []).slice(0, 3));
-      } catch (fetchError) {
-        console.error('Error fetching quotes:', fetchError);
-      } finally {
-        setIsLoadingQuotes(false);
-      }
-    };
+    return scheduleIdleTask(() => {
+      const fetchQuotes = async () => {
+        setIsLoadingQuotes(true);
+        try {
+          const result = await generateCrystalQuotes();
+          setQuotes((result.quotes || []).slice(0, 3));
+        } catch (fetchError) {
+          console.error('Error fetching quotes:', fetchError);
+        } finally {
+          setIsLoadingQuotes(false);
+        }
+      };
 
-    void fetchQuotes();
+      void fetchQuotes();
+    }, 1400);
   }, []);
 
   useEffect(() => {
@@ -139,9 +142,9 @@ export function Home({
           type: String(item.data().type || 'Custom'),
           pulse: String(item.data().pulse || 'Monitoring'),
           trend:
-            item.data().trend === 'down' || item.data().trend === 'up' || item.data().trend === 'flat'
-              ? item.data().trend
-              : 'flat',
+              item.data().trend === 'down' || item.data().trend === 'up' || item.data().trend === 'flat'
+                ? item.data().trend
+                : 'flat',
           domains: Array.isArray(item.data().domains) ? item.data().domains.map(String) : [],
         }));
 
@@ -169,22 +172,22 @@ export function Home({
     () => [
       {
         id: 'firstForecast',
-        title: 'Fai il primo forecast',
-        description: 'Apri Forecast e prova una domanda semplice a 30 giorni.',
+        title: 'Run your first forecast',
+        description: 'Open Forecast and try one simple 30-day question.',
         done: onboardingState.completedChecklist.firstForecast,
         action: () => onForecastIntent(HERO_EXAMPLES[0]),
       },
       {
         id: 'firstWatchlist',
-        title: 'Salva una voce in Watchlist',
-        description: 'Monitora una citta, un paese o un settore che vuoi seguire.',
+        title: 'Save one watchlist item',
+        description: 'Track a city, country, or sector you want to keep in view.',
         done: onboardingState.completedChecklist.firstWatchlist,
         action: () => onNavigate('watchlist'),
       },
       {
         id: 'openedBriefing',
-        title: 'Apri Nextletter',
-        description: 'Vedi come i segnali diventano una lettura piu ordinata e utile.',
+        title: 'Open Nextletter',
+        description: 'See how the same signals become a calmer daily read.',
         done: onboardingState.completedChecklist.openedBriefing,
         action: () => onNavigate('nextletter'),
       },
@@ -229,7 +232,7 @@ export function Home({
 
   return (
     <div className="space-y-8 md:space-y-10">
-      <section className="editorial-panel overflow-hidden rounded-[32px] px-6 py-8 md:px-8 md:py-10">
+      <section className="editorial-panel overflow-hidden rounded-[36px] px-6 py-8 md:px-8 md:py-10">
         <div className="grid gap-7 lg:grid-cols-[1.2fr_0.8fr] lg:items-end">
           <div>
             <div className="section-kicker">{SECTION_COPY.home.heroKicker}</div>
@@ -243,7 +246,7 @@ export function Home({
                 onClick={() => onForecastIntent(HERO_EXAMPLES[0])}
                 className="inline-flex items-center gap-2 rounded-full bg-[#1453e8] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#1248c8]"
               >
-                Fai un forecast
+                {PRODUCT_BRAND.primaryCta}
                 <ArrowRight className="h-4 w-4" />
               </button>
               <button
@@ -258,7 +261,7 @@ export function Home({
                   className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                 >
                   <Lock className="h-4 w-4" />
-                  Accedi gratis
+                  Sign in for free
                 </button>
               )}
             </div>
@@ -276,13 +279,13 @@ export function Home({
             </div>
           </div>
 
-          <div className="oracle-panel rounded-[32px] p-6 md:p-7">
+          <div className="oracle-panel rounded-[36px] p-6 md:p-7">
             <div className="section-kicker !text-rose-200">{worldSimLabel}</div>
-            <h3 className="mt-3 text-2xl font-display font-semibold text-white md:text-3xl">Una simulation chamber per leggere il mondo da sopra.</h3>
-            <p className="mt-3 text-sm leading-7 text-slate-300">
-              {capabilities.worldSimAvailable
-                ? 'Aprilo quando il forecast dipende da attori, attriti e reazioni a catena che non stanno bene dentro un solo numero.'
-                : RUNTIME_COPY.worldSimPreview}
+            <h3 className="mt-3 text-2xl font-display font-semibold text-white md:text-3xl">{WORLD_SIM_BRAND.teaserTitle}</h3>
+              <p className="mt-3 text-sm leading-7 text-slate-300">
+                {capabilities.worldSimAvailable
+                  ? WORLD_SIM_BRAND.teaserBody
+                  : RUNTIME_COPY.worldSimPreview}
             </p>
             <div className="mt-6 grid gap-3">
               {['Who moves first', 'Where pressure builds', 'What changes the odds'].map((item) => (
@@ -299,7 +302,7 @@ export function Home({
               onClick={() => onOpenWorldSimScene(featuredWorldSimScene)}
               className="mt-6 inline-flex items-center gap-2 rounded-full bg-white px-4 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-slate-100"
             >
-              Apri la simulation chamber
+              {WORLD_SIM_BRAND.enterLabel}
               <ArrowRight className="h-4 w-4" />
             </button>
             <p className="mt-5 text-xs leading-6 text-slate-400">{WORLD_SIM_BRAND.honestNote}</p>
@@ -308,11 +311,11 @@ export function Home({
       </section>
 
       {!checklistItems.every((item) => item.done) && (
-        <section className="editorial-panel rounded-[28px] px-6 py-6 md:px-7">
+        <section className="editorial-panel content-auto rounded-[30px] px-6 py-6 md:px-7">
           <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
             <div>
               <div className="section-kicker">First Moves</div>
-              <h3 className="mt-3 text-2xl font-display font-semibold text-slate-950">Tre mosse per capire il prodotto.</h3>
+              <h3 className="mt-3 text-2xl font-display font-semibold text-slate-950">Three quick moves to understand the product.</h3>
             </div>
             <button
               onClick={onOpenTutorial}
@@ -352,10 +355,10 @@ export function Home({
         </section>
       )}
 
-      <section className="grid gap-5 xl:grid-cols-[1.05fr_0.95fr]">
-        <div className="editorial-panel rounded-[32px] p-6 md:p-7">
+      <section className="content-auto grid gap-5 xl:grid-cols-[1.05fr_0.95fr]">
+        <div className="editorial-panel rounded-[34px] p-6 md:p-7">
           <div className="section-kicker">Today</div>
-          <h3 className="mt-3 text-2xl font-display font-semibold text-slate-950">I segnali piu utili da guardare adesso.</h3>
+          <h3 className="mt-3 text-2xl font-display font-semibold text-slate-950">The signals worth reading right now.</h3>
           <div className="mt-6 grid gap-4">
             {todayCards.map((card) => (
               <div key={card.card_id} className="rounded-[24px] border border-slate-200 bg-white p-5">
@@ -393,9 +396,9 @@ export function Home({
           </div>
         </div>
 
-        <div className="editorial-panel rounded-[32px] p-6 md:p-7">
+        <div className="editorial-panel rounded-[34px] p-6 md:p-7">
           <div className="section-kicker">Briefing Preview</div>
-          <h3 className="mt-3 text-2xl font-display font-semibold text-slate-950">Una preview semplice di Nextletter.</h3>
+          <h3 className="mt-3 text-2xl font-display font-semibold text-slate-950">A cleaner preview of Nextletter.</h3>
           <div className="mt-6 space-y-4">
             <div className="rounded-[24px] border border-slate-200 bg-white p-5">
               <div className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
@@ -403,7 +406,7 @@ export function Home({
                 Global Edition
               </div>
               <p className="mt-4 text-sm leading-7 text-slate-600">
-                I segnali che contano davvero, in una lettura piu ordinata e meno rumorosa.
+                The signals that matter, arranged into a calmer daily read.
               </p>
             </div>
             <div className="rounded-[24px] border border-slate-200 bg-white p-5">
@@ -412,7 +415,7 @@ export function Home({
                 {worldSimLabel}
               </div>
               <p className="mt-4 text-sm leading-7 text-slate-600">
-                Sui temi piu delicati, Nextletter puo riusare lo stesso layer profondo del forecast per mantenere coerenza tra risposta e racconto.
+                On higher-stakes themes, Nextletter can reuse the same deeper layer as Forecast so the answer and the story stay aligned.
               </p>
             </div>
           </div>
@@ -420,18 +423,18 @@ export function Home({
             onClick={() => onNavigate('nextletter')}
             className="mt-6 inline-flex items-center gap-2 rounded-full bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800"
           >
-            Apri Nextletter
+            Open Nextletter
             <ArrowRight className="h-4 w-4" />
           </button>
         </div>
       </section>
 
-      <section className="grid gap-5 xl:grid-cols-[0.95fr_1.05fr]">
-        <div className="editorial-panel rounded-[32px] p-6 md:p-7">
+      <section className="content-auto grid gap-5 xl:grid-cols-[0.95fr_1.05fr]">
+        <div className="editorial-panel rounded-[34px] p-6 md:p-7">
           <div className="flex items-center justify-between gap-4">
             <div>
               <div className="section-kicker">{worldSimLabel}</div>
-              <h3 className="mt-3 text-2xl font-display font-semibold text-slate-950">Quando vale la pena aprire il layer simulativo.</h3>
+              <h3 className="mt-3 text-2xl font-display font-semibold text-slate-950">When it is worth opening the simulation layer.</h3>
             </div>
           </div>
 
@@ -469,7 +472,7 @@ export function Home({
         </div>
 
         <div className="grid gap-5 md:grid-cols-2">
-          <div className="editorial-panel rounded-[32px] p-6">
+          <div className="editorial-panel rounded-[34px] p-6">
             <div className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
               <Radar className="h-4 w-4 text-amber-500" />
               Signals to watch
@@ -493,7 +496,7 @@ export function Home({
             </div>
           </div>
 
-          <div className="editorial-panel rounded-[32px] p-6">
+          <div className="editorial-panel rounded-[34px] p-6">
             <div className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
               <Globe2 className="h-4 w-4 text-emerald-500" />
               City Pulse
@@ -520,18 +523,18 @@ export function Home({
         </div>
       </section>
 
-      <section className="grid gap-5 xl:grid-cols-[0.92fr_1.08fr]">
-        <div className="editorial-panel rounded-[32px] p-6 md:p-7">
+      <section className="content-auto grid gap-5 xl:grid-cols-[0.92fr_1.08fr]">
+        <div className="editorial-panel rounded-[34px] p-6 md:p-7">
           <div className="flex items-center justify-between gap-4">
             <div>
               <div className="section-kicker">Watchlist Pulse</div>
-              <h3 className="mt-3 text-2xl font-display font-semibold text-slate-950">I temi che stai seguendo.</h3>
+              <h3 className="mt-3 text-2xl font-display font-semibold text-slate-950">The things you are tracking.</h3>
             </div>
             <button
               onClick={() => (isGuest ? onLogin?.() : onNavigate('watchlist'))}
               className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
             >
-              {isGuest ? 'Accedi per salvare' : 'Apri Watchlist'}
+              {isGuest ? 'Sign in to save' : 'Open Watchlist'}
             </button>
           </div>
           <div className="mt-6 space-y-3">
@@ -567,11 +570,11 @@ export function Home({
           </div>
         </div>
 
-        <div className="editorial-panel rounded-[32px] p-6 md:p-7">
+        <div className="editorial-panel rounded-[34px] p-6 md:p-7">
           <div className="flex items-center justify-between gap-4">
             <div>
               <div className="section-kicker">Crystal Quotes</div>
-              <h3 className="mt-3 text-2xl font-display font-semibold text-slate-950">Le letture rapide della settimana.</h3>
+              <h3 className="mt-3 text-2xl font-display font-semibold text-slate-950">Fast reads for the week.</h3>
             </div>
             {isLoadingQuotes && <Loader2 className="h-5 w-5 animate-spin text-slate-400" />}
           </div>
@@ -648,7 +651,7 @@ export function Home({
               <div className="flex flex-col gap-3 border-t border-slate-200/80 bg-white/70 px-6 py-5 md:flex-row md:items-center md:justify-between md:px-8">
                 <div className="flex items-center gap-2 text-sm font-medium text-slate-500">
                   <ShieldCheck className="h-4 w-4 text-emerald-500" />
-                  Una lettura rapida grounded sui trend della settimana.
+                  A quick grounded read on the week’s signals.
                 </div>
                 <button
                   onClick={() => void handleSaveQuote(selectedQuote)}
@@ -663,12 +666,12 @@ export function Home({
                   {savedQuotes.includes(selectedQuote.quote_id) ? (
                     <>
                       <Check className="h-4 w-4" />
-                      Salvato
+                      Saved
                     </>
                   ) : (
                     <>
                       <Bookmark className="h-4 w-4" />
-                      {isGuest ? 'Accedi per salvare' : 'Salva analisi'}
+                      {isGuest ? 'Sign in to save' : 'Save analysis'}
                     </>
                   )}
                 </button>

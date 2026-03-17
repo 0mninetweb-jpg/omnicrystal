@@ -23,6 +23,7 @@ import { useAppRuntime } from '../context/AppRuntimeContext';
 import { ACTION_CATALOG, formatCredits, getPlanLabel } from '../lib/crystalPlans';
 import { formatProbabilityLabel, formatSignedDelta, getMarketSignalLabel, getMarketSignalState, hasPredictionMarketFrame } from '../lib/predictionMarket';
 import { createWorldSimSceneData } from '../lib/worldSimScene';
+import { scheduleIdleTask } from '../lib/scheduleIdle';
 import { RUNTIME_COPY, SECTION_COPY, WORLD_SIM_BRAND } from '../content/brand';
 import { cn } from './CrystalCard';
 import { WorldSimInlineCard } from './WorldSimInlineCard';
@@ -66,38 +67,38 @@ type GeneratedLetter = {
 };
 
 const PREDEFINED_TOPICS = [
-  { id: 'sport', label: 'Sport e attenzione collettiva' },
-  { id: 'energy', label: 'Energia e costo della vita' },
-  { id: 'ai', label: 'AI, lavoro e produttivita' },
-  { id: 'markets', label: 'Mercati e segnali macro' },
-  { id: 'cities', label: 'Citta, mobilita e turismo' },
-  { id: 'culture', label: 'Cultura e media behavior' },
+  { id: 'sport', label: 'Sports and collective attention' },
+  { id: 'energy', label: 'Energy and cost of living' },
+  { id: 'ai', label: 'AI, work, and productivity' },
+  { id: 'markets', label: 'Markets and macro signals' },
+  { id: 'cities', label: 'Cities, mobility, and tourism' },
+  { id: 'culture', label: 'Culture and media behavior' },
 ];
 
 const GLOBAL_SECTIONS: GeneratedSection[] = [
   {
     topic: 'Energy',
-    title: 'Stress energetico europeo',
+    title: 'European energy stress',
     content:
-      'Le pressioni su energia e logistica restano il nodo piu chiaro del trimestre. Non e ancora un allarme uniforme, ma il rapporto rischio e tempo di reazione si sta stringendo.',
+      'Pressure on energy and logistics is still the clearest thread of the quarter. It is not a uniform alarm yet, but the gap between risk and reaction time is narrowing.',
     probability: 72,
     horizon: '90d',
     impact: 'High',
-    so_what: 'Se il tuo business e esposto ai costi fissi, anticipa ora le decisioni tariffarie e la pianificazione di cassa.',
+    so_what: 'If your business is exposed to fixed costs, make pricing and cash-planning decisions earlier rather than later.',
     historical_context:
-      'Quando la frizione geopolitica si combina con magazzini piu fragili, il repricing arriva quasi sempre prima al retail che al discorso pubblico.',
+      'When geopolitical friction meets weaker inventories, repricing usually reaches retail before it reaches the broader public conversation.',
   },
   {
     topic: 'AI adoption',
-    title: 'Automazione service e lavoro knowledge',
+    title: 'Service automation and knowledge work',
     content:
-      'L accelerazione vera non sta nei tool singoli, ma nei sistemi che orchestrano agenti, dati e processi. E li che si apre il gap tra chi ottimizza e chi rincorre.',
+      'The real acceleration is not in single tools. It is in systems that orchestrate agents, data, and workflows. That is where the gap opens between teams that optimize early and teams that keep catching up.',
     probability: 64,
     horizon: '6m',
     impact: 'Medium',
-    so_what: 'Posizionati su coordinamento, controllo di qualita e integrazione dei flussi, non solo sulla produzione manuale.',
+    so_what: 'Bias toward coordination, quality control, and workflow integration, not only manual production.',
     historical_context:
-      'Le tecnologie che comprimono i margini operativi si diffondono prima nelle funzioni ripetitive, poi cambiano il ruolo dei team piu esposti.',
+      'Technologies that compress operating margins usually spread through repetitive functions first, then change the role of the most exposed teams.',
   },
 ];
 
@@ -140,8 +141,8 @@ export function Nextletter({ user, isGuest, onLogin, onGenerateCard, onOpenWorld
     () =>
       createWorldSimSceneData({
         title: 'WorldSim inside Nextletter',
-        subtitle: 'Usa la stessa camera di simulazione per leggere attori, pressioni e punti di svolta anche dentro il briefing.',
-        question: 'Quale dinamica merita una lettura piu profonda questa settimana?',
+        subtitle: 'Use the same simulation chamber to read actors, pressure, and turning points inside the briefing too.',
+        question: 'Which dynamic deserves a deeper read this week?',
         mode: capabilities.worldSimAvailable ? 'live' : 'preview',
         sourceLabel: 'Nextletter layer',
       }),
@@ -149,19 +150,21 @@ export function Nextletter({ user, isGuest, onLogin, onGenerateCard, onOpenWorld
   );
 
   useEffect(() => {
-    const fetchQuotes = async () => {
-      setIsLoadingQuotes(true);
-      try {
-        const result = await generateCrystalQuotes();
-        setCrystalQuotes((result.quotes || []).slice(0, 4));
-      } catch (error) {
-        console.error('Error fetching quotes:', error);
-      } finally {
-        setIsLoadingQuotes(false);
-      }
-    };
+    return scheduleIdleTask(() => {
+      const fetchQuotes = async () => {
+        setIsLoadingQuotes(true);
+        try {
+          const result = await generateCrystalQuotes();
+          setCrystalQuotes((result.quotes || []).slice(0, 4));
+        } catch (error) {
+          console.error('Error fetching quotes:', error);
+        } finally {
+          setIsLoadingQuotes(false);
+        }
+      };
 
-    void fetchQuotes();
+      void fetchQuotes();
+    }, 1200);
   }, []);
 
   useEffect(() => {
@@ -308,7 +311,7 @@ export function Nextletter({ user, isGuest, onLogin, onGenerateCard, onOpenWorld
         {
           sourceView: 'nextletter',
           insufficientCreditsMessage:
-            'La tua Nextletter personale richiede 3 crediti. Passa a Plus o Pro per riceverla con continuita.',
+            'Your Personal Edition needs 3 credits. Move to Plus or Pro if you want it as a steady habit.',
         }
       );
       setGeneratedLetter(letter);
@@ -326,7 +329,7 @@ export function Nextletter({ user, isGuest, onLogin, onGenerateCard, onOpenWorld
     const sectionWorldSimScene = createWorldSimSceneData({
       title: section.title || section.topic || `Section ${index + 1}`,
       subtitle: section.content,
-      question: section.query_suggestion || `Cosa potrebbe cambiare davvero il quadro di ${section.title || section.topic || 'questa sezione'}?`,
+      question: section.query_suggestion || `What could materially change the picture for ${section.title || section.topic || 'this section'}?`,
       mode:
         capabilities.worldSimAvailable &&
         (section.world_sim_job?.status === 'completed' || Boolean(section.world_sim?.narrative_arc))
@@ -346,7 +349,7 @@ export function Nextletter({ user, isGuest, onLogin, onGenerateCard, onOpenWorld
     });
 
     return (
-      <article key={`${section.title || 'section'}-${index}`} className="rounded-[30px] border border-slate-200 bg-white p-6 shadow-[0_16px_35px_rgba(15,23,42,0.05)]">
+      <article key={`${section.title || 'section'}-${index}`} className="signal-board content-auto rounded-[32px] p-6">
         <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
           <div className="flex gap-4">
             <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[18px] bg-[#e8eefc] text-[#1453e8]">
@@ -441,7 +444,7 @@ export function Nextletter({ user, isGuest, onLogin, onGenerateCard, onOpenWorld
                       {section.world_sim_job.status}
                     </span>
                     <span className="text-xs font-medium text-rose-700">
-                      {Math.round((section.world_sim_job.progress || 0) * 100)}% · {section.world_sim_job.agentCount} agenti
+                      {Math.round((section.world_sim_job.progress || 0) * 100)}% - {section.world_sim_job.agentCount} agents
                     </span>
                   </div>
                 )}
@@ -472,7 +475,7 @@ export function Nextletter({ user, isGuest, onLogin, onGenerateCard, onOpenWorld
                   onClick={() => onOpenWorldSimScene(sectionWorldSimScene, section.world_sim_job || null)}
                   className="mt-4 inline-flex items-center gap-2 rounded-full border border-rose-200 bg-white px-4 py-2 text-sm font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100/70"
                 >
-                  Apri il layer simulativo
+                  Open the simulation layer
                   <ArrowRight className="h-4 w-4" />
                 </button>
               </div>
@@ -486,7 +489,7 @@ export function Nextletter({ user, isGuest, onLogin, onGenerateCard, onOpenWorld
               onClick={() => onGenerateCard?.(section.query_suggestion || '')}
               className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
             >
-              Apri forecast collegato
+              Open linked forecast
               <ArrowRight className="h-4 w-4" />
             </button>
           </div>
@@ -497,7 +500,7 @@ export function Nextletter({ user, isGuest, onLogin, onGenerateCard, onOpenWorld
 
   return (
     <div className="space-y-6">
-      <section className="editorial-panel rounded-[32px] p-6 md:p-7">
+      <section className="editorial-panel content-auto rounded-[36px] p-6 md:p-7">
         <div className="grid gap-6 lg:grid-cols-[1.05fr_0.95fr] lg:items-end">
           <div>
             <div className="section-kicker">{SECTION_COPY.nextletter.heroKicker}</div>
@@ -507,18 +510,18 @@ export function Nextletter({ user, isGuest, onLogin, onGenerateCard, onOpenWorld
             <p className="mt-4 max-w-2xl text-base leading-8 text-slate-600">{SECTION_COPY.nextletter.heroBody}</p>
           </div>
 
-          <div className="rounded-[28px] border border-slate-200 bg-white p-5">
+          <div className="signal-board rounded-[30px] p-5">
             <div className="section-kicker">Edition Access</div>
             <div className="mt-3 flex flex-wrap items-center gap-3">
               <span className="rounded-full bg-slate-950 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-white">
                 {isGuest ? 'Guest' : getPlanLabel(entitlements.plan)}
               </span>
               <span className="text-sm font-semibold text-slate-700">
-                {isGuest ? 'Global Edition visibile da subito' : `${entitlements.creditsBalance} crediti disponibili`}
+                {isGuest ? 'Global Edition is open right away' : `${entitlements.creditsBalance} credits available`}
               </span>
             </div>
             <div className="mt-4 text-sm leading-7 text-slate-500">
-              Personal Edition consuma {formatCredits(ACTION_CATALOG.nextletter_personal.cost)} per generazione riuscita.
+              Personal Edition uses {formatCredits(ACTION_CATALOG.nextletter_personal.cost)} for each successful generation.
             </div>
             <div className="mt-4 rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-600">
               {capabilities.message}
@@ -527,14 +530,14 @@ export function Nextletter({ user, isGuest, onLogin, onGenerateCard, onOpenWorld
         </div>
       </section>
 
-      <section className="editorial-panel rounded-[32px] p-5">
+      <section className="editorial-panel content-auto rounded-[34px] p-5">
         <div className="inline-flex rounded-full border border-slate-200 bg-white p-1">
           <button
-            onClick={() => setActiveEdition('global')}
-            className={cn(
-              'rounded-full px-4 py-2 text-sm font-semibold transition',
-              activeEdition === 'global' ? 'bg-slate-950 text-white' : 'text-slate-600'
-            )}
+              onClick={() => setActiveEdition('global')}
+              className={cn(
+                'rounded-full px-4 py-2 text-sm font-semibold transition',
+                activeEdition === 'global' ? 'bg-slate-950 text-white' : 'text-slate-600'
+              )}
           >
             <span className="inline-flex items-center gap-2">
               <Globe2 className="h-4 w-4" />
@@ -542,11 +545,11 @@ export function Nextletter({ user, isGuest, onLogin, onGenerateCard, onOpenWorld
             </span>
           </button>
           <button
-            onClick={() => setActiveEdition('personal')}
-            className={cn(
-              'rounded-full px-4 py-2 text-sm font-semibold transition',
-              activeEdition === 'personal' ? 'bg-slate-950 text-white' : 'text-slate-600'
-            )}
+              onClick={() => setActiveEdition('personal')}
+              className={cn(
+                'rounded-full px-4 py-2 text-sm font-semibold transition',
+                activeEdition === 'personal' ? 'bg-slate-950 text-white' : 'text-slate-600'
+              )}
           >
             <span className="inline-flex items-center gap-2">
               <User className="h-4 w-4" />
@@ -559,25 +562,25 @@ export function Nextletter({ user, isGuest, onLogin, onGenerateCard, onOpenWorld
       <AnimatePresence mode="wait">
         {activeEdition === 'global' ? (
           <motion.div key="global" initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -14 }} className="space-y-6">
-            <section className="editorial-panel rounded-[32px] p-6 md:p-7">
+            <section className="editorial-panel content-auto rounded-[36px] p-6 md:p-7">
               <div className="flex items-center justify-between gap-4">
                 <div>
                   <div className="section-kicker">Global Edition</div>
-                  <h3 className="mt-3 text-3xl font-display font-semibold text-slate-950">I macro segnali che vale la pena leggere oggi.</h3>
+                  <h3 className="mt-3 text-3xl font-display font-semibold text-slate-950">The macro signals worth reading today.</h3>
                 </div>
                 <div className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-600">
-                  Aggiornato oggi
+                  Updated today
                 </div>
               </div>
 
               <div className="mt-6 space-y-5">{GLOBAL_SECTIONS.map(renderSection)}</div>
             </section>
 
-            <section className="editorial-panel rounded-[32px] p-6 md:p-7">
+            <section className="editorial-panel content-auto rounded-[36px] p-6 md:p-7">
               <div className="flex items-center justify-between gap-4">
                 <div>
                   <div className="section-kicker">Crystal Quotes</div>
-                  <h3 className="mt-3 text-3xl font-display font-semibold text-slate-950">Le letture rapide della settimana.</h3>
+                  <h3 className="mt-3 text-3xl font-display font-semibold text-slate-950">Fast reads for the week.</h3>
                 </div>
                 {isLoadingQuotes && <Loader2 className="h-5 w-5 animate-spin text-slate-400" />}
               </div>
@@ -603,39 +606,39 @@ export function Nextletter({ user, isGuest, onLogin, onGenerateCard, onOpenWorld
         ) : (
           <motion.div key="personal" initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -14 }} className="space-y-6">
             {isGuest ? (
-              <section className="editorial-panel rounded-[32px] p-10 text-center">
+              <section className="editorial-panel content-auto rounded-[36px] p-10 text-center">
                 <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-[28px] bg-slate-950 text-white">
                   <Lock className="h-9 w-9" />
                 </div>
-                <h3 className="mt-6 text-3xl font-display font-semibold text-slate-950">La tua Personal Edition di Nextletter.</h3>
+                <h3 className="mt-6 text-3xl font-display font-semibold text-slate-950">Your Personal Edition of Nextletter.</h3>
                 <p className="mx-auto mt-3 max-w-xl text-base leading-8 text-slate-600">
-                  Accedi per generare edizioni personali basate su profilo, interessi e segnali live. Il layer premium entra solo quando serve.
+                  Sign in to generate personal editions shaped by your profile, interests, and live signals. The premium layer steps in only when it adds real value.
                 </p>
                 <button
                   onClick={onLogin}
                   className="mt-6 inline-flex items-center gap-2 rounded-full bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800"
                 >
-                  Accedi per sbloccare
+                  Sign in to unlock
                 </button>
               </section>
             ) : generatedLetter ? (
               <section className="space-y-6">
-                <div className="editorial-panel rounded-[32px] p-6 md:p-7">
+                <div className="editorial-panel content-auto rounded-[36px] p-6 md:p-7">
                   <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
                     <div>
                       <div className="section-kicker">Personal Briefing</div>
                       <h3 className="mt-3 text-4xl font-display font-semibold text-slate-950 md:text-5xl">
-                        {generatedLetter.title || 'La tua briefing edition'}
+                        {generatedLetter.title || 'Your briefing edition'}
                       </h3>
                       <p className="mt-4 max-w-2xl text-base leading-8 text-slate-600">
-                        {generatedLetter.subtitle || 'Una sintesi personalizzata di segnali, probabilita e prossime mosse.'}
+                        {generatedLetter.subtitle || 'A personal read of signals, probabilities, and next moves.'}
                       </p>
                     </div>
                     <button
                       onClick={() => setGeneratedLetter(null)}
                       className="rounded-full border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                     >
-                      Rigenera briefing
+                      Generate another briefing
                     </button>
                   </div>
                 </div>
@@ -644,9 +647,9 @@ export function Nextletter({ user, isGuest, onLogin, onGenerateCard, onOpenWorld
               </section>
             ) : (
               <section className="grid gap-5 xl:grid-cols-[0.98fr_1.02fr]">
-                <div className="editorial-panel rounded-[32px] p-6">
+                <div className="editorial-panel rounded-[34px] p-6">
                   <div className="section-kicker">Compose Your Briefing</div>
-                  <h3 className="mt-3 text-3xl font-display font-semibold text-slate-950">Scegli i temi che vuoi leggere meglio.</h3>
+                  <h3 className="mt-3 text-3xl font-display font-semibold text-slate-950">Choose the themes you want to read more clearly.</h3>
 
                   <div className="mt-6 flex flex-wrap gap-2">
                     {PREDEFINED_TOPICS.map((topic) => {
@@ -677,7 +680,7 @@ export function Nextletter({ user, isGuest, onLogin, onGenerateCard, onOpenWorld
                         if (generationError) setGenerationError(null);
                         setCustomTopic(event.target.value);
                       }}
-                      placeholder="Aggiungi un tema specifico..."
+                      placeholder="Add a specific topic..."
                       className="mt-3 w-full rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-900 outline-none transition focus:border-[#1453e8] focus:bg-white"
                     />
                   </div>
@@ -688,19 +691,19 @@ export function Nextletter({ user, isGuest, onLogin, onGenerateCard, onOpenWorld
                     className="mt-5 inline-flex items-center gap-2 rounded-full bg-[#1453e8] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#1248c8] disabled:opacity-60"
                   >
                     {isGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-                    Genera - {formatCredits(ACTION_CATALOG.nextletter_personal.cost)}
+                    Generate {formatCredits(ACTION_CATALOG.nextletter_personal.cost)}
                   </button>
                   {generationError && <p className="mt-4 text-sm font-medium text-rose-600">{generationError}</p>}
                 </div>
 
-                <div className="editorial-panel rounded-[32px] p-6">
+                <div className="editorial-panel rounded-[34px] p-6">
                   <div className="section-kicker">What You Will Get</div>
                   <div className="mt-5 space-y-4">
                     {[
-                      'Topic, sintesi, probability, horizon e impact in ogni sezione.',
-                      'Why it matters e what to do in linguaggio semplice.',
+                      'Topic, summary, probability, horizon, and impact in every section.',
+                      'Why it matters and what to do in plain language.',
                       capabilities.worldSimAvailable
-                        ? `${WORLD_SIM_BRAND.name} entra quando c e gia un layer utile da riusare.`
+                        ? `${WORLD_SIM_BRAND.name} appears when there is already a deeper layer worth reusing.`
                         : RUNTIME_COPY.worldSimPreview,
                     ].map((item) => (
                       <div key={item} className="flex items-start gap-3 rounded-[22px] border border-slate-200 bg-white p-4 text-sm leading-7 text-slate-600">
@@ -713,10 +716,10 @@ export function Nextletter({ user, isGuest, onLogin, onGenerateCard, onOpenWorld
                   <div className="mt-5 rounded-[24px] border border-slate-200 bg-slate-50 p-4">
                     <div className="section-kicker !text-slate-500">Current plan</div>
                     <div className="mt-3 text-lg font-semibold text-slate-950">
-                      {getPlanLabel(entitlements.plan)} - {entitlements.creditsBalance} crediti disponibili
+                      {getPlanLabel(entitlements.plan)} - {entitlements.creditsBalance} credits available
                     </div>
                     <p className="mt-3 text-sm leading-7 text-slate-500">
-                      Free ti fa provare il prodotto. Plus e Pro lo rendono piu continuo e personale.
+                      Free lets you feel the product. Plus and Pro make it steadier, deeper, and more personal.
                     </p>
                   </div>
 
@@ -725,7 +728,7 @@ export function Nextletter({ user, isGuest, onLogin, onGenerateCard, onOpenWorld
                       compact
                       data={nextletterWorldSimPreview}
                       onOpen={() => onOpenWorldSimScene(nextletterWorldSimPreview, null)}
-                      ctaLabel="Apri il layer di Nextletter"
+                      ctaLabel="Open the Nextletter layer"
                     />
                   </div>
                 </div>
@@ -786,7 +789,7 @@ export function Nextletter({ user, isGuest, onLogin, onGenerateCard, onOpenWorld
               </div>
 
               <div className="flex flex-col gap-3 border-t border-slate-200/80 bg-white/70 px-6 py-5 md:flex-row md:items-center md:justify-between md:px-8">
-                <div className="text-sm font-medium text-slate-500">Una lettura rapida grounded sui trend della settimana.</div>
+                <div className="text-sm font-medium text-slate-500">A quick grounded read on the week’s signals.</div>
                 <button
                   onClick={() => void handleSaveQuote(selectedQuote)}
                   disabled={isSaving || savedQuotes.includes(selectedQuote.quote_id)}
@@ -798,12 +801,12 @@ export function Nextletter({ user, isGuest, onLogin, onGenerateCard, onOpenWorld
                   {savedQuotes.includes(selectedQuote.quote_id) ? (
                     <>
                       <Check className="h-4 w-4" />
-                      Salvato
+                      Saved
                     </>
                   ) : (
                     <>
                       <Bookmark className="h-4 w-4" />
-                      {isGuest ? 'Accedi per salvare' : 'Salva analisi'}
+                      {isGuest ? 'Sign in to save' : 'Save analysis'}
                     </>
                   )}
                 </button>

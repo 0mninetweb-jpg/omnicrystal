@@ -12,7 +12,7 @@ import {
 } from '../lib/crystalPlans';
 import { createCheckoutSession } from '../services/billingService';
 import { withServerRequestContext } from '../services/geminiService';
-import { PRODUCT_BRAND, WORLD_SIM_BRAND } from '../content/brand';
+import { PLAN_COPY, PRODUCT_BRAND, WORLD_SIM_BRAND } from '../content/brand';
 import type {
   BillingInterval,
   CrystalFeature,
@@ -50,8 +50,8 @@ const CrystalPlanContext = createContext<CrystalPlanContextValue | null>(null);
 function getDefaultUpgradeIntent(): UpgradeIntent {
   return {
     reason: 'feature',
-    title: `Sblocca il prossimo livello di ${PRODUCT_BRAND.name}`,
-    description: 'Piu crediti, piu continuita e accesso ai layer premium quando servono davvero.',
+    title: PLAN_COPY.defaultUpgradeTitle,
+    description: PLAN_COPY.defaultUpgradeDescription,
     recommendedPlan: 'plus',
   };
 }
@@ -127,7 +127,7 @@ export function CrystalPlanProvider({
         const session = await createCheckoutSession(plan, interval);
         window.location.href = session.url;
       } catch (error) {
-        setCheckoutError(error instanceof Error ? error.message : 'Impossibile aprire il checkout.');
+        setCheckoutError(error instanceof Error ? error.message : PLAN_COPY.checkoutError);
       } finally {
         setIsCheckingOut(false);
       }
@@ -149,42 +149,42 @@ export function CrystalPlanProvider({
       if (!user) {
         openUpgrade({
           reason: 'login',
-          title: `Accedi per sbloccare ${PRODUCT_BRAND.name}`,
-          description: 'Crea un account gratuito per usare crediti, watchlist e aree personalizzate.',
+          title: PLAN_COPY.loginTitle,
+          description: PLAN_COPY.loginDescription,
           recommendedPlan: 'plus',
           action: spec.action,
           sourceView: options?.sourceView,
         });
-        throw new Error('Devi accedere per usare questa funzione.');
+        throw new Error('You need to sign in to use this feature.');
       }
 
       if (spec.requiredPlan !== 'free' && !isPlanAtLeast(entitlements.plan, spec.requiredPlan)) {
         openUpgrade({
           reason: 'feature',
-          title: `${getPlanLabel(spec.requiredPlan)} sblocca questa profondita`,
+          title: `${getPlanLabel(spec.requiredPlan)} unlocks this level of depth`,
           description:
             spec.requiredPlan === 'pro'
-              ? `${WORLD_SIM_BRAND.name} e i forecast piu profondi fanno parte del piano Pro.`
-              : 'Plus sblocca gli orizzonti medi e un uso piu continuo del prodotto.',
+              ? `${WORLD_SIM_BRAND.name} and deeper forecasts are part of Pro.`
+              : 'Plus unlocks medium horizons and steadier product usage.',
           recommendedPlan: spec.requiredPlan,
           action: spec.action,
           sourceView: options?.sourceView,
         });
-        throw new Error('Questa funzione richiede un piano superiore.');
+        throw new Error('This feature requires a higher plan.');
       }
 
       if (entitlements.creditsBalance < spec.cost) {
         openUpgrade({
           reason: 'credits',
-          title: 'Crediti terminati',
+          title: 'You are out of credits',
           description:
             options?.insufficientCreditsMessage ||
-            `Ti servono ${spec.cost} crediti per questa azione. Passa a Plus o Pro per continuare senza interruzioni.`,
+            `You need ${spec.cost} credits for this action. Move to Plus or Pro to keep going without interruptions.`,
           recommendedPlan: getRecommendedPlanForAction(spec.action),
           action: spec.action,
           sourceView: options?.sourceView,
         });
-        throw new Error('Crediti insufficienti.');
+        throw new Error('Not enough credits.');
       }
 
       try {
@@ -194,8 +194,8 @@ export function CrystalPlanProvider({
         if (code === 'plan-upgrade-required' || code === 'oracle-plan-required') {
           openUpgrade({
             reason: 'feature',
-            title: 'Questa previsione richiede un piano superiore',
-            description: error instanceof Error ? error.message : 'Sblocca questa funzionalita con un upgrade.',
+            title: 'This forecast needs a higher plan',
+            description: error instanceof Error ? error.message : 'Unlock this feature with an upgrade.',
             recommendedPlan: getRecommendedPlanForAction(spec.action),
             action: spec.action,
             sourceView: options?.sourceView,
@@ -204,8 +204,8 @@ export function CrystalPlanProvider({
         if (code === 'credits-exhausted') {
           openUpgrade({
             reason: 'credits',
-            title: 'Hai finito i crediti del ciclo',
-            description: error instanceof Error ? error.message : 'Passa a un piano superiore per continuare.',
+            title: 'You have used the credits for this cycle',
+            description: error instanceof Error ? error.message : 'Move to a higher plan to keep going.',
             recommendedPlan: getRecommendedPlanForAction(spec.action),
             action: spec.action,
             sourceView: options?.sourceView,

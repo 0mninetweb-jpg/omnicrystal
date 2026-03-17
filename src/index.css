@@ -5,14 +5,16 @@
   --font-display: "Fraunces", Georgia, serif;
   --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
 
-  --color-crystal-paper: #f6f0e7;
-  --color-crystal-stone: #ede4d7;
-  --color-crystal-ink: #111827;
-  --color-crystal-charcoal: #1f2937;
+  --color-crystal-paper: #f7f4ef;
+  --color-crystal-stone: #eee7dd;
+  --color-crystal-ink: #0f172a;
+  --color-crystal-slate: #475569;
   --color-crystal-blue: #1453e8;
   --color-crystal-rose: #d95d74;
   --color-crystal-trust: #118a67;
   --color-crystal-risk: #cf7d2b;
+  --color-crystal-night: #050814;
+  --color-crystal-night-soft: #0d1324;
 }
 
 @utility no-scrollbar {
@@ -40,9 +42,10 @@
     margin: 0;
     min-height: 100vh;
     background:
-      radial-gradient(circle at top left, rgba(20, 83, 232, 0.09), transparent 28%),
-      radial-gradient(circle at top right, rgba(217, 93, 116, 0.08), transparent 24%),
-      linear-gradient(180deg, #fbf8f3 0%, #f5f0e8 52%, #f3ede3 100%);
+      radial-gradient(circle at top left, rgba(20, 83, 232, 0.08), transparent 26%),
+      radial-gradient(circle at top right, rgba(217, 93, 116, 0.06), transparent 22%),
+      radial-gradient(circle at 30% 110%, rgba(20, 83, 232, 0.03), transparent 32%),
+      linear-gradient(180deg, #fcfaf7 0%, #f7f3ec 46%, #f3ede3 100%);
     color: #1f2937;
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
@@ -80,17 +83,19 @@
 }
 
 .editorial-panel {
-  background: rgba(255, 255, 255, 0.74);
-  backdrop-filter: blur(18px);
-  border: 1px solid rgba(255, 255, 255, 0.72);
-  box-shadow: 0 20px 60px rgba(15, 23, 42, 0.08);
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.78);
+  box-shadow:
+    0 28px 70px rgba(15, 23, 42, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.55);
 }
 
 .ink-panel {
   background:
     radial-gradient(circle at top right, rgba(217, 93, 116, 0.18), transparent 26%),
-    radial-gradient(circle at bottom left, rgba(20, 83, 232, 0.16), transparent 30%),
-    linear-gradient(180deg, #101826 0%, #0f172a 100%);
+    radial-gradient(circle at bottom left, rgba(20, 83, 232, 0.14), transparent 30%),
+    linear-gradient(180deg, #121b2d 0%, #0f172a 100%);
   border: 1px solid rgba(255, 255, 255, 0.1);
   box-shadow: 0 28px 70px rgba(15, 23, 42, 0.28);
 }
@@ -105,10 +110,12 @@
 .oracle-panel {
   background:
     radial-gradient(circle at top right, rgba(253, 164, 175, 0.2), transparent 28%),
-    radial-gradient(circle at bottom left, rgba(20, 83, 232, 0.15), transparent 24%),
-    linear-gradient(180deg, #16111c 0%, #101826 100%);
+    radial-gradient(circle at bottom left, rgba(20, 83, 232, 0.16), transparent 24%),
+    linear-gradient(180deg, #140f19 0%, #081121 100%);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.22);
+  box-shadow:
+    0 34px 90px rgba(15, 23, 42, 0.26),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
 .soft-grid {
@@ -131,6 +138,21 @@
     radial-gradient(circle at top left, rgba(20, 83, 232, 0.1), transparent 22%),
     radial-gradient(circle at bottom right, rgba(217, 93, 116, 0.08), transparent 24%),
     linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0));
+}
+
+.glass-panel {
+  background: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.signal-board {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.86), rgba(255, 255, 255, 0.7)),
+    rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  box-shadow: 0 22px 48px rgba(15, 23, 42, 0.06);
 }
 
 .text-gradient {
@@ -197,8 +219,8 @@
 .world-sim-globe {
   background:
     radial-gradient(circle at 28% 28%, rgba(255, 255, 255, 0.35), transparent 24%),
-    radial-gradient(circle at 62% 40%, rgba(59, 130, 246, 0.32), transparent 36%),
-    radial-gradient(circle at 45% 68%, rgba(244, 63, 94, 0.16), transparent 38%),
+    radial-gradient(circle at 62% 40%, rgba(59, 130, 246, 0.36), transparent 36%),
+    radial-gradient(circle at 45% 68%, rgba(244, 63, 94, 0.18), transparent 38%),
     linear-gradient(180deg, rgba(15, 23, 42, 0.15), rgba(15, 23, 42, 0.55));
   box-shadow:
     inset 0 0 60px rgba(255, 255, 255, 0.08),
@@ -226,6 +248,65 @@
 
 .world-sim-node {
   animation: editorialFloat 6s ease-in-out infinite;
+}
+
+.observatory-shell {
+  background:
+    radial-gradient(circle at top, rgba(244, 63, 94, 0.14), transparent 22%),
+    radial-gradient(circle at left, rgba(56, 189, 248, 0.15), transparent 28%),
+    linear-gradient(180deg, rgba(8, 11, 22, 0.94), rgba(5, 8, 20, 0.98));
+}
+
+.matrix-rail {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02)),
+    rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(26px);
+}
+
+.content-auto {
+  content-visibility: auto;
+  contain-intrinsic-size: 720px;
+}
+
+:root[data-device-tier='phone'] body::before,
+:root[data-device-tier='tablet'] body::before {
+  opacity: 0.22;
+}
+
+:root[data-device-tier='phone'] .editorial-panel,
+:root[data-device-tier='phone'] .signal-board,
+:root[data-device-tier='phone'] .glass-panel,
+:root[data-device-tier='tablet'] .glass-panel {
+  backdrop-filter: blur(16px);
+}
+
+:root[data-device-tier='phone'] .editorial-panel,
+:root[data-device-tier='phone'] .signal-board {
+  box-shadow: 0 16px 32px rgba(15, 23, 42, 0.06);
+}
+
+:root[data-motion-mode='reduced'] .world-sim-ring,
+:root[data-motion-mode='reduced'] .world-sim-ring--delay,
+:root[data-motion-mode='reduced'] .world-sim-node {
+  animation-duration: 42s;
+}
+
+:root[data-motion-mode='reduced'] .animate-float {
+  animation-duration: 8s;
+}
+
+:root[data-motion-mode='minimal'] .world-sim-ring,
+:root[data-motion-mode='minimal'] .world-sim-ring--delay,
+:root[data-motion-mode='minimal'] .world-sim-scan,
+:root[data-motion-mode='minimal'] .world-sim-node,
+:root[data-motion-mode='minimal'] .animate-float {
+  animation: none !important;
+}
+
+:root[data-motion-mode='minimal'] html {
+  scroll-behavior: auto;
 }
 
 @media (max-width: 1023px) {

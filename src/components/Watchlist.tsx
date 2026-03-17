@@ -17,6 +17,7 @@ import { db, handleFirestoreError, OperationType } from '../firebase';
 import { useCrystalPlan } from '../context/CrystalPlanContext';
 import { getPlanLabel } from '../lib/crystalPlans';
 import { formatProbabilityLabel, getMarketSignalLabel, getMarketSignalState, hasPredictionMarketFrame } from '../lib/predictionMarket';
+import { scheduleIdleTask } from '../lib/scheduleIdle';
 import { SECTION_COPY } from '../content/brand';
 import { getPolymarketPulse } from '../services/geminiService';
 import type { PredictionMarketFrame } from '../types/crystal';
@@ -40,8 +41,8 @@ type WatchlistItem = {
 };
 
 const GUEST_ITEMS: WatchlistItem[] = [
-  { id: 'guest-1', entity: 'Roma', type: 'City', domains: ['Tourism', 'Mobility', 'Weather'], alerts: true, pulse: 'High activity', trend: 'up' },
-  { id: 'guest-2', entity: 'Italia', type: 'Country', domains: ['Inflation', 'Macro', 'Energy'], alerts: true, pulse: 'Under watch', trend: 'flat' },
+  { id: 'guest-1', entity: 'Rome', type: 'City', domains: ['Tourism', 'Mobility', 'Weather'], alerts: true, pulse: 'High activity', trend: 'up' },
+  { id: 'guest-2', entity: 'Italy', type: 'Country', domains: ['Inflation', 'Macro', 'Energy'], alerts: true, pulse: 'Under watch', trend: 'flat' },
   { id: 'guest-3', entity: 'AI orchestration', type: 'Industry', domains: ['Jobs', 'Adoption'], alerts: false, pulse: 'Acceleration', trend: 'up' },
 ];
 
@@ -135,29 +136,32 @@ export function Watchlist({ user, isGuest, onLogin, onChecklistComplete }: Watch
 
     let active = true;
 
-    const fetchPulse = async () => {
-      const entries = await Promise.all(
-        watchlistItems.slice(0, 6).map(async (item) => {
-          try {
-            const queryText = [item.entity, ...(item.domains || [])].filter(Boolean).join(' ');
-            const frame = (await getPolymarketPulse(queryText, buildPulseQueryPlan(item))) as PredictionMarketFrame | null;
-            return [item.id, frame || null] as const;
-          } catch (pulseError) {
-            console.error('Watchlist market pulse error:', pulseError);
-            return [item.id, null] as const;
-          }
-        })
-      );
+    const cancelIdle = scheduleIdleTask(() => {
+      const fetchPulse = async () => {
+        const entries = await Promise.all(
+          watchlistItems.slice(0, 6).map(async (item) => {
+            try {
+              const queryText = [item.entity, ...(item.domains || [])].filter(Boolean).join(' ');
+              const frame = (await getPolymarketPulse(queryText, buildPulseQueryPlan(item))) as PredictionMarketFrame | null;
+              return [item.id, frame || null] as const;
+            } catch (pulseError) {
+              console.error('Watchlist market pulse error:', pulseError);
+              return [item.id, null] as const;
+            }
+          })
+        );
 
-      if (active) {
-        setMarketPulseById(Object.fromEntries(entries));
-      }
-    };
+        if (active) {
+          setMarketPulseById(Object.fromEntries(entries));
+        }
+      };
 
-    void fetchPulse();
+      void fetchPulse();
+    }, 900);
 
     return () => {
       active = false;
+      cancelIdle();
     };
   }, [user?.uid, watchlistItems]);
 
@@ -180,15 +184,15 @@ export function Watchlist({ user, isGuest, onLogin, onChecklistComplete }: Watch
 
     if (watchlistItems.length >= entitlements.watchlistLimit) {
       if (entitlements.plan === 'pro') {
-        setLimitMessage('Hai raggiunto il limite massimo della watchlist Pro.');
+        setLimitMessage('You have reached the maximum limit of the Pro watchlist.');
       } else {
         openUpgrade({
           reason: 'feature',
-          title: 'La tua watchlist vuole piu spazio',
+          title: 'Your watchlist wants more room',
           description:
             entitlements.plan === 'free'
-              ? 'Free include fino a 5 entita. Passa a Plus per monitorarne 25.'
-              : 'Plus include fino a 25 entita. Passa a Pro per arrivare a 100.',
+              ? 'Free includes up to 5 entities. Move to Plus to monitor 25.'
+              : 'Plus includes up to 25 entities. Move to Pro to reach 100.',
           recommendedPlan: entitlements.plan === 'free' ? 'plus' : 'pro',
           sourceView: 'watchlist',
         });
@@ -226,7 +230,7 @@ export function Watchlist({ user, isGuest, onLogin, onChecklistComplete }: Watch
 
   return (
     <div className="space-y-6">
-      <section className="editorial-panel rounded-[32px] p-6 md:p-7">
+      <section className="editorial-panel rounded-[36px] p-6 md:p-7">
         <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <div className="section-kicker">{SECTION_COPY.watchlist.heroKicker}</div>
@@ -236,24 +240,24 @@ export function Watchlist({ user, isGuest, onLogin, onChecklistComplete }: Watch
             <p className="mt-4 max-w-2xl text-base leading-8 text-slate-600">{SECTION_COPY.watchlist.heroBody}</p>
           </div>
 
-          <div className="rounded-[28px] border border-slate-200 bg-white p-5">
+          <div className="signal-board rounded-[30px] p-5">
             <div className="section-kicker">Current Capacity</div>
             <div className="mt-3 flex flex-wrap items-center gap-3">
               <span className="rounded-full bg-slate-950 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-white">
                 {isGuest ? 'Guest' : getPlanLabel(entitlements.plan)}
               </span>
               <span className="text-sm font-semibold text-slate-700">
-                {isGuest ? 'Accedi per salvare la tua watchlist' : `${watchlistItems.length} / ${entitlements.watchlistLimit} entita`}
+                {isGuest ? 'Sign in to save your watchlist' : `${watchlistItems.length} / ${entitlements.watchlistLimit} entities`}
               </span>
             </div>
           </div>
         </div>
       </section>
 
-      <section className="editorial-panel rounded-[32px] p-6">
+      <section className="editorial-panel rounded-[34px] p-6">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div className="text-sm leading-7 text-slate-500">
-            Salva una citta, un paese o un settore. Watchlist lo riusa poi in Home, Forecast e Nextletter.
+            Save a city, country, or sector. Watchlist then feeds that context back into Home, Forecast, and Nextletter.
           </div>
           {isGuest ? (
             <button
@@ -261,7 +265,7 @@ export function Watchlist({ user, isGuest, onLogin, onChecklistComplete }: Watch
               className="inline-flex items-center gap-2 rounded-full bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800"
             >
               <Lock className="h-4 w-4" />
-              Accedi per gestire
+              Sign in to manage
             </button>
           ) : (
             <button
@@ -269,7 +273,7 @@ export function Watchlist({ user, isGuest, onLogin, onChecklistComplete }: Watch
               className="inline-flex items-center gap-2 rounded-full bg-[#1453e8] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#1248c8]"
             >
               <BookmarkPlus className="h-4 w-4" />
-              Aggiungi entita
+              Add entity
             </button>
           )}
         </div>
@@ -297,7 +301,7 @@ export function Watchlist({ user, isGuest, onLogin, onChecklistComplete }: Watch
                         void handleAddEntity();
                       }
                     }}
-                    placeholder="Es: Milano, Giappone, semiconduttori..."
+                    placeholder="Example: Milan, Japan, semiconductors..."
                     className="rounded-[22px] border border-slate-200 bg-slate-50 px-5 py-4 text-sm font-medium text-slate-900 outline-none transition focus:border-[#1453e8] focus:bg-white"
                   />
                   <div className="flex gap-2">
@@ -305,14 +309,14 @@ export function Watchlist({ user, isGuest, onLogin, onChecklistComplete }: Watch
                       onClick={() => setIsAdding(false)}
                       className="rounded-full border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-950"
                     >
-                      Annulla
+                      Cancel
                     </button>
                     <button
                       onClick={() => void handleAddEntity()}
                       className="inline-flex items-center gap-2 rounded-full bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800"
                     >
                       <Plus className="h-4 w-4" />
-                      Aggiungi
+                      Add
                     </button>
                   </div>
                 </div>
@@ -323,16 +327,15 @@ export function Watchlist({ user, isGuest, onLogin, onChecklistComplete }: Watch
         </AnimatePresence>
       </section>
 
-      <section className="grid gap-4">
+      <section className="content-auto grid gap-4">
         {watchlistItems.length === 0 ? (
           <div className="editorial-panel rounded-[32px] p-10 text-center">
             <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-slate-100 text-slate-400">
               <Activity className="h-8 w-8" />
             </div>
-            <h3 className="mt-5 text-2xl font-display font-semibold text-slate-950">Nessuna entita monitorata.</h3>
+            <h3 className="mt-5 text-2xl font-display font-semibold text-slate-950">Nothing is being tracked yet.</h3>
             <p className="mx-auto mt-3 max-w-xl text-sm leading-7 text-slate-500">
-              Aggiungi il tuo primo nodo alla watchlist per far comparire il pulse in Home e avere un contesto piu
-              utile nei forecast.
+              Add your first node to make the pulse appear in Home and give your forecasts more useful context.
             </p>
           </div>
         ) : (
@@ -415,7 +418,7 @@ export function Watchlist({ user, isGuest, onLogin, onChecklistComplete }: Watch
                           ? 'border-emerald-200 bg-emerald-50 text-emerald-600'
                           : 'border-slate-200 bg-white text-slate-500 hover:text-slate-900'
                       )}
-                      title={item.alerts ? 'Disattiva alert' : 'Attiva alert'}
+                      title={item.alerts ? 'Turn alerts off' : 'Turn alerts on'}
                     >
                       {item.alerts ? <Bell className="h-5 w-5" /> : <BellOff className="h-5 w-5" />}
                     </button>
@@ -424,7 +427,7 @@ export function Watchlist({ user, isGuest, onLogin, onChecklistComplete }: Watch
                       <button
                         onClick={() => void removeEntity(item.id)}
                         className="flex h-12 w-12 items-center justify-center rounded-full border border-rose-100 bg-rose-50 text-rose-600 transition hover:bg-rose-100"
-                        title="Rimuovi"
+                        title="Remove"
                       >
                         <Trash2 className="h-5 w-5" />
                       </button>

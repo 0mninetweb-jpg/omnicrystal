@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  X,
   ChevronDown,
   ChevronUp,
   Code2,
@@ -12,16 +13,17 @@ import {
   Sparkles,
   WandSparkles,
 } from 'lucide-react';
-import Markdown from 'react-markdown';
 import { AnimatePresence, motion } from 'framer-motion';
 import { deleteDoc, doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { CrystalCard, cn } from './CrystalCard';
 import { CrystalLoader } from './CrystalLoader';
+import { LazyMarkdown } from './LazyMarkdown';
 import { CardData } from '../types/crystal';
 import { compileQuery, getLocalInsights, getWorldSimJobResult, predict } from '../services/geminiService';
 import { useCrystalPlan } from '../context/CrystalPlanContext';
 import { useAppRuntime } from '../context/AppRuntimeContext';
+import { useAppShell } from '../context/AppShellContext';
 import { formatCredits, getPlanLabel, getPredictActionSpec } from '../lib/crystalPlans';
 import { createWorldSimSceneData } from '../lib/worldSimScene';
 import { PRODUCT_BRAND, RUNTIME_COPY, SECTION_COPY, WORLD_SIM_BRAND } from '../content/brand';
@@ -51,9 +53,9 @@ const DEFAULT_FILTERS: SearchFilters = {
 };
 
 const HERO_EXAMPLES = [
-  'Quanto e probabile un aumento delle bollette in Italia nei prossimi 30 giorni?',
-  'Roma rischia un nuovo picco di over-tourism entro 90 giorni?',
-  'L automazione AI nei contact center accelerera entro 6 mesi?',
+  'How likely is an energy price jump in Italy over the next 30 days?',
+  'Will Rome face another overtourism spike within 90 days?',
+  'Will AI automation in contact centers accelerate within 6 months?',
 ];
 
 const GEOGRAPHY_METADATA: Record<
@@ -61,10 +63,10 @@ const GEOGRAPHY_METADATA: Record<
   { label: string; level?: 'world' | 'country' | 'city'; location?: string }
 > = {
   auto: { label: 'Auto' },
-  global: { label: 'Globale', level: 'world' },
-  italy: { label: 'Italia', level: 'country', location: 'Italia' },
-  rome: { label: 'Roma', level: 'city', location: 'Roma' },
-  milan: { label: 'Milano', level: 'city', location: 'Milano' },
+  global: { label: 'Global', level: 'world' },
+  italy: { label: 'Italy', level: 'country', location: 'Italy' },
+  rome: { label: 'Rome', level: 'city', location: 'Rome' },
+  milan: { label: 'Milan', level: 'city', location: 'Milan' },
 };
 
 const HORIZON_OPTIONS: Array<{
@@ -73,12 +75,12 @@ const HORIZON_OPTIONS: Array<{
   badge?: 'Plus' | 'Pro';
   feature?: 'search_horizon_90d' | 'search_horizon_6m' | 'search_horizon_12m';
 }> = [
-  { value: 'now', label: 'Ora' },
-  { value: '7d', label: '7 giorni' },
-  { value: '30d', label: '30 giorni' },
-  { value: '90d', label: '90 giorni', badge: 'Plus', feature: 'search_horizon_90d' },
-  { value: '6m', label: '6 mesi', badge: 'Plus', feature: 'search_horizon_6m' },
-  { value: '12m', label: '12 mesi', badge: 'Pro', feature: 'search_horizon_12m' },
+  { value: 'now', label: 'Now' },
+  { value: '7d', label: '7 days' },
+  { value: '30d', label: '30 days' },
+  { value: '90d', label: '90 days', badge: 'Plus', feature: 'search_horizon_90d' },
+  { value: '6m', label: '6 months', badge: 'Plus', feature: 'search_horizon_6m' },
+  { value: '12m', label: '12 months', badge: 'Pro', feature: 'search_horizon_12m' },
 ];
 
 const CONFIDENCE_OPTIONS: Array<{
@@ -87,20 +89,21 @@ const CONFIDENCE_OPTIONS: Array<{
   badge?: 'Pro';
   feature?: 'search_confidence_rigorous';
 }> = [
-  { value: 'balanced', label: 'Bilanciata' },
-  { value: 'high', label: 'Alta' },
-  { value: 'rigorous', label: 'Massimo rigore', badge: 'Pro', feature: 'search_confidence_rigorous' },
+  { value: 'balanced', label: 'Balanced' },
+  { value: 'high', label: 'High' },
+  { value: 'rigorous', label: 'Rigorous', badge: 'Pro', feature: 'search_confidence_rigorous' },
 ];
 
 const CONFIDENCE_LABELS: Record<SearchFilters['confidence'], string> = {
-  balanced: 'Bilanciata',
-  high: 'Alta',
-  rigorous: 'Massimo rigore',
+  balanced: 'Balanced',
+  high: 'High',
+  rigorous: 'Rigorous',
 };
 
 export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplete, onOpenWorldSimScene }: SearchProps) {
   const { entitlements, canUseFeature, openUpgrade, runMeteredAction } = useCrystalPlan();
   const capabilities = useAppRuntime();
+  const { isPhone, motionMode } = useAppShell();
   const [query, setQuery] = useState(initialQuery || '');
   const [hasSearched, setHasSearched] = useState(false);
   const [filters, setFilters] = useState<SearchFilters>(DEFAULT_FILTERS);
@@ -108,7 +111,7 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
   const [isLoadingPlan, setIsLoadingPlan] = useState(false);
   const [isLoadingPrediction, setIsLoadingPrediction] = useState(false);
   const [isLoadingInsights, setIsLoadingInsights] = useState(false);
-  const [loadingMessage, setLoadingMessage] = useState('Sto preparando il forecast...');
+  const [loadingMessage, setLoadingMessage] = useState('Preparing the forecast...');
   const [queryPlan, setQueryPlan] = useState<any>(null);
   const [generatedCard, setGeneratedCard] = useState<CardData | null>(null);
   const [localInsights, setLocalInsights] = useState<{ text: string; chunks: any[] } | null>(null);
@@ -118,6 +121,8 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
   const [autoOpenedWorldSimJobId, setAutoOpenedWorldSimJobId] = useState<string | null>(null);
 
   const predictActionSpec = useMemo(() => getPredictActionSpec('search', filters), [filters]);
+  const useFilterSheet = isPhone;
+  const shouldAnimatePanels = motionMode !== 'minimal';
   const isWorldSimMode = predictActionSpec.action === 'search_oracle';
   const runtimeModeLabel = isWorldSimMode
     ? capabilities.worldSimAvailable
@@ -128,7 +133,7 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
   const worldSimPreviewScene = useMemo(
     () =>
       createWorldSimSceneData({
-        title: 'WorldSim: guarda il sistema dietro al numero',
+        title: 'WorldSim: see the system behind the number',
         question: query.trim() || HERO_EXAMPLES[1],
         mode: capabilities.worldSimAvailable ? 'live' : 'preview',
       }),
@@ -232,10 +237,10 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
 
   useEffect(() => {
     const messages = [
-      'Sto preparando il forecast...',
-      'Leggo i driver principali e il contesto...',
-      'Compongo risposta, probabilita e segnali da osservare...',
-      'Aggiungo il livello di fiducia finale...',
+      'Preparing the forecast...',
+      'Reading the main drivers and the surrounding context...',
+      'Building the answer, probability, and what to watch next...',
+      'Adding the final confidence layer...',
     ];
     if (!isLoadingPlan && !isLoadingPrediction) return;
 
@@ -280,11 +285,11 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
     if (option?.feature && !canUseFeature(option.feature)) {
       openUpgrade({
         reason: 'feature',
-        title: `${option.badge} sblocca ${option.label}`,
+        title: `${option.badge} unlocks ${option.label}`,
         description:
           option.badge === 'Pro'
-            ? `${WORLD_SIM_BRAND.name} e gli orizzonti a 12 mesi fanno parte del piano Pro.`
-            : 'Gli orizzonti medio-lunghi sono inclusi nel piano Plus.',
+            ? `${WORLD_SIM_BRAND.name} and 12-month horizons are part of Pro.`
+            : 'Medium and longer horizons are included in Plus.',
         recommendedPlan: option.badge === 'Pro' ? 'pro' : 'plus',
         sourceView: 'search',
       });
@@ -299,8 +304,8 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
     if (option?.feature && !canUseFeature(option.feature)) {
       openUpgrade({
         reason: 'feature',
-        title: 'Massimo rigore e una funzione Pro',
-        description: `${WORLD_SIM_BRAND.name} e i forecast piu profondi fanno parte del piano Pro.`,
+        title: 'Rigorous mode is a Pro feature',
+        description: `${WORLD_SIM_BRAND.name} and deeper forecasts are part of Pro.`,
         recommendedPlan: 'pro',
         sourceView: 'search',
       });
@@ -355,7 +360,7 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
       return;
     }
     if (requiresWorldSim && !capabilities.worldSimAvailable) {
-      setError(`${RUNTIME_COPY.worldSimPreview} Per ora puoi continuare con il forecast standard.`);
+      setError(`${RUNTIME_COPY.worldSimPreview} For now you can keep using the standard forecast.`);
       return;
     }
 
@@ -432,7 +437,7 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
         {
           sourceView: 'search',
           insufficientCreditsMessage:
-            'Ti servono piu crediti per questo forecast. Passa a Plus o Pro per continuare senza interruzioni.',
+            'You need more credits for this forecast. Move to Plus or Pro to keep going without interruptions.',
         }
       );
       setGeneratedCard(card);
@@ -446,7 +451,7 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
         .finally(() => setIsLoadingInsights(false));
     } catch (searchError) {
       console.error('Failed to process query', searchError);
-      setError(searchError instanceof Error ? searchError.message : 'Si e verificato un errore imprevisto.');
+      setError(searchError instanceof Error ? searchError.message : 'Something unexpected happened.');
     } finally {
       setIsLoadingPlan(false);
       setIsLoadingPrediction(false);
@@ -467,9 +472,87 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
     );
   };
 
+  const advancedFilters = (
+    <div className="grid gap-5 rounded-[28px] border border-slate-200 bg-white p-5 md:grid-cols-3">
+      <div>
+        <div className="section-kicker">Geography</div>
+        <div className="mt-4 flex flex-wrap gap-2">
+          {Object.entries(GEOGRAPHY_METADATA).map(([value, meta]) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => applyFilters({ geography: value as SearchFilters['geography'] })}
+              className={cn(
+                'inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition',
+                filters.geography === value
+                  ? 'border-[#1453e8] bg-[#e8eefc] text-[#1453e8]'
+                  : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300 hover:bg-white'
+              )}
+            >
+              {meta.level === 'city' ? <MapPin className="h-4 w-4" /> : <Globe2 className="h-4 w-4" />}
+              {meta.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <div className="section-kicker">Horizon</div>
+        <div className="mt-4 flex flex-wrap gap-2">
+          {HORIZON_OPTIONS.map((option) => {
+            const locked = option.feature ? !canUseFeature(option.feature) : false;
+            return (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => handleHorizonChange(option.value)}
+                className={cn(
+                  'inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition',
+                  filters.horizon === option.value
+                    ? 'border-[#1453e8] bg-[#e8eefc] text-[#1453e8]'
+                    : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300 hover:bg-white'
+                )}
+              >
+                {option.label}
+                {renderOptionBadge(option.badge)}
+                {locked && <Lock className="h-3.5 w-3.5" />}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div>
+        <div className="section-kicker">Confidence</div>
+        <div className="mt-4 flex flex-wrap gap-2">
+          {CONFIDENCE_OPTIONS.map((option) => {
+            const locked = option.feature ? !canUseFeature(option.feature) : false;
+            return (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => handleConfidenceChange(option.value)}
+                className={cn(
+                  'inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition',
+                  filters.confidence === option.value
+                    ? 'border-[#1453e8] bg-[#e8eefc] text-[#1453e8]'
+                    : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300 hover:bg-white'
+                )}
+              >
+                {option.label}
+                {renderOptionBadge(option.badge)}
+                {locked && <Lock className="h-3.5 w-3.5" />}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+
   return (
     <div className="space-y-7">
-      <section className="editorial-panel overflow-hidden rounded-[32px] p-6 md:p-8">
+      <section className="editorial-panel overflow-hidden rounded-[36px] p-6 md:p-8">
         <div className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr] lg:items-end">
           <div>
             <div className="section-kicker">{SECTION_COPY.forecast.heroKicker}</div>
@@ -486,7 +569,7 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
                 }}
                 className="inline-flex items-center gap-2 rounded-full bg-[#1453e8] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#1248c8]"
               >
-                Fai un forecast
+                {PRODUCT_BRAND.primaryCta}
               </button>
             </div>
 
@@ -506,19 +589,19 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
             </div>
           </div>
 
-          <div className="rounded-[28px] border border-slate-200 bg-white p-5">
-            <div className="section-kicker">Current Access</div>
-            <div className="mt-3 flex flex-wrap items-center gap-3">
-              <span className="rounded-full bg-slate-950 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-white">
-                {isGuest ? 'Guest' : getPlanLabel(entitlements.plan)}
-              </span>
-              <span className="text-sm font-semibold text-slate-700">
-                {isGuest ? 'Accedi per salvare e usare i crediti' : `${entitlements.creditsBalance} crediti disponibili`}
-              </span>
-            </div>
-            <div className="mt-4 text-sm leading-7 text-slate-500">
-              Ricevi una risposta chiara, i motivi principali dietro al numero e i prossimi segnali da osservare.
-            </div>
+            <div className="signal-board rounded-[30px] p-5">
+              <div className="section-kicker">Current Access</div>
+              <div className="mt-3 flex flex-wrap items-center gap-3">
+                <span className="rounded-full bg-slate-950 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-white">
+                  {isGuest ? 'Guest' : getPlanLabel(entitlements.plan)}
+                </span>
+                <span className="text-sm font-semibold text-slate-700">
+                  {isGuest ? 'Sign in to save and use credits' : `${entitlements.creditsBalance} credits available`}
+                </span>
+              </div>
+              <div className="mt-4 text-sm leading-7 text-slate-500">
+              Get a direct answer, the core reasoning behind it, and the next signals worth watching.
+              </div>
             <div className="mt-4 rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-600">
               {capabilities.message}
             </div>
@@ -526,7 +609,7 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
         </div>
       </section>
 
-      <section className="editorial-panel rounded-[32px] p-5 md:p-6">
+      <section className="editorial-panel rounded-[34px] p-5 md:p-6">
         <form onSubmit={handleSearch} className="space-y-5">
           <div className="rounded-[28px] border border-slate-200 bg-white p-4 shadow-[0_16px_35px_rgba(15,23,42,0.05)]">
             <div className="flex flex-col gap-4 md:flex-row md:items-center">
@@ -536,7 +619,7 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
                   type="text"
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
-                  placeholder={`Chiedi a ${PRODUCT_BRAND.name} cosa potrebbe succedere e in quale orizzonte...`}
+                  placeholder={`Ask ${PRODUCT_BRAND.name} what may happen and on which horizon...`}
                   className="w-full min-w-0 bg-transparent text-base font-medium text-slate-900 outline-none placeholder:text-slate-400"
                 />
               </div>
@@ -575,9 +658,9 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
 
           <div className="grid gap-3 rounded-[24px] border border-slate-200 bg-white p-4 md:grid-cols-3">
             {[
-              'What may happen: una risposta diretta e leggibile.',
-              'Why: i motivi principali dietro al forecast.',
-              isWorldSimMode ? 'WorldSim: il layer profondo per leggere attori e reazioni a catena.' : 'WorldSim: si apre solo quando serve piu profondita.',
+              'What may happen: a direct and readable answer.',
+              'Why: the main drivers behind the forecast.',
+              isWorldSimMode ? 'WorldSim: the deeper layer for actors, pressure, and chain reactions.' : 'WorldSim: it opens only when you need more depth.',
             ].map((item) => (
               <div key={item} className="rounded-[18px] bg-slate-50 px-4 py-3 text-sm leading-7 text-slate-600">
                 {item}
@@ -585,97 +668,62 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
             ))}
           </div>
 
-          <AnimatePresence initial={false}>
-            {isAdvancedOpen && (
+          {!useFilterSheet && (
+            <AnimatePresence initial={false}>
+              {isAdvancedOpen && (
               <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-                exit={{ opacity: 0, height: 0 }}
+                initial={shouldAnimatePanels ? { opacity: 0, height: 0 } : undefined}
+                animate={shouldAnimatePanels ? { opacity: 1, height: 'auto' } : undefined}
+                exit={shouldAnimatePanels ? { opacity: 0, height: 0 } : undefined}
                 className="overflow-hidden"
               >
-                <div className="grid gap-5 rounded-[28px] border border-slate-200 bg-white p-5 md:grid-cols-3">
-                  <div>
-                    <div className="section-kicker">Geography</div>
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      {Object.entries(GEOGRAPHY_METADATA).map(([value, meta]) => (
-                        <button
-                          key={value}
-                          type="button"
-                          onClick={() => applyFilters({ geography: value as SearchFilters['geography'] })}
-                          className={cn(
-                            'inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition',
-                            filters.geography === value
-                              ? 'border-[#1453e8] bg-[#e8eefc] text-[#1453e8]'
-                              : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300 hover:bg-white'
-                          )}
-                        >
-                          {meta.level === 'city' ? <MapPin className="h-4 w-4" /> : <Globe2 className="h-4 w-4" />}
-                          {meta.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div>
-                    <div className="section-kicker">Horizon</div>
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      {HORIZON_OPTIONS.map((option) => {
-                        const locked = option.feature ? !canUseFeature(option.feature) : false;
-                        return (
-                          <button
-                            key={option.value}
-                            type="button"
-                            onClick={() => handleHorizonChange(option.value)}
-                            className={cn(
-                              'inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition',
-                              filters.horizon === option.value
-                                ? 'border-[#1453e8] bg-[#e8eefc] text-[#1453e8]'
-                                : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300 hover:bg-white'
-                            )}
-                          >
-                            {option.label}
-                            {renderOptionBadge(option.badge)}
-                            {locked && <Lock className="h-3.5 w-3.5" />}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  <div>
-                    <div className="section-kicker">Confidence</div>
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      {CONFIDENCE_OPTIONS.map((option) => {
-                        const locked = option.feature ? !canUseFeature(option.feature) : false;
-                        return (
-                          <button
-                            key={option.value}
-                            type="button"
-                            onClick={() => handleConfidenceChange(option.value)}
-                            className={cn(
-                              'inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition',
-                              filters.confidence === option.value
-                                ? 'border-[#1453e8] bg-[#e8eefc] text-[#1453e8]'
-                                : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300 hover:bg-white'
-                            )}
-                          >
-                            {option.label}
-                            {renderOptionBadge(option.badge)}
-                            {locked && <Lock className="h-3.5 w-3.5" />}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </div>
+                {advancedFilters}
               </motion.div>
-            )}
-          </AnimatePresence>
+              )}
+            </AnimatePresence>
+          )}
         </form>
       </section>
 
+      {useFilterSheet && (
+        <AnimatePresence>
+          {isAdvancedOpen && (
+            <div className="fixed inset-0 z-[120] md:hidden">
+              <motion.button
+                initial={shouldAnimatePanels ? { opacity: 0 } : undefined}
+                animate={shouldAnimatePanels ? { opacity: 1 } : undefined}
+                exit={shouldAnimatePanels ? { opacity: 0 } : undefined}
+                onClick={() => setIsAdvancedOpen(false)}
+                className="absolute inset-0 bg-[rgba(15,23,42,0.34)] backdrop-blur-sm"
+              />
+              <motion.div
+                initial={shouldAnimatePanels ? { opacity: 0, y: 24 } : undefined}
+                animate={shouldAnimatePanels ? { opacity: 1, y: 0 } : undefined}
+                exit={shouldAnimatePanels ? { opacity: 0, y: 24 } : undefined}
+                transition={{ duration: 0.18, ease: 'easeOut' }}
+                className="absolute inset-x-0 bottom-0 rounded-t-[28px] border border-slate-200 bg-[rgba(252,250,247,0.98)] p-4 shadow-[0_-18px_50px_rgba(15,23,42,0.12)]"
+              >
+                <div className="mb-4 flex items-center justify-between">
+                  <div>
+                    <div className="section-kicker">Filters</div>
+                    <div className="mt-1 text-lg font-semibold text-slate-950">Tune the forecast without crowding the screen.</div>
+                  </div>
+                  <button
+                    onClick={() => setIsAdvancedOpen(false)}
+                    className="rounded-full border border-slate-200 bg-white p-2 text-slate-500"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+                <div className="max-h-[72vh] overflow-y-auto pb-2">{advancedFilters}</div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
+      )}
+
       {(isLoadingPlan || isLoadingPrediction) && (
-        <section className="ink-panel rounded-[32px] p-8 text-center">
+      <section className="ink-panel rounded-[36px] p-8 text-center">
           <CrystalLoader />
           <p className="mt-6 text-base font-medium text-slate-300">{loadingMessage}</p>
         </section>
@@ -689,14 +737,14 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
 
       {!hasSearched && !isLoadingPlan && !isLoadingPrediction && (
         <section className="grid gap-5 lg:grid-cols-[1.05fr_0.95fr]">
-          <div className="editorial-panel rounded-[32px] p-6">
+          <div className="editorial-panel content-auto rounded-[32px] p-6">
             <div className="section-kicker">How to ask</div>
-            <h3 className="mt-3 text-2xl font-display font-semibold text-slate-950">Pensa alla domanda come a una decisione.</h3>
+            <h3 className="mt-3 text-2xl font-display font-semibold text-slate-950">Think about the question like a decision.</h3>
             <div className="mt-5 space-y-3">
               {[
-                'Chiedi una cosa concreta: cosa vuoi capire davvero?',
-                'Usa 30 giorni se vuoi agire subito, 6 mesi se vuoi orientarti meglio.',
-                'Aggiungi profilo e watchlist per rendere la risposta piu vicina al tuo contesto.',
+                'Ask something concrete: what do you actually want to understand?',
+                'Use 30 days when you need to act soon, 6 months when you need wider orientation.',
+                'Add profile and watchlist context to make the answer feel closer to your world.',
               ].map((item) => (
                 <div key={item} className="flex items-start gap-3 rounded-[22px] border border-slate-200 bg-white p-4 text-sm font-medium leading-7 text-slate-600">
                   <div className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full bg-[#1453e8]" />
@@ -717,7 +765,7 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
                 <div className="section-kicker">What may happen</div>
                 <div className="mt-3 flex flex-wrap items-center gap-3 text-sm font-medium text-slate-500">
                   <span className="rounded-full bg-slate-950 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-white">
-                    {filters.horizon === 'now' ? '7 giorni' : filters.horizon}
+                    {filters.horizon === 'now' ? '7 days' : filters.horizon}
                   </span>
                   <span className="rounded-full bg-slate-100 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-600">
                     {GEOGRAPHY_METADATA[filters.geography].label}
@@ -730,27 +778,27 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
 
               <CrystalCard card={generatedCard} onSave={handleSaveCard} isSaved={isCardSaved} />
 
-              <div className="editorial-panel rounded-[28px] p-5">
+              <div className="editorial-panel content-auto rounded-[28px] p-5">
                 <div className="section-kicker">Local context</div>
                 {isLoadingInsights ? (
                   <div className="mt-4 inline-flex items-center gap-2 text-sm font-medium text-slate-500">
                     <Loader2 className="h-4 w-4 animate-spin text-[#1453e8]" />
-                    Recupero il contesto locale...
+                    Pulling local context...
                   </div>
                 ) : localInsights ? (
                   <div className="mt-4 prose prose-sm max-w-none text-slate-600">
-                    <Markdown>{localInsights.text}</Markdown>
+                    <LazyMarkdown>{localInsights.text}</LazyMarkdown>
                   </div>
                 ) : (
                   <p className="mt-4 text-sm leading-7 text-slate-500">
-                    Quando la domanda ha un luogo chiaro, qui aggiungo il contesto locale senza togliere spazio alla previsione principale.
+                    When the question has a clear place attached to it, the local context lives here without competing with the main forecast.
                   </p>
                 )}
               </div>
             </div>
 
             <div className="space-y-5">
-              <div className="editorial-panel rounded-[28px] p-5">
+              <div className="editorial-panel content-auto rounded-[28px] p-5">
                 <div className="section-kicker">Why</div>
                 <div className="mt-4 space-y-3">
                   {(generatedCard.drivers || []).slice(0, 4).map((driver) => (
@@ -765,8 +813,7 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
                     <div className="rounded-[24px] border border-rose-200 bg-rose-50 p-5">
                       <div className="section-kicker !text-rose-600">{WORLD_SIM_BRAND.name}</div>
                       <p className="mt-3 text-sm leading-7 text-rose-800">
-                        {WORLD_SIM_BRAND.name} ha aggiunto una vista piu profonda sugli scenari, ma il numero finale resta
-                        ancorato al motore base.
+                        {WORLD_SIM_BRAND.name} adds a deeper read on scenarios, but the final number still stays anchored to the base forecast engine.
                       </p>
                     </div>
                   )}
@@ -778,14 +825,14 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
                 compact
                 job={generatedCard.world_sim_job || null}
                 onOpen={() => onOpenWorldSimScene(worldSimResultScene, generatedCard.world_sim_job || null)}
-                ctaLabel={generatedCard.world_sim?.enabled ? 'Apri il layer simulativo' : WORLD_SIM_BRAND.enterLabel}
+                ctaLabel={generatedCard.world_sim?.enabled ? 'Open the simulation layer' : WORLD_SIM_BRAND.enterLabel}
               />
             </div>
           </div>
 
           {queryPlan && (
             <details
-              className="editorial-panel rounded-[28px] p-5"
+              className="editorial-panel content-auto rounded-[28px] p-5"
               onToggle={(event) => setShowDebug((event.currentTarget as HTMLDetailsElement).open)}
             >
               <summary className="flex cursor-pointer list-none items-center gap-2 text-sm font-semibold text-slate-700">

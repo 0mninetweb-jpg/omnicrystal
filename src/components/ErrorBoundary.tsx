@@ -12,7 +12,7 @@ interface State {
 export class ErrorBoundary extends Component<Props, State> {
   public state: State = {
     hasError: false,
-    error: null
+    error: null,
   };
 
   public static getDerivedStateFromError(error: Error): State {
@@ -26,20 +26,18 @@ export class ErrorBoundary extends Component<Props, State> {
   public render() {
     if (this.state.hasError) {
       return (
-        <div className="min-h-screen bg-[#050505] text-white flex flex-col items-center justify-center p-4">
-          <div className="bg-red-900/20 border border-red-500/50 rounded-xl p-6 max-w-lg w-full">
-            <h2 className="text-xl font-bold text-red-400 mb-2">Qualcosa è andato storto</h2>
-            <p className="text-gray-300 mb-4">
-              C'è stato un errore imprevisto nell'applicazione.
-            </p>
-            <pre className="bg-black/50 p-4 rounded text-sm text-red-300 overflow-auto whitespace-pre-wrap">
+        <div className="flex min-h-screen flex-col items-center justify-center bg-[#050505] p-4 text-white">
+          <div className="w-full max-w-lg rounded-xl border border-red-500/50 bg-red-900/20 p-6">
+            <h2 className="mb-2 text-xl font-bold text-red-400">Something went wrong</h2>
+            <p className="mb-4 text-gray-300">An unexpected application error occurred.</p>
+            <pre className="overflow-auto whitespace-pre-wrap rounded bg-black/50 p-4 text-sm text-red-300">
               {this.state.error?.message}
             </pre>
-            <button 
+            <button
               onClick={() => window.location.reload()}
-              className="mt-4 px-4 py-2 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-lg transition-colors"
+              className="mt-4 rounded-lg bg-red-500/20 px-4 py-2 text-red-400 transition-colors hover:bg-red-500/30"
             >
-              Ricarica la pagina
+              Reload the page
             </button>
           </div>
         </div>
