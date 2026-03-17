@@ -6,6 +6,8 @@ import { generateNextletter, generateCrystalQuotes } from '../services/geminiSer
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { CrystalQuote } from '../types/crystal';
+import { useCrystalPlan } from '../context/CrystalPlanContext';
+import { ACTION_CATALOG, formatCredits, getPlanLabel } from '../lib/crystalPlans';
 
 interface NextletterProps {
   user: any;
@@ -24,6 +26,7 @@ const PREDEFINED_TOPICS = [
 ];
 
 export function Nextletter({ user, isGuest, onLogin, onGenerateCard }: NextletterProps) {
+  const { entitlements, runMeteredAction } = useCrystalPlan();
   const [activeEdition, setActiveEdition] = useState<'global' | 'personal'>('global');
   const [isBuilding, setIsBuilding] = useState(false);
   const [selectedTopics, setSelectedTopics] = useState<string[]>([]);
@@ -101,7 +104,15 @@ export function Nextletter({ user, isGuest, onLogin, onGenerateCard }: Nextlette
 
     setIsGenerating(true);
     try {
-      const result = await generateNextletter(allTopics, userContext);
+      const result = await runMeteredAction(
+        ACTION_CATALOG.nextletter_personal,
+        () => generateNextletter(allTopics, userContext),
+        {
+          sourceView: 'nextletter',
+          insufficientCreditsMessage:
+            'La tua Nextletter personale richiede 3 crediti. Passa a Plus o Pro per riceverla con continuita.',
+        }
+      );
       setGeneratedLetter(result);
       setIsBuilding(false);
     } catch (error) {
@@ -390,6 +401,37 @@ export function Nextletter({ user, isGuest, onLogin, onGenerateCard }: Nextlette
                                 <p>{section.historical_context}</p>
                               </div>
                             )}
+                            {section.world_sim?.narrative_arc && (
+                              <div className="rounded-[32px] border border-rose-500/20 bg-rose-500/5 p-8">
+                                <div className="mb-4 flex items-center gap-3">
+                                  <span className="rounded-full border border-rose-500/20 bg-rose-500/10 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-rose-300">
+                                    Oracle WorldSim
+                                  </span>
+                                  <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">
+                                    {section.world_sim.simulation_mode || 'delta sim'}
+                                  </span>
+                                </div>
+                                <p className="text-[15px] text-slate-300 leading-relaxed mb-4">
+                                  {section.world_sim.narrative_arc}
+                                </p>
+                                {section.world_sim.pivotal_actors?.length > 0 && (
+                                  <div className="flex flex-wrap gap-2 mb-4">
+                                    {section.world_sim.pivotal_actors.map((actor: string) => (
+                                      <span key={actor} className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-bold text-white">
+                                        {actor}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                                {section.world_sim.prediction_market_frame?.outcome && (
+                                  <p className="text-[13px] text-slate-400 leading-relaxed">
+                                    Outcome: <span className="text-slate-200">{section.world_sim.prediction_market_frame.outcome}</span>
+                                    {' · '}
+                                    Horizon: <span className="text-slate-200">{section.world_sim.prediction_market_frame.horizon}</span>
+                                  </p>
+                                )}
+                              </div>
+                            )}
                           </div>
                           <div className="inline-flex items-center gap-4 text-sky-400 font-sans text-lg bg-sky-500/5 px-8 py-8 rounded-[40px] border border-sky-500/20 w-full shadow-inner">
                             <ArrowRight className="w-6 h-6 flex-shrink-0 text-sky-500" /> 
@@ -426,6 +468,18 @@ export function Nextletter({ user, isGuest, onLogin, onGenerateCard }: Nextlette
               <div className="bg-[#0a0a0a] p-10 md:p-20 rounded-[48px] border border-white/10 shadow-2xl relative overflow-hidden">
                 <div className="absolute inset-0 premium-gradient opacity-5 pointer-events-none" />
                 <div className="relative z-10">
+                  <div className="mb-10 flex flex-wrap items-center justify-between gap-4 rounded-[28px] border border-white/10 bg-white/5 p-6">
+                    <div>
+                      <div className="text-[10px] font-bold uppercase tracking-[0.25em] text-slate-500">PERSONAL EDITION</div>
+                      <div className="mt-2 text-lg font-bold text-white">
+                        {getPlanLabel(entitlements.plan)} · {entitlements.creditsBalance} crediti disponibili
+                      </div>
+                    </div>
+                    <div className="rounded-full border border-sky-500/20 bg-sky-500/10 px-4 py-2 text-sm font-bold text-sky-300">
+                      Costo: {formatCredits(ACTION_CATALOG.nextletter_personal.cost)}
+                    </div>
+                  </div>
+
                   <div className="text-center mb-16">
                     <h2 className="text-4xl md:text-5xl font-display font-bold text-white mb-6 tracking-tight">Cosa ti interessa?</h2>
                     <p className="text-xl text-slate-400 font-medium max-w-xl mx-auto leading-relaxed">Seleziona gli argomenti per la tua Nextletter personalizzata. Analizzeremo i prossimi 30 giorni per te.</p>
@@ -483,7 +537,7 @@ export function Nextletter({ user, isGuest, onLogin, onGenerateCard }: Nextlette
                         </>
                       ) : (
                         <>
-                          <Zap className="w-6 h-6" /> Genera Nextletter
+                          <Zap className="w-6 h-6" /> Genera Nextletter · {formatCredits(ACTION_CATALOG.nextletter_personal.cost)}
                         </>
                       )}
                     </button>
@@ -501,11 +555,11 @@ export function Nextletter({ user, isGuest, onLogin, onGenerateCard }: Nextlette
                   <p className="text-xl text-slate-400 font-medium mb-12 max-w-lg mx-auto leading-relaxed">
                     Scegli gli argomenti che ti interessano di più e l'AI scriverà un'edizione personalizzata piena di consigli pratici e pronostici per i prossimi 30 giorni.
                   </p>
-                  <button 
+                  <button
                     onClick={() => setIsBuilding(true)}
                     className="px-12 py-6 bg-white text-black rounded-2xl font-bold hover:bg-sky-50 transition-all shadow-2xl inline-flex items-center gap-3 text-xl"
                   >
-                    <Plus className="w-6 h-6" /> Inizia ora
+                    <Plus className="w-6 h-6" /> Inizia ora · {formatCredits(ACTION_CATALOG.nextletter_personal.cost)}
                   </button>
                 </div>
               </div>

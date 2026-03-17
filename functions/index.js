@@ -4,9 +4,17 @@ const { GoogleGenAI, Type } = require("@google/genai");
 const { onRequest } = require("firebase-functions/v2/https");
 const { defineSecret } = require("firebase-functions/params");
 const googleTrends = require("google-trends-api");
+const Stripe = require("stripe");
+const {
+  getWorldSimDigest,
+  enhanceCardWithWorldSim,
+  enhanceNextletterWithWorldSim,
+} = require("./worldSim");
 
 const GEMINI_API_KEY = defineSecret("GEMINI_API_KEY");
 const NIXTLA_API_KEY = defineSecret("NIXTLA_API_KEY");
+const STRIPE_SECRET_KEY = defineSecret("STRIPE_SECRET_KEY");
+const STRIPE_WEBHOOK_SECRET = defineSecret("STRIPE_WEBHOOK_SECRET");
 
 const SUPPORTED_DOMAINS = [
   "A.1.macro.gdp_growth",
@@ -53,6 +61,28 @@ if (!admin.apps.length) {
 
 const db = admin.firestore();
 
+const PLAN_OFFERS = {
+  free: { creditsPerCycle: 15, watchlistLimit: 5 },
+  plus: { creditsPerCycle: 120, watchlistLimit: 25 },
+  pro: { creditsPerCycle: 400, watchlistLimit: 100 },
+};
+
+const STRIPE_PRICING = {
+  plus: { month: 1200, year: 9900 },
+  pro: { month: 2900, year: 24900 },
+};
+
+const DEFAULT_PROFILE_AI_FREE_MESSAGES = 10;
+const PLAN_ORDER = ["free", "plus", "pro"];
+
+function getStripe() {
+  const apiKey = STRIPE_SECRET_KEY.value();
+  if (!apiKey) {
+    throw new Error("STRIPE_SECRET_KEY non configurata per Firebase Functions.");
+  }
+  return new Stripe(apiKey, { apiVersion: "2025-02-24.acacia" });
+}
+
 function getBody(req) {
   if (!req.body) return {};
   if (typeof req.body === "string") {
@@ -87,6 +117,22 @@ function createQueryHash(queryText) {
   return crypto.createHash("sha256").update(queryText.trim().toLowerCase()).digest("hex");
 }
 
+function createCardCacheKey(queryText, queryPlan = {}, engine = "standard") {
+  return createQueryHash(
+    JSON.stringify({
+      queryText: queryText.trim().toLowerCase(),
+      engine,
+      domain: queryPlan?.domain || queryPlan?.domain_id || "",
+      horizons: Array.isArray(queryPlan?.horizons) ? queryPlan.horizons.map((item) => item?.horizon_id || "") : [],
+      filters: queryPlan?.filters || {},
+      constraints: queryPlan?.constraints || {},
+      entities: Array.isArray(queryPlan?.entities)
+        ? queryPlan.entities.map((entity) => `${entity?.entity_type || "entity"}:${entity?.label || entity?.entity_id || ""}`)
+        : [],
+    })
+  );
+}
+
 function clamp01(value, fallback = 0.5) {
   const num = Number(value);
   if (!Number.isFinite(num)) return fallback;
@@ -96,6 +142,370 @@ function clamp01(value, fallback = 0.5) {
 
 function sanitizeList(list) {
   return Array.isArray(list) ? list.filter((item) => typeof item === "string" && item.trim()) : [];
+}
+
+function isPlan(value) {
+  return PLAN_ORDER.includes(value);
+}
+
+function isPlanStatus(value) {
+  return ["active", "past_due", "canceled"].includes(value);
+}
+
+function planAtLeast(plan, requiredPlan) {
+  return PLAN_ORDER.indexOf(plan) >= PLAN_ORDER.indexOf(requiredPlan);
+}
+
+function getNextCreditResetDate(from = new Date()) {
+  const next = new Date(from);
+  next.setMonth(next.getMonth() + 1);
+  return next;
+}
+
+function parseTimestamp(value) {
+  if (!value) return null;
+  if (value instanceof Date) return value;
+  if (typeof value?.toDate === "function") return value.toDate();
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function toFiniteNumber(value, fallback) {
+  const next = Number(value);
+  return Number.isFinite(next) ? next : fallback;
+}
+
+function createDefaultEntitlements(plan = "free", now = new Date()) {
+  return {
+    plan,
+    planStatus: "active",
+    creditsBalance: PLAN_OFFERS[plan].creditsPerCycle,
+    creditsCycleAmount: PLAN_OFFERS[plan].creditsPerCycle,
+    creditsResetAt: getNextCreditResetDate(now),
+    profileAiFreeMessagesRemaining: DEFAULT_PROFILE_AI_FREE_MESSAGES,
+    watchlistLimit: PLAN_OFFERS[plan].watchlistLimit,
+    planExpiresAt: null,
+    stripeCustomerId: null,
+    stripeSubscriptionId: null,
+    billingInterval: null,
+  };
+}
+
+function downgradeToFree(state, now = new Date()) {
+  const defaults = createDefaultEntitlements("free", now);
+  return {
+    ...state,
+    ...defaults,
+  };
+}
+
+function normalizeUserState(data = {}, now = new Date()) {
+  const plan = isPlan(data.plan) ? data.plan : "free";
+  const defaults = createDefaultEntitlements(plan, now);
+  const normalized = {
+    plan,
+    planStatus: isPlanStatus(data.planStatus) ? data.planStatus : defaults.planStatus,
+    creditsBalance: toFiniteNumber(data.creditsBalance, defaults.creditsBalance),
+    creditsCycleAmount: toFiniteNumber(data.creditsCycleAmount, PLAN_OFFERS[plan].creditsPerCycle),
+    creditsResetAt: parseTimestamp(data.creditsResetAt) || defaults.creditsResetAt,
+    profileAiFreeMessagesRemaining: toFiniteNumber(
+      data.profileAiFreeMessagesRemaining,
+      DEFAULT_PROFILE_AI_FREE_MESSAGES
+    ),
+    watchlistLimit: toFiniteNumber(data.watchlistLimit, PLAN_OFFERS[plan].watchlistLimit),
+    planExpiresAt: parseTimestamp(data.planExpiresAt),
+    stripeCustomerId: typeof data.stripeCustomerId === "string" ? data.stripeCustomerId : null,
+    stripeSubscriptionId: typeof data.stripeSubscriptionId === "string" ? data.stripeSubscriptionId : null,
+    billingInterval: data.billingInterval === "year" || data.billingInterval === "month" ? data.billingInterval : null,
+  };
+
+  if (normalized.planStatus === "canceled" && normalized.planExpiresAt && normalized.planExpiresAt <= now) {
+    return downgradeToFree(normalized, now);
+  }
+
+  if (normalized.creditsResetAt <= now) {
+    normalized.creditsBalance = normalized.creditsCycleAmount;
+    normalized.creditsResetAt = getNextCreditResetDate(now);
+  }
+
+  return normalized;
+}
+
+function buildUserEntitlementPatch(userState, decodedToken, existingData = {}) {
+  const patch = {
+    email: decodedToken?.email || existingData.email || "no-email@example.com",
+    displayName: decodedToken?.name || existingData.displayName || "User",
+    photoURL: decodedToken?.picture || existingData.photoURL || "",
+    plan: userState.plan,
+    planStatus: userState.planStatus,
+    creditsBalance: userState.creditsBalance,
+    creditsCycleAmount: userState.creditsCycleAmount,
+    creditsResetAt: admin.firestore.Timestamp.fromDate(userState.creditsResetAt),
+    profileAiFreeMessagesRemaining: userState.profileAiFreeMessagesRemaining,
+    watchlistLimit: userState.watchlistLimit,
+    planExpiresAt: userState.planExpiresAt ? admin.firestore.Timestamp.fromDate(userState.planExpiresAt) : null,
+    stripeCustomerId: userState.stripeCustomerId,
+    stripeSubscriptionId: userState.stripeSubscriptionId,
+    billingInterval: userState.billingInterval,
+  };
+
+  if (!existingData.createdAt) {
+    patch.createdAt = admin.firestore.FieldValue.serverTimestamp();
+  }
+
+  return patch;
+}
+
+async function syncUserState(uid, decodedToken) {
+  const userRef = db.collection("users").doc(uid);
+  return db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(userRef);
+    const data = snapshot.exists ? snapshot.data() || {} : {};
+    const normalized = normalizeUserState(data);
+    transaction.set(userRef, buildUserEntitlementPatch(normalized, decodedToken, data), { merge: true });
+    return normalized;
+  });
+}
+
+function createApiError(code, message, status = 400, details) {
+  const error = new Error(message);
+  error.code = code;
+  error.status = status;
+  error.details = details;
+  return error;
+}
+
+function getSourceView(req, fallback = "app") {
+  const header = req.headers["x-crystal-source-view"];
+  if (typeof header === "string" && header.trim()) {
+    return sanitizeSegment(header, fallback);
+  }
+  return fallback;
+}
+
+function getActionHeader(req) {
+  const header = req.headers["x-crystal-metered-action"];
+  return typeof header === "string" && header.trim() ? header.trim() : null;
+}
+
+function getPredictSpec(queryPlan, sourceView = "search") {
+  const horizon =
+    queryPlan?.filters?.horizon ||
+    queryPlan?.horizons?.[0]?.horizon_id ||
+    "30d";
+  const confidence =
+    queryPlan?.filters?.confidence_preference ||
+    queryPlan?.constraints?.confidence_preference ||
+    "balanced";
+
+  if (horizon === "12m" || confidence === "rigorous") {
+    return {
+      action: sourceView === "dashboard" ? "dashboard_add_card_oracle" : "search_oracle",
+      cost: 5,
+      requiredPlan: "pro",
+      engine: "oracle",
+      horizon,
+      confidence,
+    };
+  }
+
+  if (horizon === "90d" || horizon === "6m") {
+    return {
+      action: sourceView === "dashboard" ? "dashboard_add_card_extended" : "search_extended",
+      cost: 2,
+      requiredPlan: "plus",
+      engine: "extended",
+      horizon,
+      confidence,
+    };
+  }
+
+  return {
+    action: sourceView === "dashboard" ? "dashboard_add_card_standard" : "search_standard",
+    cost: 1,
+    requiredPlan: "free",
+    engine: "standard",
+    horizon,
+    confidence,
+  };
+}
+
+function ensureActionAllowed(userState, actionSpec) {
+  if (!planAtLeast(userState.plan, actionSpec.requiredPlan)) {
+    throw createApiError(
+      actionSpec.requiredPlan === "pro" ? "oracle-plan-required" : "plan-upgrade-required",
+      actionSpec.requiredPlan === "pro"
+        ? "Questa previsione richiede Crystal Pro per attivare Oracle e TimeGPT."
+        : "Questa previsione richiede Crystal Plus o superiore.",
+      402,
+      { requiredPlan: actionSpec.requiredPlan, action: actionSpec.action }
+    );
+  }
+
+  if (userState.creditsBalance < actionSpec.cost) {
+    throw createApiError(
+      "credits-exhausted",
+      `Crediti insufficienti per completare questa azione. Ti servono ${actionSpec.cost} crediti.`,
+      402,
+      { requiredCredits: actionSpec.cost, action: actionSpec.action }
+    );
+  }
+}
+
+async function recordFailedCreditEvent(uid, action, cost, sourceView, meta = {}) {
+  const eventRef = db.collection("users").doc(uid).collection("credit_events").doc();
+  await eventRef.set({
+    action,
+    cost,
+    status: "failed",
+    sourceView,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    meta,
+  });
+}
+
+async function consumeCredits(uid, decodedToken, actionSpec, sourceView, meta = {}) {
+  const userRef = db.collection("users").doc(uid);
+  const eventRef = userRef.collection("credit_events").doc();
+
+  return db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(userRef);
+    const data = snapshot.exists ? snapshot.data() || {} : {};
+    const normalized = normalizeUserState(data);
+    ensureActionAllowed(normalized, actionSpec);
+    const nextState = {
+      ...normalized,
+      creditsBalance: normalized.creditsBalance - actionSpec.cost,
+    };
+
+    transaction.set(userRef, buildUserEntitlementPatch(nextState, decodedToken, data), { merge: true });
+    transaction.set(eventRef, {
+      action: actionSpec.action,
+      cost: actionSpec.cost,
+      status: "succeeded",
+      sourceView,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      meta,
+    });
+    return nextState;
+  });
+}
+
+async function consumeProfileMessage(uid, decodedToken, sourceView, meta = {}) {
+  const userRef = db.collection("users").doc(uid);
+  const eventRef = userRef.collection("credit_events").doc();
+
+  return db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(userRef);
+    const data = snapshot.exists ? snapshot.data() || {} : {};
+    const normalized = normalizeUserState(data);
+    const nextState = { ...normalized };
+    let cost = 0;
+
+    if (nextState.profileAiFreeMessagesRemaining > 0) {
+      nextState.profileAiFreeMessagesRemaining -= 1;
+    } else {
+      ensureActionAllowed(nextState, {
+        action: "profile_ai_message",
+        cost: 1,
+        requiredPlan: "free",
+      });
+      nextState.creditsBalance -= 1;
+      cost = 1;
+    }
+
+    transaction.set(userRef, buildUserEntitlementPatch(nextState, decodedToken, data), { merge: true });
+    transaction.set(eventRef, {
+      action: "profile_ai_message",
+      cost,
+      status: "succeeded",
+      sourceView,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      meta: {
+        ...meta,
+        freeMessage: cost === 0,
+      },
+    });
+    return nextState;
+  });
+}
+
+async function getOrCreateStripeCustomer(uid, decodedToken, existingData = {}) {
+  if (existingData.stripeCustomerId) {
+    return existingData.stripeCustomerId;
+  }
+
+  const stripe = getStripe();
+  const customer = await stripe.customers.create({
+    email: decodedToken?.email || existingData.email || undefined,
+    name: decodedToken?.name || existingData.displayName || undefined,
+    metadata: { uid },
+  });
+
+  await db.collection("users").doc(uid).set(
+    {
+      stripeCustomerId: customer.id,
+    },
+    { merge: true }
+  );
+
+  return customer.id;
+}
+
+async function findUserByStripeCustomerId(customerId) {
+  const snapshot = await db.collection("users").where("stripeCustomerId", "==", customerId).limit(1).get();
+  if (snapshot.empty) return null;
+  return snapshot.docs[0];
+}
+
+async function applyStripeSubscriptionState(uid, subscription, options = {}) {
+  const plan = isPlan(subscription?.metadata?.plan) ? subscription.metadata.plan : "free";
+  const interval = subscription?.metadata?.interval === "year" ? "year" : "month";
+  const periodEnd = subscription?.current_period_end ? new Date(subscription.current_period_end * 1000) : null;
+  const status = subscription?.status || "active";
+  const patch = {};
+  const shouldResetCredits = options.resetCredits === true;
+
+  if (status === "active" || status === "trialing") {
+    const defaults = createDefaultEntitlements(plan);
+    Object.assign(patch, {
+      plan,
+      planStatus: subscription.cancel_at_period_end ? "canceled" : "active",
+      creditsCycleAmount: PLAN_OFFERS[plan].creditsPerCycle,
+      watchlistLimit: PLAN_OFFERS[plan].watchlistLimit,
+      billingInterval: interval,
+      stripeSubscriptionId: subscription.id,
+      stripeCustomerId: subscription.customer,
+      planExpiresAt: periodEnd ? admin.firestore.Timestamp.fromDate(periodEnd) : null,
+    });
+    if (shouldResetCredits) {
+      Object.assign(patch, {
+        creditsBalance: defaults.creditsPerCycle,
+        creditsResetAt: admin.firestore.Timestamp.fromDate(getNextCreditResetDate()),
+      });
+    }
+  } else if (status === "past_due" || status === "unpaid") {
+    Object.assign(patch, {
+      plan,
+      planStatus: "past_due",
+      planExpiresAt: periodEnd ? admin.firestore.Timestamp.fromDate(periodEnd) : null,
+      stripeSubscriptionId: subscription.id,
+      stripeCustomerId: subscription.customer,
+      billingInterval: interval,
+    });
+  } else {
+    const defaults = createDefaultEntitlements("free");
+    Object.assign(patch, {
+      ...defaults,
+      creditsResetAt: admin.firestore.Timestamp.fromDate(defaults.creditsResetAt),
+      planExpiresAt: null,
+      stripeSubscriptionId: null,
+      stripeCustomerId: subscription.customer || null,
+      billingInterval: null,
+    });
+  }
+
+  await db.collection("users").doc(uid).set(patch, { merge: true });
 }
 
 function normalizeCard(card, queryPlan) {
@@ -248,10 +658,10 @@ async function withRetry(fn, retries = 2, delayMs = 2000) {
   }
 }
 
-async function fetchCachedCard(queryText, domain, city) {
+async function fetchCachedCard(queryText, queryPlan, domain, city, engine = "standard") {
   const safeDomain = sanitizeSegment(domain, "general");
   const safeCity = sanitizeSegment(city, "global");
-  const queryHash = createQueryHash(queryText);
+  const queryHash = createCardCacheKey(queryText, queryPlan, engine);
   const docRef = db.doc(`cached_cards/${safeDomain}/${safeCity}/${queryHash}`);
   const snapshot = await docRef.get();
   if (!snapshot.exists) return null;
@@ -261,10 +671,10 @@ async function fetchCachedCard(queryText, domain, city) {
   return data.card_data || null;
 }
 
-async function saveCachedCard(card, queryText, domain, city) {
+async function saveCachedCard(card, queryText, queryPlan, domain, city, engine = "standard") {
   const safeDomain = sanitizeSegment(domain, "general");
   const safeCity = sanitizeSegment(city, "global");
-  const queryHash = createQueryHash(queryText);
+  const queryHash = createCardCacheKey(queryText, queryPlan, engine);
   const ttl = new Date();
   ttl.setHours(ttl.getHours() + 24);
   await db.doc(`cached_cards/${safeDomain}/${safeCity}/${queryHash}`).set(
@@ -274,6 +684,7 @@ async function saveCachedCard(card, queryText, domain, city) {
       city,
       query: queryText,
       query_hash: queryHash,
+      engine,
       card_data: card,
       generated_at: admin.firestore.FieldValue.serverTimestamp(),
       ttl: admin.firestore.Timestamp.fromDate(ttl),
@@ -470,17 +881,30 @@ ${SUPPORTED_DOMAINS.join(", ")}`,
   });
 }
 
-async function predict(queryText, queryPlan, userContext) {
+async function predict(queryText, queryPlan, userContext, options = {}) {
   const domain = queryPlan?.domain || queryPlan?.domain_id || "";
   const city =
     queryPlan?.filters?.location ||
     queryPlan?.entities?.find((entity) => entity.entity_type === "city" || entity.entity_type === "location")?.label ||
     "";
+  const engine = options.engine || "standard";
+  const action = options.action || "search_standard";
+  const cost = Number.isFinite(Number(options.cost)) ? Number(options.cost) : 1;
+  const plan = isPlan(options.plan) ? options.plan : "free";
 
-  if (domain && city) {
-    const cached = await fetchCachedCard(queryText, domain, city);
+  if (domain) {
+    const cached = await fetchCachedCard(queryText, queryPlan, domain, city, engine);
     if (cached) {
-      return { ...cached, _source: "cache" };
+      return {
+        ...cached,
+        _source: "cache",
+        _billing: {
+          action,
+          cost,
+          engine,
+          plan,
+        },
+      };
     }
   }
 
@@ -507,11 +931,14 @@ ${summary}
   }
 
   let timeGptContext = "";
-  if (domain) {
+  if (domain && engine === "oracle") {
     let fh = 7;
     if (Array.isArray(queryPlan?.horizons) && queryPlan.horizons.length > 0) {
       const horizonId = queryPlan.horizons[0]?.horizon_id;
       if (horizonId === "30d") fh = 30;
+      else if (horizonId === "90d") fh = 90;
+      else if (horizonId === "6m") fh = 180;
+      else if (horizonId === "12m") fh = 365;
       else if (horizonId === "14d") fh = 14;
       else if (horizonId === "12w") fh = 84;
     }
@@ -642,11 +1069,41 @@ REGOLE FONDAMENTALI:
     })
   );
 
-  const card = normalizeCard(JSON.parse(response.text || "{}"), queryPlan);
-  if (domain && city) {
-    await saveCachedCard(card, queryText, domain, city);
+  let card = normalizeCard(JSON.parse(response.text || "{}"), queryPlan);
+  try {
+    const worldSimDigest = await getWorldSimDigest({
+      ai,
+      db,
+      admin,
+      withRetry,
+      fetchJson,
+      queryText,
+      queryPlan,
+      userContext,
+      engine,
+      plan,
+      sidecarBaseUrl: process.env.WORLDSIM_BASE_URL,
+      sidecarApiKey: process.env.WORLDSIM_API_KEY,
+    });
+    if (worldSimDigest) {
+      card = enhanceCardWithWorldSim(card, worldSimDigest);
+    }
+  } catch (error) {
+    console.error("WorldSim unavailable:", error);
   }
-  return { ...card, _source: "live-server" };
+  if (domain) {
+    await saveCachedCard(card, queryText, queryPlan, domain, city, engine);
+  }
+  return {
+    ...card,
+    _source: "live-server",
+    _billing: {
+      action,
+      cost,
+      engine,
+      plan,
+    },
+  };
 }
 
 async function chatWithProfileBot(messages) {
@@ -676,7 +1133,7 @@ Fai una domanda alla volta. Quando hai tutto, restituisci anche un riepilogo JSO
   });
 }
 
-async function generateNextletter(interests, userContext) {
+async function generateNextletter(interests, userContext, options = {}) {
   const ai = getGemini();
   const topics = Array.isArray(interests) ? interests.filter(Boolean) : [];
   let contextString = "";
@@ -731,7 +1188,27 @@ OUTPUT JSON:
       },
     })
   );
-  return JSON.parse(response.text || "{}");
+  let letter = JSON.parse(response.text || "{}");
+
+  try {
+    letter = await enhanceNextletterWithWorldSim({
+      ai,
+      db,
+      admin,
+      withRetry,
+      fetchJson,
+      interests: topics,
+      userContext,
+      letter,
+      plan: isPlan(options.plan) ? options.plan : "free",
+      sidecarBaseUrl: process.env.WORLDSIM_BASE_URL,
+      sidecarApiKey: process.env.WORLDSIM_API_KEY,
+    });
+  } catch (error) {
+    console.error("Nextletter WorldSim unavailable:", error);
+  }
+
+  return letter;
 }
 
 async function generateCrystalQuotes() {
@@ -819,7 +1296,7 @@ exports.api = onRequest(
     region: "europe-west1",
     timeoutSeconds: 120,
     memory: "1GiB",
-    secrets: [GEMINI_API_KEY, NIXTLA_API_KEY],
+    secrets: [GEMINI_API_KEY, NIXTLA_API_KEY, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET],
   },
   async (req, res) => {
     if (req.method === "OPTIONS") {
@@ -834,6 +1311,70 @@ exports.api = onRequest(
     const body = getBody(req);
 
     try {
+      if (req.method === "POST" && route === "/billing/stripe-webhook") {
+        const stripe = getStripe();
+        const signature = req.headers["stripe-signature"];
+        const webhookSecret = STRIPE_WEBHOOK_SECRET.value();
+        if (!signature || !webhookSecret || !req.rawBody) {
+          throw createApiError("stripe-webhook-invalid", "Webhook Stripe non verificabile.", 400);
+        }
+
+        const event = stripe.webhooks.constructEvent(req.rawBody, signature, webhookSecret);
+
+        if (event.type === "checkout.session.completed") {
+          const session = event.data.object;
+          if (session.mode === "subscription" && session.subscription && session.metadata?.uid) {
+            const subscription = await stripe.subscriptions.retrieve(session.subscription);
+            await applyStripeSubscriptionState(session.metadata.uid, subscription, { resetCredits: true });
+          }
+        }
+
+        if (event.type === "customer.subscription.created" || event.type === "customer.subscription.updated") {
+          const subscription = event.data.object;
+          const uid = subscription.metadata?.uid;
+          let targetUid = uid;
+          if (!targetUid && subscription.customer) {
+            const userDoc = await findUserByStripeCustomerId(subscription.customer);
+            targetUid = userDoc?.id;
+          }
+          if (targetUid) {
+            await applyStripeSubscriptionState(targetUid, subscription, { resetCredits: event.type === "customer.subscription.created" });
+          }
+        }
+
+        if (event.type === "invoice.payment_succeeded") {
+          const invoice = event.data.object;
+          if (invoice.subscription) {
+            const subscription = await stripe.subscriptions.retrieve(invoice.subscription);
+            const uid = subscription.metadata?.uid;
+            let targetUid = uid;
+            if (!targetUid && subscription.customer) {
+              const userDoc = await findUserByStripeCustomerId(subscription.customer);
+              targetUid = userDoc?.id;
+            }
+            if (targetUid) {
+              await applyStripeSubscriptionState(targetUid, subscription, { resetCredits: true });
+            }
+          }
+        }
+
+        if (event.type === "customer.subscription.deleted") {
+          const subscription = event.data.object;
+          const uid = subscription.metadata?.uid;
+          let targetUid = uid;
+          if (!targetUid && subscription.customer) {
+            const userDoc = await findUserByStripeCustomerId(subscription.customer);
+            targetUid = userDoc?.id;
+          }
+          if (targetUid) {
+            await applyStripeSubscriptionState(targetUid, subscription, { resetCredits: false });
+          }
+        }
+
+        respondJson(res, 200, { received: true });
+        return;
+      }
+
       if (req.method === "GET" && route === "/health") {
         respondJson(res, 200, { ok: true, timestamp: new Date().toISOString() });
         return;
@@ -845,7 +1386,67 @@ exports.api = onRequest(
         return;
       }
 
-      await requireUser(req);
+      const decodedUser = await requireUser(req);
+      const sourceView = getSourceView(
+        req,
+        route === "/predict" ? "search" : route === "/nextletter" ? "nextletter" : route === "/profile-chat" ? "profile" : "app"
+      );
+      const userState = await syncUserState(decodedUser.uid, decodedUser);
+
+      if (req.method === "POST" && route === "/billing/create-checkout-session") {
+        const plan = isPlan(body.plan) && body.plan !== "free" ? body.plan : null;
+        const interval = body.interval === "year" ? "year" : "month";
+        if (!plan) {
+          throw createApiError("invalid-plan", "Piano non valido per il checkout.", 400);
+        }
+
+        const stripe = getStripe();
+        const customerId = await getOrCreateStripeCustomer(decodedUser.uid, decodedUser, userState);
+        const returnUrl =
+          typeof body.returnUrl === "string" && body.returnUrl.startsWith("http")
+            ? body.returnUrl
+            : req.headers.origin || "https://omnicrystal-3b286.web.app";
+
+        const session = await stripe.checkout.sessions.create({
+          mode: "subscription",
+          customer: customerId,
+          success_url: `${returnUrl}${returnUrl.includes("?") ? "&" : "?"}billing=success`,
+          cancel_url: `${returnUrl}${returnUrl.includes("?") ? "&" : "?"}billing=cancelled`,
+          metadata: {
+            uid: decodedUser.uid,
+            plan,
+            interval,
+          },
+          line_items: [
+            {
+              price_data: {
+                currency: "eur",
+                unit_amount: STRIPE_PRICING[plan][interval],
+                recurring: { interval },
+                product_data: {
+                  name: `Crystal ${plan === "plus" ? "Plus" : "Pro"}`,
+                  metadata: {
+                    plan,
+                    interval,
+                  },
+                },
+              },
+              quantity: 1,
+            },
+          ],
+          subscription_data: {
+            metadata: {
+              uid: decodedUser.uid,
+              plan,
+              interval,
+            },
+          },
+          allow_promotion_codes: true,
+        });
+
+        respondJson(res, 200, { url: session.url });
+        return;
+      }
 
       if (req.method === "POST" && route === "/compile-query") {
         const plan = await compileQuery(body.query || "");
@@ -854,21 +1455,80 @@ exports.api = onRequest(
       }
 
       if (req.method === "POST" && route === "/predict") {
-        const card = await predict(body.query || "", body.queryPlan || {}, body.userContext || null);
-        respondJson(res, 200, card);
-        return;
+        const actionSpec = getPredictSpec(body.queryPlan || {}, sourceView === "dashboard" ? "dashboard" : "search");
+        ensureActionAllowed(userState, actionSpec);
+        try {
+          const card = await predict(body.query || "", body.queryPlan || {}, body.userContext || null, {
+            engine: actionSpec.engine,
+            action: actionSpec.action,
+            cost: actionSpec.cost,
+            plan: userState.plan,
+          });
+          await consumeCredits(decodedUser.uid, decodedUser, actionSpec, sourceView, {
+            route: "predict",
+            engine: actionSpec.engine,
+            horizon: actionSpec.horizon,
+            confidence: actionSpec.confidence,
+          });
+          respondJson(res, 200, card);
+          return;
+        } catch (error) {
+          await recordFailedCreditEvent(decodedUser.uid, actionSpec.action, actionSpec.cost, sourceView, {
+            route: "predict",
+            message: error instanceof Error ? error.message : "Unexpected predict failure.",
+          });
+          throw error;
+        }
       }
 
       if (req.method === "POST" && route === "/profile-chat") {
-        const text = await chatWithProfileBot(body.messages || []);
-        respondJson(res, 200, { text });
-        return;
+        try {
+          const text = await chatWithProfileBot(body.messages || []);
+          await consumeProfileMessage(decodedUser.uid, decodedUser, sourceView, {
+            route: "profile-chat",
+            messageCount: Array.isArray(body.messages) ? body.messages.length : 0,
+          });
+          respondJson(res, 200, { text });
+          return;
+        } catch (error) {
+          await recordFailedCreditEvent(
+            decodedUser.uid,
+            "profile_ai_message",
+            userState.profileAiFreeMessagesRemaining > 0 ? 0 : 1,
+            sourceView,
+            {
+              route: "profile-chat",
+              message: error instanceof Error ? error.message : "Unexpected profile chat failure.",
+            }
+          );
+          throw error;
+        }
       }
 
       if (req.method === "POST" && route === "/nextletter") {
-        const letter = await generateNextletter(body.interests || [], body.userContext || null);
-        respondJson(res, 200, letter);
-        return;
+        const actionSpec = {
+          action: "nextletter_personal",
+          cost: 3,
+          requiredPlan: "free",
+        };
+        ensureActionAllowed(userState, actionSpec);
+        try {
+          const letter = await generateNextletter(body.interests || [], body.userContext || null, {
+            plan: userState.plan,
+          });
+          await consumeCredits(decodedUser.uid, decodedUser, actionSpec, sourceView, {
+            route: "nextletter",
+            topicCount: Array.isArray(body.interests) ? body.interests.length : 0,
+          });
+          respondJson(res, 200, letter);
+          return;
+        } catch (error) {
+          await recordFailedCreditEvent(decodedUser.uid, actionSpec.action, actionSpec.cost, sourceView, {
+            route: "nextletter",
+            message: error instanceof Error ? error.message : "Unexpected nextletter failure.",
+          });
+          throw error;
+        }
       }
 
       if (req.method === "POST" && route === "/local-insights") {
@@ -880,9 +1540,15 @@ exports.api = onRequest(
       respondJson(res, 404, { error: `Unknown route: ${route}` });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unexpected server error.";
-      const status = message === "Authentication required." ? 401 : 500;
+      const status =
+        error?.status ||
+        (message === "Authentication required." ? 401 : 500);
       console.error("API error:", error);
-      respondJson(res, status, { error: message });
+      respondJson(res, status, {
+        error: message,
+        code: error?.code || (message === "Authentication required." ? "auth-required" : "server-error"),
+        details: error?.details || null,
+      });
     }
   }
 );

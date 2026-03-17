@@ -2,6 +2,8 @@ import React from 'react';
 import { LayoutDashboard, Search as SearchIcon, Bookmark, Globe2, Bell, User, Gem, Mail } from 'lucide-react';
 import { cn } from './CrystalCard';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useCrystalPlan } from '../context/CrystalPlanContext';
+import { getPlanLabel } from '../lib/crystalPlans';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -14,6 +16,7 @@ interface LayoutProps {
 }
 
 export function Layout({ children, currentView, setCurrentView, user, isGuest, onLogin, onLogout }: LayoutProps) {
+  const { entitlements, openUpgrade } = useCrystalPlan();
   const navItems = [
     { id: 'dashboard', label: 'Per Te', icon: LayoutDashboard, description: 'Un feed decisionale con i segnali che meritano attenzione oggi.' },
     { id: 'search', label: 'Cerca', icon: SearchIcon, description: 'Interroga il motore predittivo con filtri e contesto chiari.' },
@@ -145,6 +148,34 @@ export function Layout({ children, currentView, setCurrentView, user, isGuest, o
             </div>
 
             <div className="flex items-center gap-3">
+              <button
+                onClick={() =>
+                  openUpgrade(
+                    isGuest
+                      ? {
+                          reason: 'login',
+                          title: 'Accedi per attivare Crystal',
+                          description: 'Sblocca crediti mensili, watchlist e previsioni personali con un account gratuito.',
+                          recommendedPlan: 'plus',
+                        }
+                      : {
+                          reason: 'feature',
+                          title: 'Piani Crystal',
+                          description: 'Gestisci crediti, confronta Plus e Pro e sblocca la modalita Oracle.',
+                          recommendedPlan: entitlements.plan === 'pro' ? 'pro' : 'plus',
+                        }
+                  )
+                }
+                className="hidden min-w-[170px] rounded-2xl border border-white/10 bg-[#0a0a0a] px-4 py-3 text-left shadow-sm transition-all hover:border-sky-500/30 hover:bg-white/5 md:block"
+              >
+                <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">
+                  <Gem className="h-3.5 w-3.5 text-sky-400" />
+                  {isGuest ? 'Guest Preview' : `${getPlanLabel(entitlements.plan)} Plan`}
+                </div>
+                <div className="mt-1 text-sm font-bold text-white">
+                  {isGuest ? 'Accedi per attivare i crediti' : `${entitlements.creditsBalance} crediti rimasti`}
+                </div>
+              </button>
               <button className="p-3 bg-[#0a0a0a] border border-white/10 rounded-2xl text-slate-400 hover:bg-white/5 hover:border-white/20 transition-all relative shadow-sm group">
                 <Bell className="w-5 h-5 group-hover:rotate-12 transition-transform" />
                 <span className="absolute top-3 right-3.5 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-[#0a0a0a] animate-pulse" />

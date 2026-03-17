@@ -31,6 +31,47 @@ export interface Driver {
   historical_trend?: { year: number; value: number }[];
 }
 
+export interface PredictionMarketFrame {
+  outcome: string;
+  horizon: string;
+  resolution_criteria: string;
+  reference_market?: string;
+  prior_probability?: number | null;
+}
+
+export interface WorldSimCounterfactual {
+  label: string;
+  outcome: string;
+}
+
+export interface WorldSimDigest {
+  enabled: boolean;
+  simulation_mode: 'cache_hit' | 'delta_simulation' | 'full_rebuild' | 'narrative_only' | string;
+  quality_score: number;
+  graph_coverage: number;
+  agent_convergence: number;
+  graph_age_hours: number;
+  narrative_arc: string;
+  pivotal_actors: string[];
+  intervention_points: string[];
+  counterfactuals: WorldSimCounterfactual[];
+  source_set: string[];
+  scenario_frequencies: {
+    label: string;
+    probability: number;
+  }[];
+  prediction_market_frame?: PredictionMarketFrame | null;
+  probability_delta: number;
+  confidence_delta: number;
+  graph_summary?: string;
+  community_summaries?: string[];
+  tensions?: string[];
+  simulation_id?: string | null;
+  cache_status?: string;
+  generated_at?: string;
+  notes?: string[];
+}
+
 export interface CardData {
   card_id: string;
   card_type: string;
@@ -52,6 +93,14 @@ export interface CardData {
     note?: string;
   }[];
   trust_layer: TrustLayer;
+  world_sim?: WorldSimDigest;
+  _source?: string;
+  _billing?: {
+    action: string;
+    cost: number;
+    engine: 'standard' | 'extended' | 'oracle';
+    plan: 'free' | 'plus' | 'pro';
+  };
 }
 
 export interface CrystalQuote {

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Globe2, TrendingUp, AlertTriangle, ChevronRight, Activity, MapPin, Sparkles, ArrowUpRight, ArrowDownRight, Quote, Calendar, Database, Shield, Bookmark, Check, Loader2, X } from 'lucide-react';
+import { Globe2, TrendingUp, AlertTriangle, ChevronRight, Activity, MapPin, Sparkles, ArrowUpRight, ArrowDownRight, Quote, Calendar, Database, Shield, Bookmark, Check, Loader2, X, Lock } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from './CrystalCard';
 import { generateCrystalQuotes } from '../services/geminiService';
@@ -7,7 +7,17 @@ import { CrystalQuote } from '../types/crystal';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { doc, setDoc, collection, serverTimestamp } from 'firebase/firestore';
 
-export function GlobalDashboards({ user }: { user: any }) {
+export function GlobalDashboards({
+  user,
+  isGuest,
+  onLogin,
+  onNavigate,
+}: {
+  user: any;
+  isGuest?: boolean;
+  onLogin?: () => void;
+  onNavigate?: (view: 'search' | 'watchlist') => void;
+}) {
   const [activeTab, setActiveTab] = useState<'quotes' | 'hazards' | 'pulse'>('quotes');
   const [quotes, setQuotes] = useState<CrystalQuote[]>([]);
   const [isLoadingQuotes, setIsLoadingQuotes] = useState(false);
@@ -64,6 +74,49 @@ export function GlobalDashboards({ user }: { user: any }) {
 
   return (
     <div className="space-y-10">
+      {isGuest && (
+        <section className="overflow-hidden rounded-[40px] border border-white/10 bg-[#0a0a0a] p-8 shadow-2xl shadow-sky-500/5 md:p-10">
+          <div className="flex flex-col gap-8 lg:flex-row lg:items-end lg:justify-between">
+            <div className="max-w-3xl space-y-4">
+              <div className="inline-flex items-center gap-3 rounded-full border border-sky-500/20 bg-sky-500/10 px-4 py-2 text-[10px] font-bold uppercase tracking-[0.28em] text-sky-300">
+                <Sparkles className="h-4 w-4" />
+                Guest Preview
+              </div>
+              <h2 className="text-3xl md:text-5xl font-display font-bold tracking-tight text-white">
+                Il blueprint completo e gia qui.
+              </h2>
+              <p className="max-w-2xl text-base md:text-lg font-medium leading-relaxed text-slate-400">
+                Esplora Crystal Quotes, Hazards Radar e City Pulse. Quando vuoi passare da osservare a prevedere, ti basta un login gratuito.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap gap-3">
+              <button
+                onClick={onLogin}
+                className="inline-flex items-center gap-3 rounded-2xl bg-white px-6 py-4 text-sm font-bold text-black transition-colors hover:bg-slate-100"
+              >
+                <Lock className="h-4 w-4" />
+                Accedi gratis
+              </button>
+              <button
+                onClick={() => onNavigate?.('search')}
+                className="inline-flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-6 py-4 text-sm font-bold text-white transition-colors hover:bg-white/10"
+              >
+                <Sparkles className="h-4 w-4 text-sky-400" />
+                Sblocca Search
+              </button>
+              <button
+                onClick={() => onNavigate?.('watchlist')}
+                className="inline-flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-6 py-4 text-sm font-bold text-white transition-colors hover:bg-white/10"
+              >
+                <Bookmark className="h-4 w-4 text-sky-400" />
+                Sblocca Watchlist
+              </button>
+            </div>
+          </div>
+        </section>
+      )}
+
       {/* Top Stats / Quick Nav */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <motion.div 

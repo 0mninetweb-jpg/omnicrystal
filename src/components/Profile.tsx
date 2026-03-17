@@ -2,8 +2,10 @@ import React, { useState, useEffect, useRef } from 'react';
 import { User, MapPin, Briefcase, Tag, Save, Loader2, Lock, MessageSquare, Send } from 'lucide-react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
-import { chatWithProfileBot } from '../services/geminiService';
+import { chatWithProfileBot, withServerRequestContext } from '../services/geminiService';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useCrystalPlan } from '../context/CrystalPlanContext';
+import { ACTION_CATALOG, formatCredits, getPlanLabel } from '../lib/crystalPlans';
 
 interface ProfileProps {
   user: any;
@@ -17,6 +19,7 @@ interface ChatMessage {
 }
 
 export function Profile({ user, isGuest, onLogin }: ProfileProps) {
+  const { entitlements, runMeteredAction } = useCrystalPlan();
   const [location, setLocation] = useState('');
   const [profession, setProfession] = useState('');
   const [interests, setInterests] = useState('');
@@ -60,7 +63,17 @@ export function Profile({ user, isGuest, onLogin }: ProfileProps) {
     setIsChatLoading(true);
 
     try {
-      const response = await chatWithProfileBot(newMessages);
+      const response =
+        entitlements.profileAiFreeMessagesRemaining > 0
+          ? await withServerRequestContext(
+              { sourceView: 'profile', meteredAction: ACTION_CATALOG.profile_ai_message.action },
+              () => chatWithProfileBot(newMessages)
+            )
+          : await runMeteredAction(ACTION_CATALOG.profile_ai_message, () => chatWithProfileBot(newMessages), {
+              sourceView: 'profile',
+              insufficientCreditsMessage:
+                'Dopo i primi messaggi gratuiti, il profilo AI usa 1 credito per messaggio. Passa a Plus o Pro per continuare.',
+            });
       
       // Check if response contains JSON block
       const jsonMatch = response.match(/```json\n([\s\S]*?)\n```/);
@@ -121,7 +134,10 @@ export function Profile({ user, isGuest, onLogin }: ProfileProps) {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user) return;
+    if (!user) {
+      onLogin();
+      return;
+    }
 
     setIsSaving(true);
     setMessage('');
@@ -160,9 +176,22 @@ export function Profile({ user, isGuest, onLogin }: ProfileProps) {
         </p>
       </div>
 
+      <div className="flex flex-wrap items-center gap-3 rounded-[28px] border border-white/10 bg-white/5 p-5">
+        <span className="rounded-full bg-sky-500/10 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-sky-300">
+          {isGuest ? 'Guest' : getPlanLabel(entitlements.plan)}
+        </span>
+        <span className="text-sm font-bold text-white">
+          {isGuest
+            ? 'Accedi per attivare il profilo intelligente.'
+            : entitlements.profileAiFreeMessagesRemaining > 0
+              ? `${entitlements.profileAiFreeMessagesRemaining} messaggi AI gratuiti rimasti`
+              : `Messaggi AI a ${formatCredits(ACTION_CATALOG.profile_ai_message.cost)}`}
+        </span>
+      </div>
+
       {!showChat ? (
         <button
-          onClick={() => setShowChat(true)}
+          onClick={() => (isGuest ? onLogin() : setShowChat(true))}
           className="w-full p-6 bg-gradient-to-r from-sky-500/10 to-indigo-500/10 border border-white/10 rounded-[32px] flex items-center justify-between group hover:shadow-xl hover:shadow-sky-500/5 transition-all"
         >
           <div className="flex items-center gap-4">
@@ -170,8 +199,14 @@ export function Profile({ user, isGuest, onLogin }: ProfileProps) {
               <MessageSquare className="w-6 h-6" />
             </div>
             <div className="text-left">
-              <h3 className="text-lg font-bold text-white">Configura con l'Assistente AI</h3>
-              <p className="text-sm text-sky-400/80 font-medium">Rispondi a 3 semplici domande per creare il tuo profilo</p>
+              <h3 className="text-lg font-bold text-white">
+                {isGuest ? 'Accedi per usare l Assistente AI' : 'Configura con l Assistente AI'}
+              </h3>
+              <p className="text-sm text-sky-400/80 font-medium">
+                {isGuest
+                  ? 'I primi 10 messaggi sono inclusi gratis nel profilo.'
+                  : 'Rispondi a 3 semplici domande per creare il tuo profilo'}
+              </p>
             </div>
           </div>
           <div className="w-10 h-10 bg-white/5 rounded-full flex items-center justify-center shadow-sm text-sky-400 group-hover:bg-sky-500 group-hover:text-white transition-colors">

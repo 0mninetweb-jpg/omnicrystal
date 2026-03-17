@@ -20,6 +20,14 @@ service cloud.firestore {
         email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
     }
 
+    function isValidPlan(plan) {
+      return plan is string && (plan == 'free' || plan == 'plus' || plan == 'pro');
+    }
+
+    function isValidPlanStatus(status) {
+      return status is string && (status == 'active' || status == 'past_due' || status == 'canceled');
+    }
+
     function isValidUser(data) {
       return hasRequiredFields(data, ['email', 'createdAt']) &&
         isValidEmail(data.email) &&
@@ -28,7 +36,18 @@ service cloud.firestore {
         (!('profession' in data) || data.profession is string) &&
         (!('displayName' in data) || data.displayName is string) &&
         (!('photoURL' in data) || data.photoURL is string) &&
-        (!('interests' in data) || data.interests is list);
+        (!('interests' in data) || data.interests is list) &&
+        (!('plan' in data) || isValidPlan(data.plan)) &&
+        (!('planStatus' in data) || isValidPlanStatus(data.planStatus)) &&
+        (!('creditsBalance' in data) || data.creditsBalance is number) &&
+        (!('creditsCycleAmount' in data) || data.creditsCycleAmount is number) &&
+        (!('creditsResetAt' in data) || data.creditsResetAt is timestamp) &&
+        (!('profileAiFreeMessagesRemaining' in data) || data.profileAiFreeMessagesRemaining is number) &&
+        (!('watchlistLimit' in data) || data.watchlistLimit is number) &&
+        (!('planExpiresAt' in data) || data.planExpiresAt == null || data.planExpiresAt is timestamp) &&
+        (!('stripeCustomerId' in data) || data.stripeCustomerId == null || data.stripeCustomerId is string) &&
+        (!('stripeSubscriptionId' in data) || data.stripeSubscriptionId == null || data.stripeSubscriptionId is string) &&
+        (!('billingInterval' in data) || data.billingInterval == null || data.billingInterval is string);
     }
 
     function isValidCard(data) {
@@ -86,6 +105,10 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    match /world_sim_cache/{document=**} {
+      allow read, write: if false;
+    }
+
     match /cached_cards/{domain}/{city}/{cardId} {
       allow read: if isAuthenticated();
       allow write: if false;
@@ -120,6 +143,11 @@ service cloud.firestore {
         allow update: if isOwner(userId) && isValidSavedQuote(request.resource.data) &&
           request.resource.data.savedAt == resource.data.savedAt;
         allow delete: if isOwner(userId);
+      }
+
+      match /credit_events/{eventId} {
+        allow read: if isOwner(userId);
+        allow write: if false;
       }
     }
   }

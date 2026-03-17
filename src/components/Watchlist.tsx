@@ -4,6 +4,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from './CrystalCard';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { collection, onSnapshot, doc, setDoc, deleteDoc, query, orderBy, serverTimestamp } from 'firebase/firestore';
+import { useCrystalPlan } from '../context/CrystalPlanContext';
+import { getPlanLabel } from '../lib/crystalPlans';
 
 interface WatchlistProps {
   user: any;
@@ -12,9 +14,11 @@ interface WatchlistProps {
 }
 
 export function Watchlist({ user, isGuest, onLogin }: WatchlistProps) {
+  const { entitlements, openUpgrade } = useCrystalPlan();
   const [isAdding, setIsAdding] = useState(false);
   const [newEntity, setNewEntity] = useState('');
   const [watchlistItems, setWatchlistItems] = useState<any[]>([]);
+  const [limitMessage, setLimitMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) {
@@ -62,6 +66,24 @@ export function Watchlist({ user, isGuest, onLogin }: WatchlistProps) {
 
   const handleAddEntity = async () => {
     if (!newEntity.trim() || !user) return;
+
+    if (watchlistItems.length >= entitlements.watchlistLimit) {
+      if (entitlements.plan === 'pro') {
+        setLimitMessage('Hai raggiunto il limite massimo della watchlist Pro.');
+      } else {
+        openUpgrade({
+          reason: 'feature',
+          title: 'La tua watchlist vuole piu spazio',
+          description:
+            entitlements.plan === 'free'
+              ? 'Free include fino a 5 entita. Passa a Plus per monitorarne 25.'
+              : 'Plus include fino a 25 entita. Passa a Pro per arrivare a 100.',
+          recommendedPlan: entitlements.plan === 'free' ? 'plus' : 'pro',
+          sourceView: 'watchlist',
+        });
+      }
+      return;
+    }
     
     const path = `users/${user.uid}/watchlist`;
     try {
@@ -76,6 +98,7 @@ export function Watchlist({ user, isGuest, onLogin }: WatchlistProps) {
       });
       setNewEntity('');
       setIsAdding(false);
+      setLimitMessage(null);
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, path);
     }
@@ -100,6 +123,14 @@ export function Watchlist({ user, isGuest, onLogin }: WatchlistProps) {
           <h2 className="text-3xl font-display font-bold text-slate-900 mb-2">La tua Watchlist</h2>
           <p className="text-slate-500 font-medium">Monitora entità e domini specifici per ricevere alert predittivi.</p>
         </div>
+        {!isGuest && (
+          <div className="inline-flex items-center gap-3 rounded-2xl border border-indigo-100 bg-white px-4 py-3 text-sm font-bold text-slate-700 shadow-sm">
+            <span>{watchlistItems.length} / {entitlements.watchlistLimit}</span>
+            <span className="rounded-full bg-indigo-50 px-3 py-1 text-[10px] uppercase tracking-[0.18em] text-indigo-600">
+              {getPlanLabel(entitlements.plan)}
+            </span>
+          </div>
+        )}
         {isGuest ? (
           <button 
             onClick={onLogin}
@@ -141,7 +172,10 @@ export function Watchlist({ user, isGuest, onLogin }: WatchlistProps) {
                 <input 
                   type="text" 
                   value={newEntity}
-                  onChange={(e) => setNewEntity(e.target.value)}
+                  onChange={(e) => {
+                    setNewEntity(e.target.value);
+                    if (limitMessage) setLimitMessage(null);
+                  }}
                   onKeyDown={(e) => e.key === 'Enter' && handleAddEntity()}
                   placeholder="Es: Milano, Giappone, Semiconduttori..."
                   className="flex-1 px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-slate-700"
@@ -158,6 +192,9 @@ export function Watchlist({ user, isGuest, onLogin }: WatchlistProps) {
                   </button>
                 </div>
               </div>
+              {limitMessage && (
+                <p className="mt-4 text-sm font-bold text-rose-500">{limitMessage}</p>
+              )}
             </div>
           </motion.div>
         )}

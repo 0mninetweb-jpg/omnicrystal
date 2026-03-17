@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { CardData } from '../types/crystal';
-import { ShieldCheck, AlertTriangle, Clock, Info, ChevronRight, TrendingUp, TrendingDown, Minus, Share2, Bookmark, Activity, Sparkles, Check } from 'lucide-react';
+import { ShieldCheck, AlertTriangle, Clock, Info, ChevronRight, TrendingUp, TrendingDown, Minus, Share2, Bookmark, Activity, Sparkles, Check, Database } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { LineChart, Line, ResponsiveContainer, YAxis, Tooltip } from 'recharts';
@@ -47,6 +47,13 @@ export function CrystalCard({
     return <AlertTriangle className="w-4 h-4 text-rose-600" />;
   };
 
+  const getWorldSimModeLabel = (mode?: string) => {
+    if (mode === 'cache_hit') return 'Cache hit';
+    if (mode === 'delta_simulation') return 'Delta sim';
+    if (mode === 'full_rebuild') return 'Full rebuild';
+    return 'Narrative only';
+  };
+
   const handleShare = async () => {
     const trustStamp = `Fiducia ${Math.round(card.trust_layer.confidence_score * 100)}% • ${card.trust_layer.data_sufficiency_flag} • ${new Date(card.trust_layer.freshness.as_of_utc).toLocaleDateString('it-IT')}`;
     const sharePayload = {
@@ -86,6 +93,12 @@ export function CrystalCard({
               <span className="text-[10px] font-bold text-sky-400 uppercase tracking-[0.2em] bg-sky-500/10 px-3 py-1 rounded-full border border-sky-500/20">
                 {card.domain?.split('.').pop()?.replace(/_/g, ' ') || 'PREVISIONE'}
               </span>
+              {card.world_sim?.enabled && (
+                <span className="text-[10px] font-bold text-rose-300 uppercase tracking-[0.2em] bg-rose-500/10 px-3 py-1 rounded-full border border-rose-500/20 flex items-center gap-1.5">
+                  <Sparkles className="w-3 h-3" />
+                  Oracle WorldSim
+                </span>
+              )}
               {card.stakes_level && (
                 <span className={cn(
                   "text-[10px] font-bold uppercase tracking-[0.2em] px-3 py-1 rounded-full border flex items-center gap-1.5",
@@ -311,6 +324,76 @@ export function CrystalCard({
         </div>
       )}
 
+      {card.world_sim?.enabled && (
+        <div className="px-8 py-8 border-t border-white/5 bg-rose-500/5">
+          <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
+            <h4 className="text-[10px] font-bold text-rose-300 uppercase tracking-[0.25em] flex items-center gap-2">
+              <Sparkles className="w-4 h-4" /> ORACLE WORLD SIM
+            </h4>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="rounded-full border border-rose-500/20 bg-rose-500/10 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-rose-200">
+                {getWorldSimModeLabel(card.world_sim.simulation_mode)}
+              </span>
+              <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-300">
+                Quality {Math.round(card.world_sim.quality_score * 100)}%
+              </span>
+            </div>
+          </div>
+
+          {card.world_sim.narrative_arc && (
+            <p className="text-[15px] font-medium text-slate-300 leading-relaxed mb-6">
+              {card.world_sim.narrative_arc}
+            </p>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {card.world_sim.pivotal_actors.length > 0 && (
+              <div className="rounded-3xl border border-white/10 bg-[#050505] p-5">
+                <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500 mb-3">Attori pivot</div>
+                <div className="flex flex-wrap gap-2">
+                  {card.world_sim.pivotal_actors.map((actor) => (
+                    <span key={actor} className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-bold text-white">
+                      {actor}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {card.world_sim.intervention_points.length > 0 && (
+              <div className="rounded-3xl border border-white/10 bg-[#050505] p-5">
+                <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500 mb-3">Intervention points</div>
+                <div className="space-y-2">
+                  {card.world_sim.intervention_points.map((point) => (
+                    <div key={point} className="flex items-start gap-3 text-[13px] font-medium text-slate-300">
+                      <div className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-rose-400" />
+                      <span>{point}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {card.world_sim.prediction_market_frame?.outcome && (
+            <div className="mt-4 rounded-3xl border border-white/10 bg-[#050505] p-5">
+              <div className="mb-3 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">
+                <Database className="w-4 h-4 text-sky-400" />
+                Prediction market frame
+              </div>
+              <div className="space-y-2 text-[13px] font-medium text-slate-300">
+                <p><span className="text-slate-500">Outcome:</span> {card.world_sim.prediction_market_frame.outcome}</p>
+                <p><span className="text-slate-500">Horizon:</span> {card.world_sim.prediction_market_frame.horizon}</p>
+                <p><span className="text-slate-500">Resolution:</span> {card.world_sim.prediction_market_frame.resolution_criteria}</p>
+                {card.world_sim.prediction_market_frame.reference_market && (
+                  <p><span className="text-slate-500">Reference:</span> {card.world_sim.prediction_market_frame.reference_market}</p>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Personal Output (Secondary) */}
       {card.personal_output && (
         <div className="px-8 py-8 border-t border-white/5 bg-gradient-to-br from-white/5 to-transparent">
@@ -393,6 +476,28 @@ export function CrystalCard({
                     {card.trust_layer.provenance_summary.license_summary.join(', ')}
                   </span>
                 </div>
+                {card.world_sim?.enabled && (
+                  <>
+                    <div className="flex justify-between items-center">
+                      <span className="uppercase tracking-[0.2em] opacity-50">Graph coverage</span>
+                      <span className="font-mono bg-black/40 px-3 py-1.5 rounded-xl border border-white/10 text-slate-300">
+                        {Math.round(card.world_sim.graph_coverage * 100)}%
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="uppercase tracking-[0.2em] opacity-50">Agent convergence</span>
+                      <span className="font-mono bg-black/40 px-3 py-1.5 rounded-xl border border-white/10 text-slate-300">
+                        {Math.round(card.world_sim.agent_convergence * 100)}%
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="uppercase tracking-[0.2em] opacity-50">Simulation mode</span>
+                      <span className="capitalize bg-black/40 px-3 py-1.5 rounded-xl border border-white/10 text-slate-300">
+                        {getWorldSimModeLabel(card.world_sim.simulation_mode)}
+                      </span>
+                    </div>
+                  </>
+                )}
               </div>
             </motion.div>
           )}

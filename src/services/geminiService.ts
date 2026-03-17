@@ -4,6 +4,13 @@ import { SUPPORTED_DOMAINS } from '../data/domains';
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || process.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '');
 
+type ServerRequestContext = {
+  sourceView?: string;
+  meteredAction?: string;
+};
+
+let activeRequestContext: ServerRequestContext | null = null;
+
 class BackendUnavailableError extends Error {
   constructor(message: string) {
     super(message);
@@ -21,7 +28,13 @@ async function parseServerResponse(response: Response) {
   if (contentType.includes('application/json')) {
     const payload = await response.json();
     if (!response.ok) {
-      throw new Error(payload?.error || payload?.message || `HTTP ${response.status}`);
+      const error = new Error(payload?.error || payload?.message || `HTTP ${response.status}`) as Error & {
+        code?: string;
+        details?: unknown;
+      };
+      error.code = payload?.code;
+      error.details = payload?.details;
+      throw error;
     }
     return payload;
   }
@@ -59,6 +72,14 @@ async function requestServer<T>(
     headers['Content-Type'] = 'application/json';
   }
 
+  if (activeRequestContext?.sourceView) {
+    headers['X-Crystal-Source-View'] = activeRequestContext.sourceView;
+  }
+
+  if (activeRequestContext?.meteredAction) {
+    headers['X-Crystal-Metered-Action'] = activeRequestContext.meteredAction;
+  }
+
   if (requireAuth) {
     if (!auth.currentUser) {
       throw new Error('Devi accedere per usare questa funzione.');
@@ -82,6 +103,16 @@ async function requestServer<T>(
 }
 
 let cachedClientApiKey: string | null = null;
+
+export async function withServerRequestContext<T>(context: ServerRequestContext, fn: () => Promise<T>) {
+  const previousContext = activeRequestContext;
+  activeRequestContext = { ...previousContext, ...context };
+  try {
+    return await fn();
+  } finally {
+    activeRequestContext = previousContext;
+  }
+}
 
 async function getClientAI() {
   if (cachedClientApiKey) {
@@ -118,8 +149,16 @@ async function withRetry<T>(fn: () => Promise<T>, retries = 2, delay = 2000): Pr
   }
 }
 
-function canFallbackToClient(error: unknown) {
-  return error instanceof BackendUnavailableError;
+function canFallbackToClient(error: unknown, options?: { metered?: boolean }) {
+  if (!(error instanceof BackendUnavailableError)) {
+    return false;
+  }
+
+  if (options?.metered) {
+    return import.meta.env.DEV || import.meta.env.VITE_ALLOW_CLIENT_AI_FALLBACK === 'true';
+  }
+
+  return true;
 }
 
 async function compileQueryClient(query: string) {
@@ -378,7 +417,7 @@ export async function predict(query: string, queryPlan: any, userContext?: any) 
   try {
     return await requestServer<any>('predict', { body: { query, queryPlan, userContext } });
   } catch (error) {
-    if (canFallbackToClient(error)) {
+    if (canFallbackToClient(error, { metered: true })) {
       return predictClient(query, queryPlan, userContext);
     }
     throw error;
@@ -390,7 +429,7 @@ export async function chatWithProfileBot(messages: { role: string; content: stri
     const response = await requestServer<{ text: string }>('profile-chat', { body: { messages } });
     return response.text;
   } catch (error) {
-    if (canFallbackToClient(error)) {
+    if (canFallbackToClient(error, { metered: true })) {
       return chatWithProfileBotClient(messages);
     }
     throw error;
@@ -401,7 +440,7 @@ export async function generateNextletter(interests: string[], userContext?: any)
   try {
     return await requestServer<any>('nextletter', { body: { interests, userContext } });
   } catch (error) {
-    if (canFallbackToClient(error)) {
+    if (canFallbackToClient(error, { metered: true })) {
       return generateNextletterClient(interests, userContext);
     }
     throw error;
@@ -423,7 +462,7 @@ export async function getLocalInsights(query: string, entities: any[]) {
   try {
     return await requestServer<any>('local-insights', { body: { query, entities } });
   } catch (error) {
-    if (canFallbackToClient(error)) {
+    if (canFallbackToClient(error, { metered: true })) {
       return getLocalInsightsClient(query, entities);
     }
     throw error;

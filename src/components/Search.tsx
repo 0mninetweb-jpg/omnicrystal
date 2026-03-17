@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Search as SearchIcon, Filter, Sparkles, Loader2, Code2, Database, ChevronDown, ChevronUp, AlertTriangle, MapPin, Gem, Globe2, Lock, Zap, X, TrendingUp } from 'lucide-react';
 import { mockCards } from '../data/mockData';
 import { SUPPORTED_DOMAINS } from '../data/domains';
-import { CrystalCard } from './CrystalCard';
+import { CrystalCard, cn } from './CrystalCard';
 import { CrystalLoader } from './CrystalLoader';
 import { CardData } from '../types/crystal';
 import Markdown from 'react-markdown';
@@ -10,6 +10,8 @@ import { compileQuery, predict, getLocalInsights } from '../services/geminiServi
 import { motion, AnimatePresence } from 'framer-motion';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { doc, setDoc, deleteDoc, getDoc, serverTimestamp } from 'firebase/firestore';
+import { useCrystalPlan } from '../context/CrystalPlanContext';
+import { formatCredits, getPlanLabel, getPredictActionSpec } from '../lib/crystalPlans';
 
 interface SearchProps {
   user: any;
@@ -44,7 +46,33 @@ const CONFIDENCE_LABELS: Record<SearchFilters['confidence'], string> = {
   rigorous: 'Massimo rigore',
 };
 
+const HORIZON_OPTIONS: Array<{
+  value: SearchFilters['horizon'];
+  label: string;
+  badge?: 'Plus' | 'Pro';
+  feature?: 'search_horizon_90d' | 'search_horizon_6m' | 'search_horizon_12m';
+}> = [
+  { value: 'now', label: 'Ora' },
+  { value: '7d', label: '7 giorni' },
+  { value: '30d', label: '30 giorni' },
+  { value: '90d', label: '90 giorni', badge: 'Plus', feature: 'search_horizon_90d' },
+  { value: '6m', label: '6 mesi', badge: 'Plus', feature: 'search_horizon_6m' },
+  { value: '12m', label: '12 mesi', badge: 'Pro', feature: 'search_horizon_12m' },
+];
+
+const CONFIDENCE_OPTIONS: Array<{
+  value: SearchFilters['confidence'];
+  label: string;
+  badge?: 'Pro';
+  feature?: 'search_confidence_rigorous';
+}> = [
+  { value: 'balanced', label: 'Bilanciata' },
+  { value: 'high', label: 'Alta' },
+  { value: 'rigorous', label: 'Massimo rigore', badge: 'Pro', feature: 'search_confidence_rigorous' },
+];
+
 export function Search({ user, isGuest, onLogin, initialQuery }: SearchProps) {
+  const { entitlements, canUseFeature, openUpgrade, runMeteredAction } = useCrystalPlan();
   const [query, setQuery] = useState(initialQuery || '');
   const [hasSearched, setHasSearched] = useState(false);
   const [isLoadingPlan, setIsLoadingPlan] = useState(false);
@@ -58,6 +86,7 @@ export function Search({ user, isGuest, onLogin, initialQuery }: SearchProps) {
   const [error, setError] = useState<string | null>(null);
   const [isCardSaved, setIsCardSaved] = useState(false);
   const [filters, setFilters] = useState<SearchFilters>(DEFAULT_FILTERS);
+  const predictActionSpec = getPredictActionSpec('search', filters);
 
   // Trigger search on mount if initialQuery is provided
   useEffect(() => {
@@ -114,6 +143,41 @@ export function Search({ user, isGuest, onLogin, initialQuery }: SearchProps) {
     if (hasSearched && query.trim()) {
       void handleSearch(query, nextFilters);
     }
+  };
+
+  const handleHorizonChange = (nextHorizon: SearchFilters['horizon']) => {
+    const option = HORIZON_OPTIONS.find((item) => item.value === nextHorizon);
+    if (option?.feature && !canUseFeature(option.feature)) {
+      openUpgrade({
+        reason: 'feature',
+        title: `${option.badge} sblocca ${option.label}`,
+        description:
+          option.badge === 'Pro'
+            ? 'Le previsioni a 12 mesi attivano la modalita Oracle del blueprint.'
+            : 'Gli orizzonti medio-lunghi sono inclusi nel piano Plus.',
+        recommendedPlan: option.badge === 'Pro' ? 'pro' : 'plus',
+        sourceView: 'search',
+      });
+      return;
+    }
+
+    applyFilters({ horizon: nextHorizon });
+  };
+
+  const handleConfidenceChange = (nextConfidence: SearchFilters['confidence']) => {
+    const option = CONFIDENCE_OPTIONS.find((item) => item.value === nextConfidence);
+    if (option?.feature && !canUseFeature(option.feature)) {
+      openUpgrade({
+        reason: 'feature',
+        title: 'Massimo Rigore e una funzione Pro',
+        description: 'La modalita piu rigorosa attiva la pipeline Oracle con segnali premium.',
+        recommendedPlan: 'pro',
+        sourceView: 'search',
+      });
+      return;
+    }
+
+    applyFilters({ confidence: nextConfidence });
   };
 
   const handleSaveCard = async (card: CardData) => {
@@ -231,7 +295,15 @@ export function Search({ user, isGuest, onLogin, initialQuery }: SearchProps) {
         }
       }
 
-      const card = await predict(searchQuery, nextPlan, userContext);
+      const card = await runMeteredAction(
+        getPredictActionSpec('search', activeFilters),
+        () => predict(searchQuery, nextPlan, userContext),
+        {
+          sourceView: 'search',
+          insufficientCreditsMessage:
+            'Ti servono piu crediti per questa previsione. Passa a Plus o Pro per continuare dalla Search.',
+        }
+      );
       
       setGeneratedCard(card);
 
@@ -298,48 +370,87 @@ export function Search({ user, isGuest, onLogin, initialQuery }: SearchProps) {
             ) : (
               <Filter className="w-4 h-4" />
             )}
-            Prevedi
+            {isLoadingPlan || isLoadingPrediction ? 'Prevedi' : `Prevedi · ${formatCredits(predictActionSpec.cost)}`}
           </button>
         </div>
       </motion.form>
 
       {/* Universal Filters */}
-      <div className="flex flex-nowrap overflow-x-auto no-scrollbar gap-4 pb-2 px-4 md:mx-0 md:px-0 md:flex-wrap justify-center max-w-4xl mx-auto">
-        <select 
-          value={filters.horizon}
-          onChange={(e) => applyFilters({ horizon: e.target.value as SearchFilters['horizon'] })}
-          className="shrink-0 px-5 py-3 bg-white border border-slate-200/60 rounded-2xl text-sm font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm cursor-pointer hover:bg-slate-50 transition-all"
-        >
-          <option value="now">Orizzonte: Ora</option>
-          <option value="7d">Orizzonte: 7 giorni</option>
-          <option value="30d">Orizzonte: 30 giorni</option>
-          <option value="90d">Orizzonte: 90 giorni</option>
-          <option value="6m">Orizzonte: 6 mesi</option>
-          <option value="12m">Orizzonte: 12 mesi</option>
-        </select>
-        <select
-          value={filters.geography}
-          onChange={(e) => applyFilters({ geography: e.target.value as SearchFilters['geography'] })}
-          className="shrink-0 px-5 py-3 bg-white border border-slate-200/60 rounded-2xl text-sm font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm cursor-pointer hover:bg-slate-50 transition-all"
-        >
-          <option value="auto">Area: Auto</option>
-          <option value="global">Area: Globale</option>
-          <option value="italy">Area: Italia</option>
-          <option value="rome">Area: Roma</option>
-          <option value="milan">Area: Milano</option>
-        </select>
-        <select
-          value={filters.confidence}
-          onChange={(e) => applyFilters({ confidence: e.target.value as SearchFilters['confidence'] })}
-          className="shrink-0 px-5 py-3 bg-white border border-slate-200/60 rounded-2xl text-sm font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm cursor-pointer hover:bg-slate-50 transition-all"
-        >
-          <option value="balanced">Fiducia: Bilanciata</option>
-          <option value="high">Fiducia: Alta</option>
-          <option value="rigorous">Fiducia: Massimo Rigore</option>
-        </select>
+      <div className="max-w-4xl mx-auto space-y-4">
+        <div className="flex flex-wrap items-center justify-center gap-3 px-4 md:px-0">
+          {HORIZON_OPTIONS.map((option) => {
+            const isLocked = !!option.feature && !canUseFeature(option.feature);
+            return (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => handleHorizonChange(option.value)}
+                className={cn(
+                  'inline-flex items-center gap-2 rounded-2xl border px-4 py-3 text-sm font-bold transition-all',
+                  filters.horizon === option.value
+                    ? 'border-indigo-500 bg-indigo-50 text-indigo-700 shadow-sm'
+                    : 'border-slate-200/70 bg-white text-slate-700 hover:border-indigo-200 hover:bg-slate-50',
+                  isLocked && 'border-amber-200 bg-amber-50 text-amber-700'
+                )}
+              >
+                <span>{option.label}</span>
+                {option.badge && (
+                  <span className={cn(
+                    'rounded-full px-2 py-0.5 text-[10px] uppercase tracking-[0.18em]',
+                    option.badge === 'Pro' ? 'bg-rose-500/10 text-rose-500' : 'bg-sky-500/10 text-sky-500'
+                  )}>
+                    {option.badge}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="flex flex-wrap items-center justify-center gap-3 px-4 md:px-0">
+          <select
+            value={filters.geography}
+            onChange={(e) => applyFilters({ geography: e.target.value as SearchFilters['geography'] })}
+            className="shrink-0 px-5 py-3 bg-white border border-slate-200/60 rounded-2xl text-sm font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm cursor-pointer hover:bg-slate-50 transition-all"
+          >
+            <option value="auto">Area: Auto</option>
+            <option value="global">Area: Globale</option>
+            <option value="italy">Area: Italia</option>
+            <option value="rome">Area: Roma</option>
+            <option value="milan">Area: Milano</option>
+          </select>
+
+          {CONFIDENCE_OPTIONS.map((option) => {
+            const isLocked = !!option.feature && !canUseFeature(option.feature);
+            return (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => handleConfidenceChange(option.value)}
+                className={cn(
+                  'inline-flex items-center gap-2 rounded-2xl border px-4 py-3 text-sm font-bold transition-all',
+                  filters.confidence === option.value
+                    ? 'border-indigo-500 bg-indigo-50 text-indigo-700 shadow-sm'
+                    : 'border-slate-200/70 bg-white text-slate-700 hover:border-indigo-200 hover:bg-slate-50',
+                  isLocked && 'border-rose-200 bg-rose-50 text-rose-700'
+                )}
+              >
+                <span>{option.label}</span>
+                {option.badge && (
+                  <span className="rounded-full bg-rose-500/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-rose-500">
+                    {option.badge}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       <div className="flex flex-wrap justify-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
+        <span className="rounded-full border border-slate-200 bg-white px-3 py-1.5 shadow-sm text-slate-700">
+          {getPlanLabel(entitlements.plan)} · {entitlements.creditsBalance} crediti
+        </span>
         <span className="rounded-full border border-slate-200 bg-white px-3 py-1.5 shadow-sm">
           Scope {GEOGRAPHY_METADATA[filters.geography].label}
         </span>
@@ -348,6 +459,9 @@ export function Search({ user, isGuest, onLogin, initialQuery }: SearchProps) {
         </span>
         <span className="rounded-full border border-slate-200 bg-white px-3 py-1.5 shadow-sm">
           Fiducia {CONFIDENCE_LABELS[filters.confidence]}
+        </span>
+        <span className="rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1.5 shadow-sm text-indigo-700">
+          Costo {formatCredits(predictActionSpec.cost)}
         </span>
       </div>
 
@@ -464,7 +578,11 @@ export function Search({ user, isGuest, onLogin, initialQuery }: SearchProps) {
                               <Sparkles className="w-4 h-4" /> Real-time Data
                             </span>
                             <span className="text-sm font-bold text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full border border-indigo-100">
-                              Gemini 3 Flash
+                              {generatedCard._billing?.engine === 'oracle'
+                                ? 'Oracle / TimeGPT'
+                                : generatedCard._billing?.engine === 'extended'
+                                  ? 'Forecast esteso'
+                                  : 'Forecast standard'}
                             </span>
                             {(generatedCard as any)._source === 'cache' && (
                               <span className="text-sm font-bold text-amber-600 bg-amber-50 px-3 py-1 rounded-full flex items-center gap-1.5 border border-amber-100">

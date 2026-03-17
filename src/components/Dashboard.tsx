@@ -8,6 +8,8 @@ import { compileQuery, predict } from '../services/geminiService';
 import { motion, AnimatePresence } from 'framer-motion';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { collection, onSnapshot, doc, setDoc, deleteDoc, query, orderBy, serverTimestamp, getDoc, getDocs, limit } from 'firebase/firestore';
+import { useCrystalPlan } from '../context/CrystalPlanContext';
+import { formatCredits, getPredictActionSpec } from '../lib/crystalPlans';
 
 interface DashboardProps {
   user: any;
@@ -16,6 +18,7 @@ interface DashboardProps {
 }
 
 export function Dashboard({ user, isGuest, onLogin }: DashboardProps) {
+  const { runMeteredAction } = useCrystalPlan();
   const [cards, setCards] = useState<CardData[]>([]);
   const [isAdding, setIsAdding] = useState(false);
   const [newQuery, setNewQuery] = useState('');
@@ -143,7 +146,18 @@ export function Dashboard({ user, isGuest, onLogin }: DashboardProps) {
       const userContext = userDocSnap.exists() ? userDocSnap.data() : undefined;
 
       const plan = await compileQuery(newQuery);
-      const card = await predict(newQuery, plan, userContext);
+      const card = await runMeteredAction(
+        getPredictActionSpec('dashboard', {
+          horizon: plan?.horizons?.[0]?.horizon_id || '30d',
+          confidence: plan?.filters?.confidence_preference || 'balanced',
+        }),
+        () => predict(newQuery, plan, userContext),
+        {
+          sourceView: 'dashboard',
+          insufficientCreditsMessage:
+            'Questa nuova scheda richiede piu crediti. Crystal ti porta sul piano giusto prima di generarne altre.',
+        }
+      );
       
       // Save to Firestore
       const cardPath = `users/${user.uid}/cards/${card.card_id}`;
@@ -224,6 +238,9 @@ export function Dashboard({ user, isGuest, onLogin }: DashboardProps) {
                 className="px-10 py-4 bg-white text-black rounded-2xl font-bold text-lg hover:bg-sky-50 transition-all shadow-xl flex items-center gap-3 group"
               >
                 Monitora nuovo tema
+                <span className="rounded-full bg-black/5 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-slate-600">
+                  Da {formatCredits(1)}
+                </span>
                 <Plus className="w-5 h-5 group-hover:rotate-90 transition-transform" />
               </motion.button>
             )}
@@ -281,6 +298,10 @@ export function Dashboard({ user, isGuest, onLogin }: DashboardProps) {
                         onChange={(e) => setNewQuery(e.target.value)}
                       />
                     </div>
+                    <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-5 py-4 text-sm font-bold text-slate-300">
+                      <Sparkles className="w-4 h-4 text-sky-400" />
+                      Costo stimato: da {formatCredits(1)}. Se nella query chiedi orizzonti lunghi, Crystal applica il costo reale del piano corrispondente.
+                    </div>
                     {error && (
                       <motion.p 
                         initial={{ opacity: 0 }}
@@ -304,7 +325,7 @@ export function Dashboard({ user, isGuest, onLogin }: DashboardProps) {
                         disabled={isLoading || !newQuery.trim()}
                         className="px-10 py-4 bg-sky-500 text-white rounded-2xl text-sm font-bold hover:bg-sky-600 transition-all shadow-xl shadow-sky-500/20 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-3"
                       >
-                        {isLoading ? loadingMessage : 'Crea Previsione'}
+                        {isLoading ? loadingMessage : `Crea previsione · da ${formatCredits(1)}`}
                         {!isLoading && <Sparkles className="w-4 h-4" />}
                       </button>
                     </div>
