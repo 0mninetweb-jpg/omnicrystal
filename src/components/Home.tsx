@@ -20,6 +20,8 @@ import { generateCrystalQuotes } from '../services/geminiService';
 import { CrystalQuote, CardData } from '../types/crystal';
 import { OnboardingState } from '../types/onboarding';
 import { mockCards } from '../data/mockData';
+import { useAppRuntime } from '../context/AppRuntimeContext';
+import { PRODUCT_BRAND, RUNTIME_COPY, SECTION_COPY, WORLD_SIM_BRAND } from '../content/brand';
 import { cn } from './CrystalCard';
 
 type HomeProps = {
@@ -47,7 +49,7 @@ const HERO_EXAMPLES = [
   'L automazione AI nei contact center accelerera entro 6 mesi?',
 ];
 
-const HAZARDS = [
+const SIGNALS_TO_WATCH = [
   { id: 'hazard-1', title: 'Stress energetico europeo', region: 'Europa', probability: 72, horizon: '90d' },
   { id: 'hazard-2', title: 'Rallentamento logistica retail', region: 'Europa centrale', probability: 58, horizon: '30d' },
   { id: 'hazard-3', title: 'Shock reputazionale piattaforme AI', region: 'Globale', probability: 41, horizon: '14d' },
@@ -59,16 +61,16 @@ const CITY_PULSE: Array<{ city: string; signal: string; score: number; trend: 'u
   { city: 'Torino', signal: 'Manifattura in transizione', score: 77, trend: 'flat' },
 ];
 
-const ORACLE_PREVIEWS = [
+const WORLDSIM_PREVIEWS = [
   {
     title: 'Public opinion drift in Europa',
-    subtitle: 'Quando il clima politico cambia, non basta una media. Serve vedere come reagiscono attori e coalizioni.',
-    details: ['Narrative arc', 'Attori pivot', 'Intervention points', 'Prediction market frame'],
+    subtitle: 'Utile quando la previsione dipende da coalizioni, pressione pubblica e reazioni a catena.',
+    details: ['Who moves it', 'Where it can shift', 'What changes the odds'],
   },
   {
     title: 'Escalation geopolitica',
-    subtitle: 'Oracle WorldSim simula dove si propagano le frizioni e quali nodi possono accelerare o assorbire lo shock.',
-    details: ['Graph coverage', 'Agent convergence', 'Freshness', 'Provenance'],
+    subtitle: 'Utile quando uno shock puo propagarsi tra attori e sistemi, non solo nei titoli del giorno.',
+    details: ['Key actors', 'Pressure points', 'Possible spillovers'],
   },
 ];
 
@@ -77,10 +79,6 @@ const GUEST_WATCHLIST: WatchlistPulseItem[] = [
   { id: 'guest-2', entity: 'Italia', type: 'Country', pulse: 'Macro under watch', trend: 'flat', domains: ['Inflation', 'Energy'] },
   { id: 'guest-3', entity: 'AI orchestration', type: 'Industry', pulse: 'Acceleration', trend: 'up', domains: ['Hiring', 'Adoption'] },
 ];
-
-function getConfidenceLabel(card: CardData) {
-  return `${Math.round(card.trust_layer.confidence_score * 100)}% trust`;
-}
 
 function getWatchlistTrendTone(trend?: 'up' | 'down' | 'flat') {
   if (trend === 'up') return 'text-emerald-600 bg-emerald-50 border-emerald-100';
@@ -97,6 +95,7 @@ export function Home({
   onOpenTutorial,
   onboardingState,
 }: HomeProps) {
+  const capabilities = useAppRuntime();
   const [quotes, setQuotes] = useState<CrystalQuote[]>([]);
   const [isLoadingQuotes, setIsLoadingQuotes] = useState(false);
   const [selectedQuote, setSelectedQuote] = useState<CrystalQuote | null>(null);
@@ -111,8 +110,8 @@ export function Home({
       try {
         const result = await generateCrystalQuotes();
         setQuotes((result.quotes || []).slice(0, 3));
-      } catch (error) {
-        console.error('Error fetching quotes:', error);
+      } catch (fetchError) {
+        console.error('Error fetching quotes:', fetchError);
       } finally {
         setIsLoadingQuotes(false);
       }
@@ -148,7 +147,7 @@ export function Home({
 
         setWatchlistItems(items.length > 0 ? items : GUEST_WATCHLIST.slice(0, 2));
       },
-      (error) => handleFirestoreError(error, OperationType.LIST, `users/${user.uid}/watchlist`)
+      (snapshotError) => handleFirestoreError(snapshotError, OperationType.LIST, `users/${user.uid}/watchlist`)
     );
 
     const unsubCards = onSnapshot(
@@ -157,7 +156,7 @@ export function Home({
         const cards = snapshot.docs.map((item) => item.data() as CardData);
         setTodayCards(cards.length > 0 ? cards : mockCards.slice(0, 3));
       },
-      (error) => handleFirestoreError(error, OperationType.LIST, `users/${user.uid}/cards`)
+      (snapshotError) => handleFirestoreError(snapshotError, OperationType.LIST, `users/${user.uid}/cards`)
     );
 
     return () => {
@@ -170,22 +169,22 @@ export function Home({
     () => [
       {
         id: 'firstForecast',
-        title: 'Fai la prima previsione',
+        title: 'Fai il primo forecast',
         description: 'Apri Forecast e prova una domanda semplice a 30 giorni.',
         done: onboardingState.completedChecklist.firstForecast,
         action: () => onForecastIntent(HERO_EXAMPLES[0]),
       },
       {
         id: 'firstWatchlist',
-        title: 'Salva una entita in Watchlist',
+        title: 'Salva una voce in Watchlist',
         description: 'Monitora una citta, un paese o un settore che vuoi seguire.',
         done: onboardingState.completedChecklist.firstWatchlist,
         action: () => onNavigate('watchlist'),
       },
       {
         id: 'openedBriefing',
-        title: 'Apri una briefing edition',
-        description: 'Vedi come Crystal trasforma i segnali in una lettura editoriale utile.',
+        title: 'Apri Nextletter',
+        description: 'Vedi come i segnali diventano una lettura piu ordinata e utile.',
         done: onboardingState.completedChecklist.openedBriefing,
         action: () => onNavigate('nextletter'),
       },
@@ -206,40 +205,39 @@ export function Home({
         savedAt: serverTimestamp(),
       });
       setSavedQuotes((current) => (current.includes(quote.quote_id) ? current : [...current, quote.quote_id]));
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `users/${user.uid}/saved_quotes/${quote.quote_id}`);
+    } catch (saveError) {
+      handleFirestoreError(saveError, OperationType.WRITE, `users/${user.uid}/saved_quotes/${quote.quote_id}`);
     } finally {
       setIsSavingQuote(false);
     }
   };
 
+  const worldSimLabel = capabilities.worldSimAvailable ? WORLD_SIM_BRAND.name : WORLD_SIM_BRAND.previewName;
+
   return (
-    <div className="space-y-10 md:space-y-12">
+    <div className="space-y-8 md:space-y-10">
       <section className="editorial-panel overflow-hidden rounded-[32px] px-6 py-8 md:px-8 md:py-10">
-        <div className="grid gap-8 lg:grid-cols-[1.2fr_0.8fr] lg:items-end">
+        <div className="grid gap-7 lg:grid-cols-[1.2fr_0.8fr] lg:items-end">
           <div>
-            <div className="section-kicker">Prediction Intelligence + World Simulation</div>
+            <div className="section-kicker">{SECTION_COPY.home.heroKicker}</div>
             <h2 className="mt-4 max-w-3xl text-4xl font-display font-semibold tracking-tight text-slate-950 md:text-6xl">
-              Crystal mostra cosa sta cambiando adesso e cosa potrebbe succedere dopo.
+              {SECTION_COPY.home.heroTitle}
             </h2>
-            <p className="mt-5 max-w-2xl text-base leading-8 text-slate-600 md:text-lg">
-              Prediction layer per trasformare una domanda in probabilita e azioni. Oracle WorldSim per vedere come si
-              muovono attori, sistemi e frizioni quando la posta in gioco sale.
-            </p>
+            <p className="mt-5 max-w-2xl text-base leading-8 text-slate-600 md:text-lg">{SECTION_COPY.home.heroBody}</p>
 
             <div className="mt-8 flex flex-wrap gap-3">
               <button
                 onClick={() => onForecastIntent(HERO_EXAMPLES[0])}
                 className="inline-flex items-center gap-2 rounded-full bg-[#1453e8] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#1248c8]"
               >
-                Fai una previsione
+                Fai un forecast
                 <ArrowRight className="h-4 w-4" />
               </button>
               <button
                 onClick={onOpenTutorial}
                 className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
               >
-                Guarda come funziona
+                {PRODUCT_BRAND.tutorialLabel}
               </button>
               {isGuest && (
                 <button
@@ -266,16 +264,17 @@ export function Home({
           </div>
 
           <div className="oracle-panel rounded-[32px] p-6 md:p-7">
-            <div className="section-kicker !text-rose-200">Oracle WorldSim</div>
+            <div className="section-kicker !text-rose-200">{worldSimLabel}</div>
             <h3 className="mt-3 text-2xl font-display font-semibold text-white md:text-3xl">
-              Simula come reagiscono attori e sistemi.
+              Un layer premium per le domande piu delicate.
             </h3>
             <p className="mt-3 text-sm leading-7 text-slate-300">
-              Quando una domanda entra in modalita Oracle, Crystal aggiunge un layer narrativo e causale grounded:
-              narrative arc, attori pivot, intervention points e market frame.
+              {capabilities.worldSimAvailable
+                ? 'Usalo quando il forecast dipende da reazioni a catena, attori chiave e punti di svolta difficili da leggere con un solo numero.'
+                : RUNTIME_COPY.worldSimPreview}
             </p>
             <div className="mt-6 grid gap-3">
-              {ORACLE_PREVIEWS[0].details.map((item) => (
+              {WORLDSIM_PREVIEWS[0].details.map((item) => (
                 <div
                   key={item}
                   className="flex items-center justify-between rounded-[20px] border border-white/10 bg-white/5 px-4 py-3 text-sm font-medium text-white"
@@ -285,9 +284,7 @@ export function Home({
                 </div>
               ))}
             </div>
-            <p className="mt-5 text-xs leading-6 text-slate-400">
-              Oracle arricchisce il forecast. La probabilita finale resta ancorata al motore predittivo base.
-            </p>
+            <p className="mt-5 text-xs leading-6 text-slate-400">{WORLD_SIM_BRAND.honestNote}</p>
           </div>
         </div>
       </section>
@@ -297,13 +294,13 @@ export function Home({
           <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
             <div>
               <div className="section-kicker">First Moves</div>
-              <h3 className="mt-3 text-2xl font-display font-semibold text-slate-950">Tre mosse per capire Crystal.</h3>
+              <h3 className="mt-3 text-2xl font-display font-semibold text-slate-950">Tre mosse per capire il prodotto.</h3>
             </div>
             <button
               onClick={onOpenTutorial}
               className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
             >
-              Replay tutorial
+              {PRODUCT_BRAND.tutorialReplayLabel}
             </button>
           </div>
 
@@ -319,16 +316,16 @@ export function Home({
               >
                 <div className="flex items-start justify-between gap-4">
                   <div>
-                    <div className="text-sm font-semibold text-slate-950">{item.title}</div>
-                    <p className="mt-2 text-sm leading-6 text-slate-600">{item.description}</p>
+                    <div className="text-lg font-display font-semibold text-slate-950">{item.title}</div>
+                    <p className="mt-2 text-sm leading-7 text-slate-600">{item.description}</p>
                   </div>
                   <div
                     className={cn(
-                      'flex h-8 w-8 items-center justify-center rounded-full border',
-                      item.done ? 'border-emerald-200 bg-emerald-500 text-white' : 'border-slate-200 bg-slate-50 text-slate-400'
+                      'flex h-10 w-10 shrink-0 items-center justify-center rounded-full border',
+                      item.done ? 'border-emerald-200 bg-white text-emerald-600' : 'border-slate-200 bg-slate-50 text-slate-400'
                     )}
                   >
-                    {item.done ? <Check className="h-4 w-4" /> : <ArrowRight className="h-4 w-4" />}
+                    {item.done ? <Check className="h-5 w-5" /> : <ArrowRight className="h-4 w-4" />}
                   </div>
                 </div>
               </button>
@@ -337,69 +334,47 @@ export function Home({
         </section>
       )}
 
-      <section className="grid gap-5 xl:grid-cols-[1.25fr_0.75fr]">
+      <section className="grid gap-5 xl:grid-cols-[1.05fr_0.95fr]">
         <div className="editorial-panel rounded-[32px] p-6 md:p-7">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <div className="section-kicker">Today</div>
-              <h3 className="mt-3 text-2xl font-display font-semibold text-slate-950">I segnali che meritano attenzione oggi.</h3>
-            </div>
-            <button
-              onClick={() => onForecastIntent()}
-              className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
-            >
-              Apri Forecast
-            </button>
-          </div>
-
-          <div className="mt-6 grid gap-4 md:grid-cols-3">
+          <div className="section-kicker">Today</div>
+          <h3 className="mt-3 text-2xl font-display font-semibold text-slate-950">I segnali piu utili da guardare adesso.</h3>
+          <div className="mt-6 grid gap-4">
             {todayCards.map((card) => (
-              <button
-                key={card.card_id}
-                onClick={() => onForecastIntent(card.title)}
-                className="rounded-[26px] border border-slate-200 bg-white p-5 text-left shadow-[0_12px_35px_rgba(15,23,42,0.06)] transition hover:-translate-y-0.5 hover:border-slate-300"
-              >
-                <div className="flex items-center justify-between gap-3">
+              <div key={card.card_id} className="rounded-[24px] border border-slate-200 bg-white p-5">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <div className="text-sm font-semibold text-slate-950">{card.title}</div>
+                    <p className="mt-2 text-sm leading-7 text-slate-600">{card.summary}</p>
+                  </div>
                   <span className="rounded-full bg-slate-100 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                    {card.domain.split('.').pop()?.replace(/_/g, ' ') || 'Signal'}
-                  </span>
-                  <span className="rounded-full bg-[#e8eefc] px-3 py-1 text-[11px] font-semibold text-[#1453e8]">
-                    {getConfidenceLabel(card)}
+                    {Math.round(card.trust_layer.confidence_score * 100)}% trust
                   </span>
                 </div>
-                <h4 className="mt-4 text-xl font-display font-semibold leading-tight text-slate-950">{card.title}</h4>
-                <p className="mt-3 text-sm leading-6 text-slate-600">{card.summary}</p>
-                <div className="mt-5 flex items-center justify-between text-xs font-semibold text-slate-500">
-                  <span>{card.verdict || 'Open signal'}</span>
-                  <ArrowRight className="h-4 w-4 text-slate-400" />
-                </div>
-              </button>
+              </div>
             ))}
           </div>
         </div>
 
         <div className="editorial-panel rounded-[32px] p-6 md:p-7">
           <div className="section-kicker">Briefing Preview</div>
-          <h3 className="mt-3 text-2xl font-display font-semibold text-slate-950">Una preview del briefing quotidiano.</h3>
+          <h3 className="mt-3 text-2xl font-display font-semibold text-slate-950">Una preview semplice di Nextletter.</h3>
           <div className="mt-6 space-y-4">
             <div className="rounded-[24px] border border-slate-200 bg-white p-5">
               <div className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
                 <Mail className="h-4 w-4 text-[#1453e8]" />
-                Crystal Briefing
+                Global Edition
               </div>
               <p className="mt-4 text-sm leading-7 text-slate-600">
-                I trend che stanno cambiando il contesto, le probabilita che contano e le mosse da fare prima che il
-                segnale diventi evidente a tutti.
+                I segnali che contano davvero, in una lettura piu ordinata e meno rumorosa.
               </p>
             </div>
             <div className="rounded-[24px] border border-slate-200 bg-white p-5">
               <div className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
                 <Sparkles className="h-4 w-4 text-rose-500" />
-                Oracle layer
+                {worldSimLabel}
               </div>
               <p className="mt-4 text-sm leading-7 text-slate-600">
-                Sulle sezioni piu delicate il briefing puo riusare lo stesso SimulationDigest del forecast, cosi la
-                causalita resta coerente anche nel racconto editoriale.
+                Sui temi piu delicati, Nextletter puo riusare lo stesso layer profondo del forecast per mantenere coerenza tra risposta e racconto.
               </p>
             </div>
           </div>
@@ -417,17 +392,17 @@ export function Home({
         <div className="editorial-panel rounded-[32px] p-6 md:p-7">
           <div className="flex items-center justify-between gap-4">
             <div>
-              <div className="section-kicker">Oracle / WorldSim</div>
+              <div className="section-kicker">{worldSimLabel}</div>
               <h3 className="mt-3 text-2xl font-display font-semibold text-slate-950">Quando entra il layer premium.</h3>
             </div>
           </div>
 
           <div className="mt-6 space-y-4">
-            {ORACLE_PREVIEWS.map((preview) => (
+            {WORLDSIM_PREVIEWS.map((preview) => (
               <div key={preview.title} className="rounded-[24px] border border-slate-200 bg-white p-5">
                 <div className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-rose-500">
                   <Sparkles className="h-4 w-4" />
-                  Oracle reveal
+                  {capabilities.worldSimAvailable ? WORLD_SIM_BRAND.name : WORLD_SIM_BRAND.previewName}
                 </div>
                 <h4 className="mt-3 text-lg font-display font-semibold text-slate-950">{preview.title}</h4>
                 <p className="mt-2 text-sm leading-7 text-slate-600">{preview.subtitle}</p>
@@ -443,6 +418,11 @@ export function Home({
                 </div>
               </div>
             ))}
+            {!capabilities.worldSimAvailable && (
+              <div className="rounded-[24px] border border-amber-200 bg-amber-50 p-4 text-sm leading-7 text-amber-800">
+                {RUNTIME_COPY.worldSimPreview}
+              </div>
+            )}
           </div>
         </div>
 
@@ -450,16 +430,16 @@ export function Home({
           <div className="editorial-panel rounded-[32px] p-6">
             <div className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
               <Radar className="h-4 w-4 text-amber-500" />
-              Hazards
+              Signals to watch
             </div>
             <div className="mt-5 space-y-3">
-              {HAZARDS.map((hazard) => (
+              {SIGNALS_TO_WATCH.map((hazard) => (
                 <div key={hazard.id} className="rounded-[22px] border border-slate-200 bg-white p-4">
                   <div className="flex items-center justify-between gap-4">
                     <div>
                       <div className="text-sm font-semibold text-slate-950">{hazard.title}</div>
                       <div className="mt-1 text-xs font-medium text-slate-500">
-                        {hazard.region} · {hazard.horizon}
+                        {hazard.region} - {hazard.horizon}
                       </div>
                     </div>
                     <div className="rounded-full bg-amber-50 px-3 py-1 text-sm font-semibold text-amber-700">
@@ -503,7 +483,7 @@ export function Home({
           <div className="flex items-center justify-between gap-4">
             <div>
               <div className="section-kicker">Watchlist Pulse</div>
-              <h3 className="mt-3 text-2xl font-display font-semibold text-slate-950">I segnali che stai monitorando.</h3>
+              <h3 className="mt-3 text-2xl font-display font-semibold text-slate-950">I temi che stai seguendo.</h3>
             </div>
             <button
               onClick={() => (isGuest ? onLogin?.() : onNavigate('watchlist'))}
@@ -549,7 +529,7 @@ export function Home({
           <div className="flex items-center justify-between gap-4">
             <div>
               <div className="section-kicker">Crystal Quotes</div>
-              <h3 className="mt-3 text-2xl font-display font-semibold text-slate-950">Le chiamate editoriali della settimana.</h3>
+              <h3 className="mt-3 text-2xl font-display font-semibold text-slate-950">Le letture rapide della settimana.</h3>
             </div>
             {isLoadingQuotes && <Loader2 className="h-5 w-5 animate-spin text-slate-400" />}
           </div>
@@ -590,7 +570,7 @@ export function Home({
               className="relative w-full max-w-3xl overflow-hidden rounded-[32px] border border-white/60 bg-[rgba(251,249,244,0.98)] shadow-[0_32px_90px_rgba(15,23,42,0.22)]"
             >
               <div className="border-b border-slate-200/80 px-6 py-5 md:px-8">
-                <div className="section-kicker">Crystal Quote Analysis</div>
+                <div className="section-kicker">Quote breakdown</div>
                 <h3 className="mt-3 text-3xl font-display font-semibold text-slate-950">&quot;{selectedQuote.text}&quot;</h3>
                 <div className="mt-3 flex items-center gap-3 text-sm font-medium text-slate-500">
                   <Sparkles className="h-4 w-4 text-[#1453e8]" />
@@ -600,7 +580,7 @@ export function Home({
 
               <div className="grid gap-6 px-6 py-6 md:grid-cols-2 md:px-8 md:py-8">
                 <div className="rounded-[24px] border border-slate-200 bg-white p-5">
-                  <div className="section-kicker !text-slate-500">Full Analysis</div>
+                  <div className="section-kicker !text-slate-500">Full read</div>
                   <p className="mt-3 text-sm leading-7 text-slate-600">{selectedQuote.analysis.full_text}</p>
                 </div>
                 <div className="space-y-4">
@@ -616,7 +596,7 @@ export function Home({
                     </div>
                   </div>
                   <div className="rounded-[24px] border border-slate-200 bg-white p-5">
-                    <div className="section-kicker !text-slate-500">Impact & Historical Parallel</div>
+                    <div className="section-kicker !text-slate-500">Impact and parallel</div>
                     <p className="mt-3 text-sm leading-7 text-slate-600">{selectedQuote.analysis.impact}</p>
                     <p className="mt-3 text-sm leading-7 text-slate-500">{selectedQuote.analysis.historical_parallel}</p>
                   </div>
@@ -626,7 +606,7 @@ export function Home({
               <div className="flex flex-col gap-3 border-t border-slate-200/80 bg-white/70 px-6 py-5 md:flex-row md:items-center md:justify-between md:px-8">
                 <div className="flex items-center gap-2 text-sm font-medium text-slate-500">
                   <ShieldCheck className="h-4 w-4 text-emerald-500" />
-                  Segnale editoriale grounded sui trend della settimana.
+                  Una lettura rapida grounded sui trend della settimana.
                 </div>
                 <button
                   onClick={() => void handleSaveQuote(selectedQuote)}

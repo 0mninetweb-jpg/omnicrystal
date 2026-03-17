@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { Check, Gem, Lock, Sparkles, X, Zap } from 'lucide-react';
 import { cn } from './CrystalCard';
 import { formatCredits, formatPrice, getPlanLabel, PLAN_OFFERS } from '../lib/crystalPlans';
+import { PRODUCT_BRAND, WORLD_SIM_BRAND } from '../content/brand';
 import type { BillingInterval, EntitlementSnapshot, PlanId, UpgradeIntent } from '../types/entitlements';
 
 export function UpgradeModal({
@@ -55,7 +56,7 @@ export function UpgradeModal({
                 <div className="space-y-5">
                   <div className="inline-flex items-center gap-3 rounded-full border border-sky-500/20 bg-sky-500/10 px-4 py-2 text-[11px] font-bold uppercase tracking-[0.25em] text-sky-300">
                     <Gem className="h-4 w-4" />
-                    Crystal Membership
+                    {PRODUCT_BRAND.plansTitle}
                   </div>
                   <div>
                     <h2 className="text-3xl md:text-5xl font-display font-bold tracking-tight text-white">
@@ -161,7 +162,7 @@ export function UpgradeModal({
                       ))}
                       {plan === 'pro' && (
                         <div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm font-bold text-rose-200">
-                          Oracle mode e forecast TimeGPT quando la query richiede 12 mesi o Massimo Rigore.
+                          {WORLD_SIM_BRAND.name} e i forecast premium entrano in gioco quando la query richiede 12 mesi o Massimo Rigore.
                         </div>
                       )}
                     </div>
@@ -199,7 +200,7 @@ export function UpgradeModal({
             <div className="relative border-t border-white/10 px-8 py-6 text-sm font-medium text-slate-400 md:px-10">
               <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                 <span>
-                  Le azioni premium consumano crediti solo se la generazione va a buon fine. Esempi: Search standard {formatCredits(1)}, Nextletter personal {formatCredits(3)}.
+                  Le azioni premium consumano crediti solo se la generazione va a buon fine. Esempi: Forecast standard {formatCredits(1)}, Nextletter personal {formatCredits(3)}.
                 </span>
                 {checkoutError && <span className="font-bold text-rose-300">{checkoutError}</span>}
               </div>

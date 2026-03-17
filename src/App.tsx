@@ -10,6 +10,7 @@ import { onAuthStateChanged, User } from 'firebase/auth';
 import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { Loader2 } from 'lucide-react';
 import { CrystalPlanProvider } from './context/CrystalPlanContext';
+import { AppRuntimeProvider } from './context/AppRuntimeContext';
 import { createDefaultEntitlementFields } from './lib/crystalPlans';
 import { OnboardingModal } from './components/OnboardingModal';
 import {
@@ -205,65 +206,67 @@ export default function App() {
   }
 
   return (
-    <CrystalPlanProvider user={user} isGuest={isGuest} onLogin={loginWithGoogle}>
-      <Layout
-        currentView={currentView}
-        setCurrentView={setCurrentView}
-        onOpenTutorial={() => setIsOnboardingOpen(true)}
-        user={user}
-        isGuest={isGuest}
-        onLogin={loginWithGoogle}
-        onLogout={handleLogout}
-      >
-        <Suspense fallback={<ViewLoader />}>
-          {currentView === 'home' && (
-            <Home
-              user={user}
-              isGuest={isGuest}
-              onLogin={loginWithGoogle}
-              onNavigate={setCurrentView}
-              onForecastIntent={openForecast}
-              onOpenTutorial={() => setIsOnboardingOpen(true)}
-              onboardingState={onboardingState}
-            />
-          )}
-          {currentView === 'forecast' && (
-            <Search
-              user={user}
-              isGuest={isGuest}
-              onLogin={loginWithGoogle}
-              initialQuery={forecastSeed}
-              onForecastComplete={() => markChecklist('firstForecast')}
-            />
-          )}
-          {currentView === 'nextletter' && (
-            <Nextletter
-              user={user}
-              isGuest={isGuest}
-              onLogin={loginWithGoogle}
-              onGenerateCard={(query) => openForecast(query)}
-            />
-          )}
-          {currentView === 'watchlist' && (
-            <Watchlist
-              user={user}
-              isGuest={isGuest}
-              onLogin={loginWithGoogle}
-              onChecklistComplete={() => markChecklist('firstWatchlist')}
-            />
-          )}
-          {currentView === 'profile' && <Profile user={user} isGuest={isGuest} onLogin={loginWithGoogle} />}
-        </Suspense>
-      </Layout>
+    <AppRuntimeProvider>
+      <CrystalPlanProvider user={user} isGuest={isGuest} onLogin={loginWithGoogle}>
+        <Layout
+          currentView={currentView}
+          setCurrentView={setCurrentView}
+          onOpenTutorial={() => setIsOnboardingOpen(true)}
+          user={user}
+          isGuest={isGuest}
+          onLogin={loginWithGoogle}
+          onLogout={handleLogout}
+        >
+          <Suspense fallback={<ViewLoader />}>
+            {currentView === 'home' && (
+              <Home
+                user={user}
+                isGuest={isGuest}
+                onLogin={loginWithGoogle}
+                onNavigate={setCurrentView}
+                onForecastIntent={openForecast}
+                onOpenTutorial={() => setIsOnboardingOpen(true)}
+                onboardingState={onboardingState}
+              />
+            )}
+            {currentView === 'forecast' && (
+              <Search
+                user={user}
+                isGuest={isGuest}
+                onLogin={loginWithGoogle}
+                initialQuery={forecastSeed}
+                onForecastComplete={() => markChecklist('firstForecast')}
+              />
+            )}
+            {currentView === 'nextletter' && (
+              <Nextletter
+                user={user}
+                isGuest={isGuest}
+                onLogin={loginWithGoogle}
+                onGenerateCard={(query) => openForecast(query)}
+              />
+            )}
+            {currentView === 'watchlist' && (
+              <Watchlist
+                user={user}
+                isGuest={isGuest}
+                onLogin={loginWithGoogle}
+                onChecklistComplete={() => markChecklist('firstWatchlist')}
+              />
+            )}
+            {currentView === 'profile' && <Profile user={user} isGuest={isGuest} onLogin={loginWithGoogle} />}
+          </Suspense>
+        </Layout>
 
-      <OnboardingModal
-        open={isOnboardingOpen}
-        onClose={completeTutorial}
-        onStartForecast={() => {
-          completeTutorial();
-          openForecast('Quanto e probabile un aumento dei costi energetici in Italia nei prossimi 30 giorni?');
-        }}
-      />
-    </CrystalPlanProvider>
+        <OnboardingModal
+          open={isOnboardingOpen}
+          onClose={completeTutorial}
+          onStartForecast={() => {
+            completeTutorial();
+            openForecast('Quanto e probabile un aumento dei costi energetici in Italia nei prossimi 30 giorni?');
+          }}
+        />
+      </CrystalPlanProvider>
+    </AppRuntimeProvider>
   );
 }

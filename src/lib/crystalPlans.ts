@@ -28,8 +28,8 @@ export const PLAN_OFFERS: Record<PlanId, BillingOffer> = {
     yearlyEquivalentMonthly: 0,
     creditsPerCycle: 15,
     watchlistLimit: 5,
-    headline: 'Prova completa del blueprint con crediti mensili inclusi.',
-    features: ['15 crediti / mese', '5 entita in watchlist', 'Preview completa di tutte le schermate'],
+    headline: 'Il modo piu semplice per provare il prodotto con crediti mensili inclusi.',
+    features: ['15 crediti / mese', '5 entita in watchlist', 'Tutte le aree dell app in preview completa'],
   },
   plus: {
     monthlyPrice: 12,
@@ -37,8 +37,8 @@ export const PLAN_OFFERS: Record<PlanId, BillingOffer> = {
     yearlyEquivalentMonthly: 8.25,
     creditsPerCycle: 120,
     watchlistLimit: 25,
-    headline: 'Il piano daily-driver per usare Crystal ogni settimana.',
-    features: ['120 crediti / mese', '25 entita in watchlist', 'Horizon fino a 6 mesi'],
+    headline: 'Il piano giusto se vuoi usare Crystal ogni settimana.',
+    features: ['120 crediti / mese', '25 entita in watchlist', 'Forecast fino a 6 mesi'],
   },
   pro: {
     monthlyPrice: 29,
@@ -46,7 +46,7 @@ export const PLAN_OFFERS: Record<PlanId, BillingOffer> = {
     yearlyEquivalentMonthly: 20.75,
     creditsPerCycle: 400,
     watchlistLimit: 100,
-    headline: 'La modalita Oracle con forecast premium e TimeGPT.',
+    headline: 'Per forecast piu profondi, orizzonti lunghi e layer premium.',
     features: ['400 crediti / mese', '100 entita in watchlist', '12 mesi + Massimo Rigore'],
   },
 };
@@ -54,28 +54,28 @@ export const PLAN_OFFERS: Record<PlanId, BillingOffer> = {
 export const PLAN_ORDER: PlanId[] = ['free', 'plus', 'pro'];
 
 export const ACTION_CATALOG: Record<MeteredAction, MeteredActionSpec> = {
-  search_standard: { action: 'search_standard', cost: 1, requiredPlan: 'free', label: 'Prevedi', accent: 'sky' },
-  search_extended: { action: 'search_extended', cost: 2, requiredPlan: 'plus', label: 'Prevedi', accent: 'amber' },
-  search_oracle: { action: 'search_oracle', cost: 5, requiredPlan: 'pro', label: 'Oracle', accent: 'rose' },
+  search_standard: { action: 'search_standard', cost: 1, requiredPlan: 'free', label: 'Forecast', accent: 'sky' },
+  search_extended: { action: 'search_extended', cost: 2, requiredPlan: 'plus', label: 'Forecast', accent: 'amber' },
+  search_oracle: { action: 'search_oracle', cost: 5, requiredPlan: 'pro', label: 'WorldSim', accent: 'rose' },
   dashboard_add_card_standard: {
     action: 'dashboard_add_card_standard',
     cost: 1,
     requiredPlan: 'free',
-    label: 'Crea previsione',
+    label: 'Crea forecast',
     accent: 'sky',
   },
   dashboard_add_card_extended: {
     action: 'dashboard_add_card_extended',
     cost: 2,
     requiredPlan: 'plus',
-    label: 'Crea previsione',
+    label: 'Crea forecast',
     accent: 'amber',
   },
   dashboard_add_card_oracle: {
     action: 'dashboard_add_card_oracle',
     cost: 5,
     requiredPlan: 'pro',
-    label: 'Oracle',
+    label: 'WorldSim',
     accent: 'rose',
   },
   nextletter_personal: {

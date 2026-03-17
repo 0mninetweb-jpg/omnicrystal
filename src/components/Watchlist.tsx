@@ -16,6 +16,7 @@ import { collection, deleteDoc, doc, onSnapshot, orderBy, query, serverTimestamp
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { useCrystalPlan } from '../context/CrystalPlanContext';
 import { getPlanLabel } from '../lib/crystalPlans';
+import { SECTION_COPY } from '../content/brand';
 import { cn } from './CrystalCard';
 
 interface WatchlistProps {
@@ -158,14 +159,11 @@ export function Watchlist({ user, isGuest, onLogin, onChecklistComplete }: Watch
       <section className="editorial-panel rounded-[32px] p-6 md:p-7">
         <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <div className="section-kicker">Watchlist Pulse</div>
+            <div className="section-kicker">{SECTION_COPY.watchlist.heroKicker}</div>
             <h2 className="mt-3 text-4xl font-display font-semibold tracking-tight text-slate-950 md:text-5xl">
-              Monitora le entita che vuoi tenere sotto osservazione.
+              {SECTION_COPY.watchlist.heroTitle}
             </h2>
-            <p className="mt-4 max-w-2xl text-base leading-8 text-slate-600">
-              La watchlist di Crystal non e una lista passiva: ti mostra status, pulse e limiti in modo pulito, senza
-              trasformarsi in una schermata settings-heavy.
-            </p>
+            <p className="mt-4 max-w-2xl text-base leading-8 text-slate-600">{SECTION_COPY.watchlist.heroBody}</p>
           </div>
 
           <div className="rounded-[28px] border border-slate-200 bg-white p-5">
@@ -185,7 +183,7 @@ export function Watchlist({ user, isGuest, onLogin, onChecklistComplete }: Watch
       <section className="editorial-panel rounded-[32px] p-6">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div className="text-sm leading-7 text-slate-500">
-            Salva una citta, un paese o un settore. Crystal lo riusa in Home, Forecast e briefing.
+            Salva una citta, un paese o un settore. Watchlist lo riusa poi in Home, Forecast e Nextletter.
           </div>
           {isGuest ? (
             <button

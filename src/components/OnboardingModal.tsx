@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ArrowRight, Compass, Sparkles, Waypoints, X } from 'lucide-react';
+import { PRODUCT_BRAND, TUTORIAL_STEPS } from '../content/brand';
 
 type OnboardingModalProps = {
   open: boolean;
@@ -8,56 +9,20 @@ type OnboardingModalProps = {
   onStartForecast: () => void;
 };
 
-type TutorialStep = {
-  id: string;
-  kicker: string;
-  title: string;
-  description: string;
-  bullets: string[];
+type TutorialStep = (typeof TUTORIAL_STEPS)[number] & {
   icon: React.ComponentType<{ className?: string }>;
 };
 
-const STEPS: TutorialStep[] = [
-  {
-    id: 'what',
-    kicker: 'What Crystal Does',
-    title: 'Crystal trasforma domande sul futuro in decisioni leggibili.',
-    description:
-      'Ogni forecast unisce probabilita, driver verificabili e azioni pratiche in un formato semplice da leggere anche se il tema e complesso.',
-    bullets: [
-      'Ricevi una risposta chiara, non solo una sintesi di notizie.',
-      'Vedi cosa conta davvero: probabilita, rischio, fiducia e scenari.',
-      'Puoi salvare i segnali che vuoi monitorare nel tempo.',
-    ],
-    icon: Compass,
-  },
-  {
-    id: 'layers',
-    kicker: 'Prediction Layer vs Oracle',
-    title: 'Il prediction layer risponde. Oracle WorldSim simula.',
-    description:
-      'La previsione standard produce il numero e i driver principali. Oracle WorldSim entra solo quando serve piu profondita causale e piu storytelling strategico.',
-    bullets: [
-      'Prediction layer: outcome, probabilita, rischio, trust.',
-      'Oracle WorldSim: attori pivot, narrative arc e intervention points.',
-      'Oracle arricchisce il forecast, non sostituisce il motore base.',
-    ],
-    icon: Waypoints,
-  },
-  {
-    id: 'action',
-    kicker: 'Your First Action',
-    title: 'Parti da una domanda concreta.',
-    description:
-      'Per capire Crystal in pochi secondi, la cosa migliore e lanciare una previsione semplice e vedere come viene spiegata.',
-    bullets: [
-      'Prova una domanda con orizzonte 30 giorni.',
-      'Poi salva una entita nella Watchlist.',
-      'Infine apri il Briefing per vedere il prodotto in modalita editoriale.',
-    ],
-    icon: Sparkles,
-  },
-];
+const STEP_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
+  what: Compass,
+  layers: Waypoints,
+  action: Sparkles,
+};
+
+const STEPS: TutorialStep[] = TUTORIAL_STEPS.map((step) => ({
+  ...step,
+  icon: STEP_ICONS[step.id] || Compass,
+}));
 
 export function OnboardingModal({ open, onClose, onStartForecast }: OnboardingModalProps) {
   const [activeStep, setActiveStep] = useState(0);
@@ -138,10 +103,10 @@ export function OnboardingModal({ open, onClose, onStartForecast }: OnboardingMo
               </div>
 
               <div className="rounded-[28px] ink-panel p-6">
-                <div className="section-kicker !text-slate-400">How It Feels</div>
+                <div className="section-kicker !text-slate-400">{PRODUCT_BRAND.name}</div>
                 <p className="mt-3 text-sm leading-7 text-slate-300">
-                  Crystal non ti butta addosso complessita. Ti mostra un numero, ti spiega perche quel numero esiste e
-                  ti dice dove guardare dopo.
+                  Non serve capire tutto in una volta. Ti basta vedere una risposta chiara, capire perche esiste e sapere
+                  cosa guardare dopo.
                 </p>
 
                 <div className="mt-6 rounded-[24px] border border-white/10 bg-white/5 p-4">
@@ -162,14 +127,14 @@ export function OnboardingModal({ open, onClose, onStartForecast }: OnboardingMo
                 </div>
 
                 <div className="mt-6 text-xs leading-6 text-slate-400">
-                  Il tutorial resta sempre richiamabile dall&apos;header con <span className="font-semibold text-slate-200">How Crystal works</span>.
+                  Il tutorial resta sempre richiamabile dall header con <span className="font-semibold text-slate-200">{PRODUCT_BRAND.tutorialLabel}</span>.
                 </div>
               </div>
             </div>
 
             <div className="relative flex flex-col gap-3 border-t border-slate-200/80 bg-white/70 px-6 py-5 md:flex-row md:items-center md:justify-between md:px-8">
               <div className="text-sm font-medium text-slate-500">
-                Ti bastano pochi passaggi per capire dove finisce il feed e dove comincia il prediction layer.
+                Bastano pochi passaggi per capire come leggere il prodotto.
               </div>
               <div className="flex items-center gap-3">
                 <button

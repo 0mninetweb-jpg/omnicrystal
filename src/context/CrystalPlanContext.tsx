@@ -12,6 +12,7 @@ import {
 } from '../lib/crystalPlans';
 import { createCheckoutSession } from '../services/billingService';
 import { withServerRequestContext } from '../services/geminiService';
+import { PRODUCT_BRAND, WORLD_SIM_BRAND } from '../content/brand';
 import type {
   BillingInterval,
   CrystalFeature,
@@ -49,8 +50,8 @@ const CrystalPlanContext = createContext<CrystalPlanContextValue | null>(null);
 function getDefaultUpgradeIntent(): UpgradeIntent {
   return {
     reason: 'feature',
-    title: 'Sblocca il prossimo livello di Crystal',
-    description: 'Più crediti, più profondità e la modalità Oracle per le previsioni ad alto impatto.',
+    title: `Sblocca il prossimo livello di ${PRODUCT_BRAND.name}`,
+    description: 'Piu crediti, piu continuita e accesso ai layer premium quando servono davvero.',
     recommendedPlan: 'plus',
   };
 }
@@ -148,8 +149,8 @@ export function CrystalPlanProvider({
       if (!user) {
         openUpgrade({
           reason: 'login',
-          title: 'Accedi per sbloccare Crystal',
-          description: 'Crea un account gratuito per usare crediti, watchlist e previsioni personalizzate.',
+          title: `Accedi per sbloccare ${PRODUCT_BRAND.name}`,
+          description: 'Crea un account gratuito per usare crediti, watchlist e aree personalizzate.',
           recommendedPlan: 'plus',
           action: spec.action,
           sourceView: options?.sourceView,
@@ -163,8 +164,8 @@ export function CrystalPlanProvider({
           title: `${getPlanLabel(spec.requiredPlan)} sblocca questa profondita`,
           description:
             spec.requiredPlan === 'pro'
-              ? 'La modalita Oracle usa TimeGPT e i filtri Pro del blueprint.'
-              : 'Plus sblocca gli orizzonti medi e un uso piu continuo di Crystal.',
+              ? `${WORLD_SIM_BRAND.name} e i forecast piu profondi fanno parte del piano Pro.`
+              : 'Plus sblocca gli orizzonti medi e un uso piu continuo del prodotto.',
           recommendedPlan: spec.requiredPlan,
           action: spec.action,
           sourceView: options?.sourceView,
@@ -187,10 +188,7 @@ export function CrystalPlanProvider({
       }
 
       try {
-        return await withServerRequestContext(
-          { sourceView: options?.sourceView, meteredAction: spec.action },
-          fn
-        );
+        return await withServerRequestContext({ sourceView: options?.sourceView, meteredAction: spec.action }, fn);
       } catch (error) {
         const code = getErrorCode(error);
         if (code === 'plan-upgrade-required' || code === 'oracle-plan-required') {

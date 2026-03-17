@@ -5,6 +5,7 @@ import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { LineChart, Line, ResponsiveContainer, YAxis, Tooltip } from 'recharts';
 import { motion, AnimatePresence } from 'framer-motion';
+import { WORLD_SIM_BRAND } from '../content/brand';
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -96,7 +97,7 @@ export function CrystalCard({
               {card.world_sim?.enabled && (
                 <span className="text-[10px] font-bold text-rose-300 uppercase tracking-[0.2em] bg-rose-500/10 px-3 py-1 rounded-full border border-rose-500/20 flex items-center gap-1.5">
                   <Sparkles className="w-3 h-3" />
-                  Oracle WorldSim
+                  {WORLD_SIM_BRAND.name}
                 </span>
               )}
               {card.stakes_level && (

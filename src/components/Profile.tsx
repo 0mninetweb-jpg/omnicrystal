@@ -5,7 +5,9 @@ import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { chatWithProfileBot, withServerRequestContext } from '../services/geminiService';
 import { useCrystalPlan } from '../context/CrystalPlanContext';
+import { useAppRuntime } from '../context/AppRuntimeContext';
 import { ACTION_CATALOG, formatCredits, getPlanLabel } from '../lib/crystalPlans';
+import { RUNTIME_COPY, SECTION_COPY } from '../content/brand';
 import { cn } from './CrystalCard';
 
 interface ProfileProps {
@@ -21,6 +23,7 @@ interface ChatMessage {
 
 export function Profile({ user, isGuest, onLogin }: ProfileProps) {
   const { entitlements, runMeteredAction } = useCrystalPlan();
+  const capabilities = useAppRuntime();
   const [location, setLocation] = useState('');
   const [profession, setProfession] = useState('');
   const [interests, setInterests] = useState('');
@@ -178,14 +181,11 @@ export function Profile({ user, isGuest, onLogin }: ProfileProps) {
       <section className="editorial-panel rounded-[32px] p-6 md:p-7">
         <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr] lg:items-end">
           <div>
-            <div className="section-kicker">Profile Setup</div>
+            <div className="section-kicker">{SECTION_COPY.profile.heroKicker}</div>
             <h2 className="mt-3 text-4xl font-display font-semibold tracking-tight text-slate-950 md:text-5xl">
-              Dai a Crystal il tuo contesto, non la tua vita intera.
+              {SECTION_COPY.profile.heroTitle}
             </h2>
-            <p className="mt-4 max-w-2xl text-base leading-8 text-slate-600">
-              Bastano posizione, lavoro e interessi per trasformare un forecast generico in una previsione che parla di
-              te, della tua citta e delle tue decisioni.
-            </p>
+            <p className="mt-4 max-w-2xl text-base leading-8 text-slate-600">{SECTION_COPY.profile.heroBody}</p>
           </div>
 
           <div className="rounded-[28px] border border-slate-200 bg-white p-5">
@@ -206,6 +206,11 @@ export function Profile({ user, isGuest, onLogin }: ProfileProps) {
                   ? `${entitlements.profileAiFreeMessagesRemaining} messaggi AI gratuiti rimasti.`
                   : `Messaggi AI a ${formatCredits(ACTION_CATALOG.profile_ai_message.cost)}.`}
             </div>
+            {!capabilities.forecastAvailable && (
+              <div className="mt-4 rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-600">
+                {RUNTIME_COPY.forecastPreview}
+              </div>
+            )}
           </div>
         </div>
       </section>
@@ -237,7 +242,17 @@ export function Profile({ user, isGuest, onLogin }: ProfileProps) {
 
           {!showChat ? (
             <button
-              onClick={() => (isGuest ? onLogin() : setShowChat(true))}
+              onClick={() => {
+                if (isGuest) {
+                  onLogin();
+                  return;
+                }
+                if (!capabilities.forecastAvailable) {
+                  setMessage(RUNTIME_COPY.forecastPreview);
+                  return;
+                }
+                setShowChat(true);
+              }}
               className="mt-5 flex w-full items-center justify-between rounded-[28px] border border-slate-200 bg-slate-950 px-5 py-5 text-left text-white transition hover:bg-slate-900"
             >
               <div className="flex items-center gap-4">
@@ -246,10 +261,14 @@ export function Profile({ user, isGuest, onLogin }: ProfileProps) {
                 </div>
                 <div>
                   <div className="text-lg font-semibold">
-                    {isGuest ? 'Accedi per usare l assistente AI' : 'Configura con l assistente AI'}
+                    {isGuest ? 'Accedi per usare l assistente AI' : !capabilities.forecastAvailable ? 'Assistente AI in preview' : 'Configura con l assistente AI'}
                   </div>
                   <div className="mt-1 text-sm text-slate-300">
-                    {isGuest ? 'I primi 10 messaggi sono inclusi nel profilo.' : 'Ti guida passo dopo passo e riempie il profilo per te.'}
+                    {isGuest
+                      ? 'I primi 10 messaggi sono inclusi nel profilo.'
+                      : !capabilities.forecastAvailable
+                        ? 'Il backend live non e ancora collegato in questa versione.'
+                        : 'Ti guida passo dopo passo e riempie il profilo per te.'}
                   </div>
                 </div>
               </div>

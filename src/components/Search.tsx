@@ -21,7 +21,9 @@ import { CrystalLoader } from './CrystalLoader';
 import { CardData } from '../types/crystal';
 import { compileQuery, getLocalInsights, predict } from '../services/geminiService';
 import { useCrystalPlan } from '../context/CrystalPlanContext';
+import { useAppRuntime } from '../context/AppRuntimeContext';
 import { formatCredits, getPlanLabel, getPredictActionSpec } from '../lib/crystalPlans';
+import { PRODUCT_BRAND, RUNTIME_COPY, SECTION_COPY, WORLD_SIM_BRAND } from '../content/brand';
 
 interface SearchProps {
   user: any;
@@ -45,8 +47,8 @@ const DEFAULT_FILTERS: SearchFilters = {
 
 const HERO_EXAMPLES = [
   'Quanto e probabile un aumento delle bollette in Italia nei prossimi 30 giorni?',
-  'Roma andra incontro a stress turistico e mobilita entro 90 giorni?',
-  'Il customer service tier-1 verra automatizzato piu rapidamente entro 6 mesi?',
+  'Roma rischia un nuovo picco di over-tourism entro 90 giorni?',
+  'L automazione AI nei contact center accelerera entro 6 mesi?',
 ];
 
 const GEOGRAPHY_METADATA: Record<
@@ -93,6 +95,7 @@ const CONFIDENCE_LABELS: Record<SearchFilters['confidence'], string> = {
 
 export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplete }: SearchProps) {
   const { entitlements, canUseFeature, openUpgrade, runMeteredAction } = useCrystalPlan();
+  const capabilities = useAppRuntime();
   const [query, setQuery] = useState(initialQuery || '');
   const [hasSearched, setHasSearched] = useState(false);
   const [filters, setFilters] = useState<SearchFilters>(DEFAULT_FILTERS);
@@ -100,7 +103,7 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
   const [isLoadingPlan, setIsLoadingPlan] = useState(false);
   const [isLoadingPrediction, setIsLoadingPrediction] = useState(false);
   const [isLoadingInsights, setIsLoadingInsights] = useState(false);
-  const [loadingMessage, setLoadingMessage] = useState('Crystal sta preparando il forecast...');
+  const [loadingMessage, setLoadingMessage] = useState('Sto preparando il forecast...');
   const [queryPlan, setQueryPlan] = useState<any>(null);
   const [generatedCard, setGeneratedCard] = useState<CardData | null>(null);
   const [localInsights, setLocalInsights] = useState<{ text: string; chunks: any[] } | null>(null);
@@ -109,6 +112,13 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
   const [isCardSaved, setIsCardSaved] = useState(false);
 
   const predictActionSpec = useMemo(() => getPredictActionSpec('search', filters), [filters]);
+  const isWorldSimMode = predictActionSpec.action === 'search_oracle';
+  const runtimeModeLabel = isWorldSimMode
+    ? capabilities.worldSimAvailable
+      ? WORLD_SIM_BRAND.name
+      : WORLD_SIM_BRAND.previewName
+    : 'Standard forecast';
+  const isSubmitBlocked = !capabilities.forecastAvailable || (isWorldSimMode && !capabilities.worldSimAvailable);
 
   useEffect(() => {
     if (initialQuery && !hasSearched) {
@@ -125,10 +135,10 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
 
   useEffect(() => {
     const messages = [
-      'Crystal sta preparando il forecast...',
-      'Sto leggendo i driver e verificando il contesto...',
-      'Compongo probabilita, scenari e trust layer...',
-      'Oracle resta in attesa: attivo solo se serve profondita extra...',
+      'Sto preparando il forecast...',
+      'Leggo i driver principali e il contesto...',
+      'Compongo risposta, probabilita e segnali da osservare...',
+      'Aggiungo il livello di fiducia finale...',
     ];
     if (!isLoadingPlan && !isLoadingPrediction) return;
 
@@ -152,8 +162,8 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
       try {
         const snapshot = await getDoc(doc(db, 'users', user.uid, 'cards', generatedCard.card_id));
         setIsCardSaved(snapshot.exists());
-      } catch (error) {
-        handleFirestoreError(error, OperationType.GET, `users/${user.uid}/cards/${generatedCard.card_id}`);
+      } catch (lookupError) {
+        handleFirestoreError(lookupError, OperationType.GET, `users/${user.uid}/cards/${generatedCard.card_id}`);
       }
     };
 
@@ -176,7 +186,7 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
         title: `${option.badge} sblocca ${option.label}`,
         description:
           option.badge === 'Pro'
-            ? 'Le previsioni a 12 mesi attivano la modalita Oracle del blueprint.'
+            ? `${WORLD_SIM_BRAND.name} e gli orizzonti a 12 mesi fanno parte del piano Pro.`
             : 'Gli orizzonti medio-lunghi sono inclusi nel piano Plus.',
         recommendedPlan: option.badge === 'Pro' ? 'pro' : 'plus',
         sourceView: 'search',
@@ -193,7 +203,7 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
       openUpgrade({
         reason: 'feature',
         title: 'Massimo rigore e una funzione Pro',
-        description: 'La modalita piu rigorosa attiva la pipeline Oracle con segnali premium.',
+        description: `${WORLD_SIM_BRAND.name} e i forecast piu profondi fanno parte del piano Pro.`,
         recommendedPlan: 'pro',
         sourceView: 'search',
       });
@@ -218,8 +228,8 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
         });
         setIsCardSaved(true);
       }
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `users/${user.uid}/cards/${card.card_id}`);
+    } catch (writeError) {
+      handleFirestoreError(writeError, OperationType.WRITE, `users/${user.uid}/cards/${card.card_id}`);
     }
   };
 
@@ -236,14 +246,25 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
 
     setQuery(searchQuery);
     setHasSearched(true);
-    setIsLoadingPlan(true);
-    setIsLoadingPrediction(false);
-    setIsLoadingInsights(false);
     setQueryPlan(null);
     setGeneratedCard(null);
     setLocalInsights(null);
-    setError(null);
     setShowDebug(false);
+    setError(null);
+
+    const requiresWorldSim = activeFilters.horizon === '12m' || activeFilters.confidence === 'rigorous';
+    if (!capabilities.forecastAvailable) {
+      setError(RUNTIME_COPY.forecastPreview);
+      return;
+    }
+    if (requiresWorldSim && !capabilities.worldSimAvailable) {
+      setError(`${RUNTIME_COPY.worldSimPreview} Per ora puoi continuare con il forecast standard.`);
+      return;
+    }
+
+    setIsLoadingPlan(true);
+    setIsLoadingPrediction(false);
+    setIsLoadingInsights(false);
 
     try {
       const plan = await compileQuery(searchQuery);
@@ -303,8 +324,8 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
         try {
           const userSnapshot = await getDoc(doc(db, 'users', user.uid));
           userContext = userSnapshot.exists() ? userSnapshot.data() : undefined;
-        } catch (error) {
-          handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
+        } catch (lookupError) {
+          handleFirestoreError(lookupError, OperationType.GET, `users/${user.uid}`);
         }
       }
 
@@ -314,7 +335,7 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
         {
           sourceView: 'search',
           insufficientCreditsMessage:
-            'Ti servono piu crediti per questa previsione. Passa a Plus o Pro per continuare da Forecast.',
+            'Ti servono piu crediti per questo forecast. Passa a Plus o Pro per continuare senza interruzioni.',
         }
       );
       setGeneratedCard(card);
@@ -326,9 +347,9 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
           console.error('Local insights fetch error:', insightError);
         })
         .finally(() => setIsLoadingInsights(false));
-    } catch (error) {
-      console.error('Failed to process query', error);
-      setError(error instanceof Error ? error.message : 'Si e verificato un errore imprevisto.');
+    } catch (searchError) {
+      console.error('Failed to process query', searchError);
+      setError(searchError instanceof Error ? searchError.message : 'Si e verificato un errore imprevisto.');
     } finally {
       setIsLoadingPlan(false);
       setIsLoadingPrediction(false);
@@ -350,18 +371,42 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
   };
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-7">
       <section className="editorial-panel overflow-hidden rounded-[32px] p-6 md:p-8">
         <div className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr] lg:items-end">
           <div>
-            <div className="section-kicker">Forecast Studio</div>
+            <div className="section-kicker">{SECTION_COPY.forecast.heroKicker}</div>
             <h2 className="mt-4 max-w-3xl text-4xl font-display font-semibold tracking-tight text-slate-950 md:text-5xl">
-              Trasforma una domanda in probabilita, scenari e mosse concrete.
+              {SECTION_COPY.forecast.heroTitle}
             </h2>
-            <p className="mt-4 max-w-2xl text-base leading-8 text-slate-600">
-              Crystal ti restituisce un answer leggibile, il perche della previsione e, quando il contesto lo richiede,
-              il layer Oracle WorldSim.
-            </p>
+            <p className="mt-4 max-w-2xl text-base leading-8 text-slate-600">{SECTION_COPY.forecast.heroBody}</p>
+
+            <div className="mt-7 flex flex-wrap gap-3">
+              <button
+                onClick={() => {
+                  setQuery(HERO_EXAMPLES[0]);
+                  void handleSearch(HERO_EXAMPLES[0]);
+                }}
+                className="inline-flex items-center gap-2 rounded-full bg-[#1453e8] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#1248c8]"
+              >
+                Fai un forecast
+              </button>
+            </div>
+
+            <div className="mt-6 flex flex-wrap gap-2">
+              {HERO_EXAMPLES.map((example) => (
+                <button
+                  key={example}
+                  onClick={() => {
+                    setQuery(example);
+                    void handleSearch(example);
+                  }}
+                  className="rounded-full border border-slate-200 bg-white/80 px-4 py-2 text-left text-xs font-medium text-slate-600 transition hover:border-slate-300 hover:text-slate-950"
+                >
+                  {example}
+                </button>
+              ))}
+            </div>
           </div>
 
           <div className="rounded-[28px] border border-slate-200 bg-white p-5">
@@ -375,7 +420,10 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
               </span>
             </div>
             <div className="mt-4 text-sm leading-7 text-slate-500">
-              What you&apos;ll get: outcome, probability, risk, trust e un piano d&apos;azione in un solo flusso.
+              Ricevi una risposta chiara, i motivi principali dietro al numero e i prossimi segnali da osservare.
+            </div>
+            <div className="mt-4 rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-600">
+              {capabilities.message}
             </div>
           </div>
         </div>
@@ -391,14 +439,15 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
                   type="text"
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
-                  placeholder="Chiedi a Crystal cosa potrebbe succedere e in quale orizzonte..."
+                  placeholder={`Chiedi a ${PRODUCT_BRAND.name} cosa potrebbe succedere e in quale orizzonte...`}
                   className="w-full min-w-0 bg-transparent text-base font-medium text-slate-900 outline-none placeholder:text-slate-400"
                 />
               </div>
               <button
                 type="submit"
+                disabled={isSubmitBlocked}
                 className={cn(
-                  'inline-flex items-center justify-center gap-2 rounded-full px-5 py-3 text-sm font-semibold text-white transition',
+                  'inline-flex items-center justify-center gap-2 rounded-full px-5 py-3 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-55',
                   predictActionSpec.action === 'search_oracle'
                     ? 'bg-rose-600 hover:bg-rose-700'
                     : predictActionSpec.action === 'search_extended'
@@ -407,24 +456,8 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
                 )}
               >
                 {predictActionSpec.action === 'search_oracle' ? <WandSparkles className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
-                {predictActionSpec.label} · {formatCredits(predictActionSpec.cost)}
+                {predictActionSpec.label} - {formatCredits(predictActionSpec.cost)}
               </button>
-            </div>
-
-            <div className="mt-4 flex flex-wrap items-center gap-2">
-              {HERO_EXAMPLES.map((example) => (
-                <button
-                  key={example}
-                  type="button"
-                  onClick={() => {
-                    setQuery(example);
-                    void handleSearch(example);
-                  }}
-                  className="rounded-full border border-slate-200 bg-slate-50 px-4 py-2 text-xs font-medium text-slate-600 transition hover:border-slate-300 hover:bg-white hover:text-slate-950"
-                >
-                  {example}
-                </button>
-              ))}
             </div>
           </div>
 
@@ -435,11 +468,11 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
               className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
             >
               <Filter className="h-4 w-4 text-[#1453e8]" />
-              Advanced
+              Filters
               {isAdvancedOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
             </button>
             <div className="text-sm font-medium text-slate-500">
-              Forecast mode: <span className="font-semibold text-slate-900">{predictActionSpec.action === 'search_oracle' ? 'Oracle WorldSim' : 'Prediction layer'}</span>
+              Mode: <span className="font-semibold text-slate-900">{runtimeModeLabel}</span>
             </div>
           </div>
 
@@ -548,13 +581,13 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
       {!hasSearched && !isLoadingPlan && !isLoadingPrediction && (
         <section className="grid gap-5 lg:grid-cols-[1.05fr_0.95fr]">
           <div className="editorial-panel rounded-[32px] p-6">
-            <div className="section-kicker">How To Ask</div>
-            <h3 className="mt-3 text-2xl font-display font-semibold text-slate-950">Fai una domanda come se stessi prendendo una decisione.</h3>
+            <div className="section-kicker">How to ask</div>
+            <h3 className="mt-3 text-2xl font-display font-semibold text-slate-950">Pensa alla domanda come a una decisione.</h3>
             <div className="mt-5 space-y-3">
               {[
-                'Specifica il contesto: cosa vuoi sapere davvero?',
-                'Scegli un orizzonte: 30 giorni per agire, 6 mesi per orientarti, 12 mesi per Oracle.',
-                'Usa il profilo e la watchlist per rendere piu utile il risultato.',
+                'Chiedi una cosa concreta: cosa vuoi capire davvero?',
+                'Usa 30 giorni se vuoi agire subito, 6 mesi se vuoi orientarti meglio.',
+                'Aggiungi profilo e watchlist per rendere la risposta piu vicina al tuo contesto.',
               ].map((item) => (
                 <div key={item} className="flex items-start gap-3 rounded-[22px] border border-slate-200 bg-white p-4 text-sm font-medium leading-7 text-slate-600">
                   <div className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full bg-[#1453e8]" />
@@ -564,14 +597,14 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
             </div>
           </div>
           <div className="oracle-panel rounded-[32px] p-6">
-            <div className="section-kicker !text-rose-200">When Oracle Appears</div>
-            <h3 className="mt-3 text-2xl font-display font-semibold text-white">Forecast standard per tutto. Oracle solo quando serve.</h3>
+            <div className="section-kicker !text-rose-200">{capabilities.worldSimAvailable ? WORLD_SIM_BRAND.name : WORLD_SIM_BRAND.previewName}</div>
+            <h3 className="mt-3 text-2xl font-display font-semibold text-white">Quando serve un livello di profondita in piu.</h3>
             <div className="mt-5 space-y-3">
               <div className="rounded-[22px] border border-white/10 bg-white/5 p-4 text-sm leading-7 text-slate-300">
-                Horizon a 12 mesi o Massimo rigore attivano il path Pro con TimeGPT e WorldSim.
+                Usa 12 mesi o Massimo rigore solo quando vuoi leggere un tema a piu strati e con piu contesto causale.
               </div>
               <div className="rounded-[22px] border border-white/10 bg-white/5 p-4 text-sm leading-7 text-slate-300">
-                Il trust layer continua a dirti copertura, convergenza degli agenti e provenienza delle fonti.
+                {capabilities.worldSimAvailable ? WORLD_SIM_BRAND.honestNote : RUNTIME_COPY.worldSimPreview}
               </div>
             </div>
           </div>
@@ -608,16 +641,16 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
                     <div key={driver.feature_key} className="rounded-[20px] border border-slate-200 bg-white p-4">
                       <div className="text-sm font-semibold text-slate-900">{driver.feature_key.replace(/_/g, ' ')}</div>
                       <div className="mt-1 text-xs font-medium uppercase tracking-[0.18em] text-slate-500">
-                        {driver.direction} · contribution {Math.round(driver.contribution * 100)}%
+                        {driver.direction} - contribution {Math.round(driver.contribution * 100)}%
                       </div>
                     </div>
                   ))}
                   {generatedCard.world_sim?.enabled && (
                     <div className="rounded-[24px] border border-rose-200 bg-rose-50 p-5">
-                      <div className="section-kicker !text-rose-600">Oracle layer</div>
+                      <div className="section-kicker !text-rose-600">{WORLD_SIM_BRAND.name}</div>
                       <p className="mt-3 text-sm leading-7 text-rose-800">
-                        Oracle WorldSim ha arricchito questa risposta con attori pivot, narrative arc e intervention
-                        points. Il numero finale resta ancorato al motore base.
+                        {WORLD_SIM_BRAND.name} ha aggiunto una vista piu profonda sugli scenari, ma il numero finale resta
+                        ancorato al motore base.
                       </p>
                     </div>
                   )}
@@ -625,7 +658,7 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
               </div>
 
               <div className="editorial-panel rounded-[28px] p-5">
-                <div className="section-kicker">Local Insights</div>
+                <div className="section-kicker">Local context</div>
                 {isLoadingInsights ? (
                   <div className="mt-4 inline-flex items-center gap-2 text-sm font-medium text-slate-500">
                     <Loader2 className="h-4 w-4 animate-spin text-[#1453e8]" />
@@ -637,8 +670,7 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
                   </div>
                 ) : (
                   <p className="mt-4 text-sm leading-7 text-slate-500">
-                    Quando ci sono entita geografiche chiare, Crystal aggiunge qui il contesto locale senza competere con
-                    la previsione principale.
+                    Quando la domanda ha un luogo chiaro, qui aggiungo il contesto locale senza togliere spazio alla previsione principale.
                   </p>
                 )}
               </div>
@@ -646,10 +678,13 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
           </div>
 
           {queryPlan && (
-            <details className="editorial-panel rounded-[28px] p-5">
+            <details
+              className="editorial-panel rounded-[28px] p-5"
+              onToggle={(event) => setShowDebug((event.currentTarget as HTMLDetailsElement).open)}
+            >
               <summary className="flex cursor-pointer list-none items-center gap-2 text-sm font-semibold text-slate-700">
                 <Code2 className="h-4 w-4 text-[#1453e8]" />
-                Technical debug
+                Technical details
                 {showDebug ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
               </summary>
               <div className="mt-4 grid gap-4 md:grid-cols-2">
