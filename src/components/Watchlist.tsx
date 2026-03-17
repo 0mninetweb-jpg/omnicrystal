@@ -16,7 +16,10 @@ import { collection, deleteDoc, doc, onSnapshot, orderBy, query, serverTimestamp
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { useCrystalPlan } from '../context/CrystalPlanContext';
 import { getPlanLabel } from '../lib/crystalPlans';
+import { formatProbabilityLabel, getMarketSignalLabel, getMarketSignalState, hasPredictionMarketFrame } from '../lib/predictionMarket';
 import { SECTION_COPY } from '../content/brand';
+import { getPolymarketPulse } from '../services/geminiService';
+import type { PredictionMarketFrame } from '../types/crystal';
 import { cn } from './CrystalCard';
 
 interface WatchlistProps {
@@ -48,12 +51,45 @@ function getTone(trend?: 'up' | 'down' | 'flat') {
   return 'border-slate-200 bg-slate-100 text-slate-600';
 }
 
+function getMarketTone(state: ReturnType<typeof getMarketSignalState>) {
+  if (state === 'calibrated') return 'border-sky-100 bg-sky-50 text-sky-700';
+  if (state === 'diverge') return 'border-rose-100 bg-rose-50 text-rose-700';
+  if (state === 'watch') return 'border-amber-100 bg-amber-50 text-amber-700';
+  return 'border-emerald-100 bg-emerald-50 text-emerald-700';
+}
+
+function buildPulseQueryPlan(item: WatchlistItem) {
+  const type = (item.type || '').toLowerCase();
+  const entityType = type.includes('city') ? 'city' : type.includes('country') ? 'country' : 'theme';
+  const domain =
+    entityType === 'city'
+      ? 'A.7.city_pulse.micro_area_change'
+      : entityType === 'country'
+        ? 'A.11.geopolitics.trade_tensions'
+        : 'A.2.markets.equity_indices';
+
+  return {
+    domain_id: domain,
+    horizons: [{ horizon_id: '30d' }],
+    entities: [
+      {
+        label: item.entity,
+        entity_type: entityType,
+      },
+    ],
+    filters: {
+      source: 'watchlist',
+    },
+  };
+}
+
 export function Watchlist({ user, isGuest, onLogin, onChecklistComplete }: WatchlistProps) {
   const { entitlements, openUpgrade } = useCrystalPlan();
   const [isAdding, setIsAdding] = useState(false);
   const [newEntity, setNewEntity] = useState('');
   const [watchlistItems, setWatchlistItems] = useState<WatchlistItem[]>(GUEST_ITEMS);
   const [limitMessage, setLimitMessage] = useState<string | null>(null);
+  const [marketPulseById, setMarketPulseById] = useState<Record<string, PredictionMarketFrame | null>>({});
 
   useEffect(() => {
     if (!user?.uid) {
@@ -90,6 +126,40 @@ export function Watchlist({ user, isGuest, onLogin, onChecklistComplete }: Watch
       onChecklistComplete?.();
     }
   }, [onChecklistComplete, user?.uid, watchlistItems.length]);
+
+  useEffect(() => {
+    if (!user?.uid || watchlistItems.length === 0) {
+      setMarketPulseById({});
+      return;
+    }
+
+    let active = true;
+
+    const fetchPulse = async () => {
+      const entries = await Promise.all(
+        watchlistItems.slice(0, 6).map(async (item) => {
+          try {
+            const queryText = [item.entity, ...(item.domains || [])].filter(Boolean).join(' ');
+            const frame = (await getPolymarketPulse(queryText, buildPulseQueryPlan(item))) as PredictionMarketFrame | null;
+            return [item.id, frame || null] as const;
+          } catch (pulseError) {
+            console.error('Watchlist market pulse error:', pulseError);
+            return [item.id, null] as const;
+          }
+        })
+      );
+
+      if (active) {
+        setMarketPulseById(Object.fromEntries(entries));
+      }
+    };
+
+    void fetchPulse();
+
+    return () => {
+      active = false;
+    };
+  }, [user?.uid, watchlistItems]);
 
   const toggleAlerts = async (id: string, currentAlerts: boolean) => {
     if (!user?.uid) return;
@@ -275,7 +345,13 @@ export function Watchlist({ user, isGuest, onLogin, onChecklistComplete }: Watch
               exit={{ opacity: 0, y: 16 }}
               className="editorial-panel rounded-[30px] p-5 md:p-6"
             >
-              <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+              {(() => {
+                const marketFrame = marketPulseById[item.id];
+                const hasMarketFrame = hasPredictionMarketFrame(marketFrame);
+                const marketState = getMarketSignalState(marketFrame);
+
+                return (
+                  <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
                 <div className="flex items-start gap-4">
                   <div className="flex h-14 w-14 items-center justify-center rounded-[20px] border border-slate-200 bg-white text-slate-500">
                     {item.type.toLowerCase().includes('city') ? (
@@ -316,6 +392,20 @@ export function Watchlist({ user, isGuest, onLogin, onChecklistComplete }: Watch
                     </div>
                   </div>
 
+                  {hasMarketFrame && (
+                    <div className="rounded-[20px] border border-slate-200 bg-white px-4 py-3">
+                      <div className="section-kicker">Market pulse</div>
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <span className={cn('rounded-full border px-3 py-1 text-xs font-semibold', getMarketTone(marketState))}>
+                          {getMarketSignalLabel(marketFrame)}
+                        </span>
+                        <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600">
+                          Market {formatProbabilityLabel(marketFrame?.implied_probability ?? marketFrame?.prior_probability)}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => void toggleAlerts(item.id, item.alerts)}
@@ -345,7 +435,9 @@ export function Watchlist({ user, isGuest, onLogin, onChecklistComplete }: Watch
                     </button>
                   </div>
                 </div>
-              </div>
+                  </div>
+                );
+              })()}
             </motion.div>
           ))
         )}

@@ -14,6 +14,7 @@ interface LayoutProps {
   currentView: LayoutView;
   setCurrentView: (view: LayoutView) => void;
   onOpenTutorial: () => void;
+  onOpenWorldSimScene: () => void;
   user?: any;
   isGuest?: boolean;
   onLogin?: () => void;
@@ -63,6 +64,7 @@ export function Layout({
   currentView,
   setCurrentView,
   onOpenTutorial,
+  onOpenWorldSimScene,
   user,
   isGuest,
   onLogin,
@@ -89,20 +91,21 @@ export function Layout({
               </div>
 
               <div className="mt-6 min-h-0 flex-1 overflow-y-auto pr-1 no-scrollbar">
-                <div className="space-y-2">
+                <div className="space-y-6">
+                  <div className="space-y-1.5">
                   {NAV_ITEMS.map((item) => (
                     <button
                       key={item.id}
                       onClick={() => setCurrentView(item.id)}
                       className={cn(
-                        'group relative flex w-full items-center gap-4 rounded-[24px] px-4 py-3.5 text-left transition',
+                        'group relative flex w-full items-center gap-4 rounded-[22px] px-4 py-3.5 text-left transition',
                         currentView === item.id ? 'bg-slate-950 text-white shadow-[0_14px_30px_rgba(15,23,42,0.18)]' : 'hover:bg-white/80'
                       )}
                     >
                       {currentView === item.id && (
                         <motion.div
                           layoutId="activeNavDesktop"
-                          className="absolute inset-0 rounded-[24px] border border-slate-950"
+                          className="absolute inset-0 rounded-[22px] border border-slate-950"
                           transition={{ type: 'spring', bounce: 0.18, duration: 0.45 }}
                         />
                       )}
@@ -118,60 +121,78 @@ export function Layout({
                       </div>
                       <div className="relative min-w-0">
                         <div className="text-sm font-semibold">{item.label}</div>
-                        <div className={cn('mt-1 text-xs leading-5', currentView === item.id ? 'text-slate-300' : 'text-slate-500')}>
-                          {item.description}
-                        </div>
+                        {currentView === item.id && (
+                          <div className="mt-1 max-w-[180px] text-xs leading-5 text-slate-300">{item.description}</div>
+                        )}
                       </div>
                     </button>
                   ))}
                 </div>
 
-                <div className="mt-5 rounded-[28px] border border-slate-200 bg-white/80 p-4">
-                  <div className="section-kicker">{PRODUCT_BRAND.plansLabel}</div>
-                  <button
-                    onClick={() =>
-                      openUpgrade(
-                        isGuest
-                          ? {
-                              reason: 'login',
-                              title: `Accedi per attivare ${PRODUCT_BRAND.name}`,
-                              description: 'Salva temi, usa i crediti mensili e attiva le aree personali con un account gratuito.',
-                              recommendedPlan: 'plus',
-                            }
-                          : {
-                              reason: 'feature',
-                              title: PRODUCT_BRAND.plansTitle,
-                              description: 'Confronta Free, Plus e Pro e scegli quanta profondita vuoi usare ogni settimana.',
-                              recommendedPlan: entitlements.plan === 'pro' ? 'pro' : 'plus',
-                            }
-                      )
-                    }
-                    className="mt-3 w-full rounded-[22px] border border-slate-200 bg-slate-50 px-4 py-4 text-left transition hover:border-slate-300 hover:bg-white"
-                  >
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                      {isGuest ? PRODUCT_BRAND.guestLabel : `${getPlanLabel(entitlements.plan)} plan`}
+                  <div className="space-y-3">
+                    <div className="rounded-[28px] border border-slate-200 bg-white/80 p-4">
+                      <div className="section-kicker">{PRODUCT_BRAND.plansLabel}</div>
+                      <button
+                        onClick={() =>
+                          openUpgrade(
+                            isGuest
+                              ? {
+                                  reason: 'login',
+                                  title: `Accedi per attivare ${PRODUCT_BRAND.name}`,
+                                  description: 'Salva temi, usa i crediti mensili e attiva le aree personali con un account gratuito.',
+                                  recommendedPlan: 'plus',
+                                }
+                              : {
+                                  reason: 'feature',
+                                  title: PRODUCT_BRAND.plansTitle,
+                                  description: 'Confronta Free, Plus e Pro e scegli quanta profondita vuoi usare ogni settimana.',
+                                  recommendedPlan: entitlements.plan === 'pro' ? 'pro' : 'plus',
+                                }
+                          )
+                        }
+                        className="mt-3 w-full rounded-[22px] border border-slate-200 bg-slate-50 px-4 py-4 text-left transition hover:border-slate-300 hover:bg-white"
+                      >
+                        <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                          {isGuest ? PRODUCT_BRAND.guestLabel : `${getPlanLabel(entitlements.plan)} plan`}
+                        </div>
+                        <div className="mt-2 text-lg font-semibold text-slate-950">
+                          {isGuest ? 'Accedi per attivare i crediti' : `${entitlements.creditsBalance} crediti rimasti`}
+                        </div>
+                        <div className="mt-3 text-sm leading-6 text-slate-500">
+                          {capabilities.worldSimAvailable
+                            ? 'Il layer premium e pronto per le query piu profonde.'
+                            : 'WorldSim resta in preview finche il backend live non e collegato.'}
+                        </div>
+                      </button>
                     </div>
-                    <div className="mt-2 text-lg font-semibold text-slate-950">
-                      {isGuest ? 'Accedi per attivare i crediti' : `${entitlements.creditsBalance} crediti rimasti`}
-                    </div>
-                    {!capabilities.worldSimAvailable && (
-                      <div className="mt-3 inline-flex items-center rounded-full border border-rose-100 bg-rose-50 px-3 py-1 text-[11px] font-semibold text-rose-700">
-                        {WORLD_SIM_BRAND.previewName}
-                      </div>
-                    )}
-                  </button>
-                </div>
 
-                <button
-                  onClick={onOpenTutorial}
-                  className="mt-4 inline-flex w-full items-center justify-between rounded-[24px] border border-slate-200 bg-white/80 px-4 py-4 text-left transition hover:border-slate-300 hover:bg-white"
-                >
-                  <div>
-                    <div className="section-kicker">Micro Tutorial</div>
-                    <div className="mt-2 text-sm font-semibold text-slate-900">{PRODUCT_BRAND.tutorialLabel}</div>
+                    <div className="grid gap-3">
+                      <button
+                        onClick={onOpenTutorial}
+                        className="inline-flex w-full items-center justify-between rounded-[24px] border border-slate-200 bg-white/80 px-4 py-4 text-left transition hover:border-slate-300 hover:bg-white"
+                      >
+                        <div>
+                          <div className="section-kicker">Micro Tutorial</div>
+                          <div className="mt-2 text-sm font-semibold text-slate-900">{PRODUCT_BRAND.tutorialLabel}</div>
+                        </div>
+                        <PlayCircle className="h-5 w-5 text-[#1453e8]" />
+                      </button>
+
+                      <button
+                        onClick={onOpenWorldSimScene}
+                        className="inline-flex w-full items-center justify-between rounded-[24px] border border-rose-200 bg-rose-50/80 px-4 py-4 text-left transition hover:border-rose-300 hover:bg-white"
+                      >
+                        <div>
+                          <div className="section-kicker !text-rose-500">
+                            {capabilities.worldSimAvailable ? WORLD_SIM_BRAND.name : WORLD_SIM_BRAND.previewName}
+                          </div>
+                          <div className="mt-2 text-sm font-semibold text-slate-900">Apri la simulation chamber</div>
+                        </div>
+                        <WandSparkles className="h-5 w-5 text-rose-500" />
+                      </button>
+                    </div>
                   </div>
-                  <PlayCircle className="h-5 w-5 text-[#1453e8]" />
-                </button>
+                </div>
               </div>
 
               <div className="mt-4 shrink-0 rounded-[28px] border border-slate-200 bg-white/80 p-4">
@@ -294,7 +315,7 @@ export function Layout({
               key={item.id}
               onClick={() => setCurrentView(item.id)}
               className={cn(
-                'relative flex flex-1 flex-col items-center justify-center gap-1 rounded-[18px] px-2 py-3 text-[11px] font-semibold transition',
+                'relative flex flex-1 flex-col items-center justify-center gap-1 rounded-[18px] px-2 py-2.5 text-[11px] font-semibold transition',
                 currentView === item.id ? 'text-slate-950' : 'text-slate-500'
               )}
             >

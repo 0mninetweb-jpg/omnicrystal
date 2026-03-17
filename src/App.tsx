@@ -13,12 +13,16 @@ import { CrystalPlanProvider } from './context/CrystalPlanContext';
 import { AppRuntimeProvider } from './context/AppRuntimeContext';
 import { createDefaultEntitlementFields } from './lib/crystalPlans';
 import { OnboardingModal } from './components/OnboardingModal';
+import { WorldSimScene } from './components/WorldSimScene';
+import { getDefaultWorldSimPreviewDataset } from './lib/worldSimScene';
 import {
   defaultOnboardingState,
   ONBOARDING_STORAGE_KEY,
   OnboardingChecklistKey,
   OnboardingState,
 } from './types/onboarding';
+import type { WorldSimSceneData } from './types/worldSim';
+import type { WorldSimJobRef } from './types/worldSimJob';
 
 const Home = lazy(async () => ({ default: (await import('./components/Home')).Home }));
 const Search = lazy(async () => ({ default: (await import('./components/Search')).Search }));
@@ -71,6 +75,12 @@ export default function App() {
   const [forecastSeed, setForecastSeed] = useState('');
   const [onboardingState, setOnboardingState] = useState<OnboardingState>(defaultOnboardingState);
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
+  const [worldSimSceneOpen, setWorldSimSceneOpen] = useState(false);
+  const [worldSimSceneMode, setWorldSimSceneMode] = useState<'preview' | 'live'>('preview');
+  const [worldSimPreviewDataset, setWorldSimPreviewDataset] = useState<WorldSimSceneData>(() =>
+    getDefaultWorldSimPreviewDataset()
+  );
+  const [worldSimJobRef, setWorldSimJobRef] = useState<WorldSimJobRef | null>(null);
 
   useEffect(() => {
     setOnboardingState(readOnboardingState());
@@ -197,6 +207,14 @@ export default function App() {
     setCurrentView('forecast');
   };
 
+  const openWorldSimScene = (dataset?: WorldSimSceneData, job?: WorldSimJobRef | null) => {
+    const nextDataset = dataset || getDefaultWorldSimPreviewDataset();
+    setWorldSimPreviewDataset(nextDataset);
+    setWorldSimSceneMode(nextDataset.mode);
+    setWorldSimJobRef(job || null);
+    setWorldSimSceneOpen(true);
+  };
+
   if (!isAuthReady) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-transparent">
@@ -212,6 +230,7 @@ export default function App() {
           currentView={currentView}
           setCurrentView={setCurrentView}
           onOpenTutorial={() => setIsOnboardingOpen(true)}
+          onOpenWorldSimScene={() => openWorldSimScene()}
           user={user}
           isGuest={isGuest}
           onLogin={loginWithGoogle}
@@ -226,6 +245,7 @@ export default function App() {
                 onNavigate={setCurrentView}
                 onForecastIntent={openForecast}
                 onOpenTutorial={() => setIsOnboardingOpen(true)}
+                onOpenWorldSimScene={openWorldSimScene}
                 onboardingState={onboardingState}
               />
             )}
@@ -236,6 +256,7 @@ export default function App() {
                 onLogin={loginWithGoogle}
                 initialQuery={forecastSeed}
                 onForecastComplete={() => markChecklist('firstForecast')}
+                onOpenWorldSimScene={openWorldSimScene}
               />
             )}
             {currentView === 'nextletter' && (
@@ -244,6 +265,7 @@ export default function App() {
                 isGuest={isGuest}
                 onLogin={loginWithGoogle}
                 onGenerateCard={(query) => openForecast(query)}
+                onOpenWorldSimScene={openWorldSimScene}
               />
             )}
             {currentView === 'watchlist' && (
@@ -265,6 +287,13 @@ export default function App() {
             completeTutorial();
             openForecast('Quanto e probabile un aumento dei costi energetici in Italia nei prossimi 30 giorni?');
           }}
+        />
+        <WorldSimScene
+          open={worldSimSceneOpen}
+          mode={worldSimSceneMode}
+          data={worldSimPreviewDataset}
+          job={worldSimJobRef}
+          onClose={() => setWorldSimSceneOpen(false)}
         />
       </CrystalPlanProvider>
     </AppRuntimeProvider>

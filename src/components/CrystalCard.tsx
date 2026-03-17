@@ -6,6 +6,14 @@ import { twMerge } from 'tailwind-merge';
 import { LineChart, Line, ResponsiveContainer, YAxis, Tooltip } from 'recharts';
 import { motion, AnimatePresence } from 'framer-motion';
 import { WORLD_SIM_BRAND } from '../content/brand';
+import {
+  formatCompactNumber,
+  formatProbabilityLabel,
+  formatSignedDelta,
+  getMarketSignalLabel,
+  getMarketSignalState,
+  hasPredictionMarketFrame,
+} from '../lib/predictionMarket';
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -23,6 +31,14 @@ export function CrystalCard({
   const [showEvidence, setShowEvidence] = useState(false);
   const [isSaved, setIsSaved] = useState(initialIsSaved);
   const [isShared, setIsShared] = useState(false);
+  const marketFrame = card.prediction_market_frame || card.world_sim?.prediction_market_frame || null;
+  const hasMarketSignal = hasPredictionMarketFrame(marketFrame);
+  const marketSignalState = getMarketSignalState(marketFrame);
+  const topScenarioProbability = Array.isArray(card.scenario_set) && card.scenario_set.length > 0
+    ? Math.max(...card.scenario_set.map((scenario) => Number(scenario?.probability) || 0))
+    : null;
+  const crystalProbability = marketFrame?.crystal_probability ?? topScenarioProbability;
+  const marketProbability = marketFrame?.implied_probability ?? marketFrame?.prior_probability ?? null;
 
   useEffect(() => {
     setIsSaved(initialIsSaved);
@@ -53,6 +69,13 @@ export function CrystalCard({
     if (mode === 'delta_simulation') return 'Delta sim';
     if (mode === 'full_rebuild') return 'Full rebuild';
     return 'Narrative only';
+  };
+
+  const getMarketSignalTone = (state: ReturnType<typeof getMarketSignalState>) => {
+    if (state === 'calibrated') return 'text-sky-300 bg-sky-500/10 border-sky-500/20';
+    if (state === 'diverge') return 'text-rose-300 bg-rose-500/10 border-rose-500/20';
+    if (state === 'watch') return 'text-amber-300 bg-amber-500/10 border-amber-500/20';
+    return 'text-emerald-300 bg-emerald-500/10 border-emerald-500/20';
   };
 
   const handleShare = async () => {
@@ -98,6 +121,17 @@ export function CrystalCard({
                 <span className="text-[10px] font-bold text-rose-300 uppercase tracking-[0.2em] bg-rose-500/10 px-3 py-1 rounded-full border border-rose-500/20 flex items-center gap-1.5">
                   <Sparkles className="w-3 h-3" />
                   {WORLD_SIM_BRAND.name}
+                </span>
+              )}
+              {hasMarketSignal && (
+                <span
+                  className={cn(
+                    'text-[10px] font-bold uppercase tracking-[0.2em] px-3 py-1 rounded-full border flex items-center gap-1.5',
+                    getMarketSignalTone(marketSignalState)
+                  )}
+                >
+                  <Database className="w-3 h-3" />
+                  {getMarketSignalLabel(marketFrame)}
                 </span>
               )}
               {card.stakes_level && (
@@ -186,6 +220,71 @@ export function CrystalCard({
           <div className="mt-4 flex items-center gap-2 text-[11px] font-bold text-amber-400 bg-amber-500/10 px-4 py-2 rounded-xl border border-amber-500/20 w-fit">
             <AlertTriangle className="w-4 h-4" />
             <span>Nota: Basato su dati parziali. Crystal ha evitato allucinazioni.</span>
+          </div>
+        )}
+
+        {hasMarketSignal && (
+          <div className="mt-6 rounded-[30px] border border-white/10 bg-[#050505] p-5 shadow-inner">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.22em] text-slate-500">
+                <Database className="h-4 w-4 text-sky-400" />
+                Market signal
+              </div>
+              <span
+                className={cn(
+                  'rounded-full border px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em]',
+                  getMarketSignalTone(marketSignalState)
+                )}
+              >
+                {getMarketSignalLabel(marketFrame)}
+              </span>
+            </div>
+
+            <div className="mt-4 grid gap-3 md:grid-cols-3">
+              <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+                <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Crystal</div>
+                <div className="mt-2 text-lg font-semibold text-white">{formatProbabilityLabel(crystalProbability)}</div>
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+                <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Market</div>
+                <div className="mt-2 text-lg font-semibold text-white">{formatProbabilityLabel(marketProbability)}</div>
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+                <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Delta</div>
+                <div className="mt-2 text-lg font-semibold text-white">{formatSignedDelta(marketFrame?.divergence_vs_crystal)}</div>
+              </div>
+            </div>
+
+            {(marketFrame?.market_question || marketFrame?.reference_market) && (
+              <div className="mt-4 text-sm leading-7 text-slate-300">
+                <span className="font-semibold text-white">Reference market:</span>{' '}
+                {marketFrame?.market_question || marketFrame?.reference_market}
+              </div>
+            )}
+
+            {(marketFrame?.volume_24h != null || marketFrame?.open_interest != null || marketFrame?.liquidity != null) && (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {marketFrame?.volume_24h != null && (
+                  <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-medium text-slate-300">
+                    24h volume {formatCompactNumber(marketFrame.volume_24h)}
+                  </span>
+                )}
+                {marketFrame?.open_interest != null && (
+                  <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-medium text-slate-300">
+                    OI {formatCompactNumber(marketFrame.open_interest)}
+                  </span>
+                )}
+                {marketFrame?.liquidity != null && (
+                  <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-medium text-slate-300">
+                    Liquidity {formatCompactNumber(marketFrame.liquidity)}
+                  </span>
+                )}
+              </div>
+            )}
+
+            {marketFrame?.calibration_note && (
+              <p className="mt-4 text-sm leading-7 text-slate-400">{marketFrame.calibration_note}</p>
+            )}
           </div>
         )}
       </div>
@@ -376,22 +475,6 @@ export function CrystalCard({
             )}
           </div>
 
-          {card.world_sim.prediction_market_frame?.outcome && (
-            <div className="mt-4 rounded-3xl border border-white/10 bg-[#050505] p-5">
-              <div className="mb-3 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">
-                <Database className="w-4 h-4 text-sky-400" />
-                Prediction market frame
-              </div>
-              <div className="space-y-2 text-[13px] font-medium text-slate-300">
-                <p><span className="text-slate-500">Outcome:</span> {card.world_sim.prediction_market_frame.outcome}</p>
-                <p><span className="text-slate-500">Horizon:</span> {card.world_sim.prediction_market_frame.horizon}</p>
-                <p><span className="text-slate-500">Resolution:</span> {card.world_sim.prediction_market_frame.resolution_criteria}</p>
-                {card.world_sim.prediction_market_frame.reference_market && (
-                  <p><span className="text-slate-500">Reference:</span> {card.world_sim.prediction_market_frame.reference_market}</p>
-                )}
-              </div>
-            </div>
-          )}
         </div>
       )}
 

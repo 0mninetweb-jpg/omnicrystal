@@ -19,11 +19,15 @@ import { db, handleFirestoreError, OperationType } from '../firebase';
 import { CrystalCard, cn } from './CrystalCard';
 import { CrystalLoader } from './CrystalLoader';
 import { CardData } from '../types/crystal';
-import { compileQuery, getLocalInsights, predict } from '../services/geminiService';
+import { compileQuery, getLocalInsights, getWorldSimJobResult, predict } from '../services/geminiService';
 import { useCrystalPlan } from '../context/CrystalPlanContext';
 import { useAppRuntime } from '../context/AppRuntimeContext';
 import { formatCredits, getPlanLabel, getPredictActionSpec } from '../lib/crystalPlans';
+import { createWorldSimSceneData } from '../lib/worldSimScene';
 import { PRODUCT_BRAND, RUNTIME_COPY, SECTION_COPY, WORLD_SIM_BRAND } from '../content/brand';
+import { WorldSimInlineCard } from './WorldSimInlineCard';
+import type { WorldSimJobRef, WorldSimJobResult } from '../types/worldSimJob';
+import { isTerminalWorldSimJobStatus as isWorldSimJobTerminal } from '../types/worldSimJob';
 
 interface SearchProps {
   user: any;
@@ -31,6 +35,7 @@ interface SearchProps {
   onLogin?: () => void;
   initialQuery?: string;
   onForecastComplete?: () => void;
+  onOpenWorldSimScene: (data: any, job?: WorldSimJobRef | null) => void;
 }
 
 type SearchFilters = {
@@ -93,7 +98,7 @@ const CONFIDENCE_LABELS: Record<SearchFilters['confidence'], string> = {
   rigorous: 'Massimo rigore',
 };
 
-export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplete }: SearchProps) {
+export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplete, onOpenWorldSimScene }: SearchProps) {
   const { entitlements, canUseFeature, openUpgrade, runMeteredAction } = useCrystalPlan();
   const capabilities = useAppRuntime();
   const [query, setQuery] = useState(initialQuery || '');
@@ -110,6 +115,7 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
   const [error, setError] = useState<string | null>(null);
   const [showDebug, setShowDebug] = useState(false);
   const [isCardSaved, setIsCardSaved] = useState(false);
+  const [autoOpenedWorldSimJobId, setAutoOpenedWorldSimJobId] = useState<string | null>(null);
 
   const predictActionSpec = useMemo(() => getPredictActionSpec('search', filters), [filters]);
   const isWorldSimMode = predictActionSpec.action === 'search_oracle';
@@ -119,6 +125,37 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
       : WORLD_SIM_BRAND.previewName
     : 'Standard forecast';
   const isSubmitBlocked = !capabilities.forecastAvailable || (isWorldSimMode && !capabilities.worldSimAvailable);
+  const worldSimPreviewScene = useMemo(
+    () =>
+      createWorldSimSceneData({
+        title: 'WorldSim: guarda il sistema dietro al numero',
+        question: query.trim() || HERO_EXAMPLES[1],
+        mode: capabilities.worldSimAvailable ? 'live' : 'preview',
+      }),
+    [capabilities.worldSimAvailable, query]
+  );
+  const worldSimResultScene = useMemo(
+    () =>
+      createWorldSimSceneData({
+        title: generatedCard?.title || 'WorldSim layer',
+        subtitle: generatedCard?.summary,
+        question: query.trim() || HERO_EXAMPLES[0],
+        digest: generatedCard?.world_sim,
+        mode:
+          capabilities.worldSimAvailable &&
+          (generatedCard?.world_sim_job?.status === 'completed' || Boolean(generatedCard?.world_sim?.enabled))
+            ? 'live'
+            : 'preview',
+        sourceLabel:
+          generatedCard?.world_sim_job && generatedCard.world_sim_job.status !== 'completed'
+            ? 'MiroFish async job'
+            : generatedCard?.world_sim?.enabled
+              ? 'Forecast digest'
+              : 'Preview dataset',
+        job: generatedCard?.world_sim_job || null,
+      }),
+    [capabilities.worldSimAvailable, generatedCard, query]
+  );
 
   useEffect(() => {
     if (initialQuery && !hasSearched) {
@@ -132,6 +169,66 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
       onForecastComplete?.();
     }
   }, [generatedCard, onForecastComplete]);
+
+  useEffect(() => {
+    const jobId = generatedCard?.world_sim_job?.jobId;
+    if (!jobId || autoOpenedWorldSimJobId === jobId) return;
+    onOpenWorldSimScene(worldSimResultScene, generatedCard?.world_sim_job || null);
+    setAutoOpenedWorldSimJobId(jobId);
+  }, [autoOpenedWorldSimJobId, generatedCard?.world_sim_job, onOpenWorldSimScene, worldSimResultScene]);
+
+  useEffect(() => {
+    const jobId = generatedCard?.world_sim_job?.jobId;
+    const status = generatedCard?.world_sim_job?.status;
+    if (!jobId || isWorldSimJobTerminal(status)) return;
+
+    let active = true;
+    let timer: number | undefined;
+
+    const poll = async () => {
+      try {
+        const result = (await getWorldSimJobResult(jobId)) as WorldSimJobResult<any, CardData>;
+        if (!active) return;
+
+        setGeneratedCard((current) => {
+          if (!current || current.world_sim_job?.jobId !== jobId) {
+            return current;
+          }
+
+          if (result.card) {
+            return {
+              ...result.card,
+              world_sim_job: result.job,
+            };
+          }
+
+          return {
+            ...current,
+            world_sim_job: result.job,
+            world_sim: result.digest ? { ...(current.world_sim || {}), ...result.digest } : current.world_sim,
+          };
+        });
+
+        if (!isWorldSimJobTerminal(result.job?.status)) {
+          timer = window.setTimeout(poll, 4000);
+        }
+      } catch (jobError) {
+        console.error('WorldSim job polling error:', jobError);
+        if (active) {
+          timer = window.setTimeout(poll, 6500);
+        }
+      }
+    };
+
+    void poll();
+
+    return () => {
+      active = false;
+      if (timer) {
+        window.clearTimeout(timer);
+      }
+    };
+  }, [generatedCard?.world_sim_job?.jobId, generatedCard?.world_sim_job?.status]);
 
   useEffect(() => {
     const messages = [
@@ -476,6 +573,18 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
             </div>
           </div>
 
+          <div className="grid gap-3 rounded-[24px] border border-slate-200 bg-white p-4 md:grid-cols-3">
+            {[
+              'What may happen: una risposta diretta e leggibile.',
+              'Why: i motivi principali dietro al forecast.',
+              isWorldSimMode ? 'WorldSim: il layer profondo per leggere attori e reazioni a catena.' : 'WorldSim: si apre solo quando serve piu profondita.',
+            ].map((item) => (
+              <div key={item} className="rounded-[18px] bg-slate-50 px-4 py-3 text-sm leading-7 text-slate-600">
+                {item}
+              </div>
+            ))}
+          </div>
+
           <AnimatePresence initial={false}>
             {isAdvancedOpen && (
               <motion.div
@@ -596,18 +705,7 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
               ))}
             </div>
           </div>
-          <div className="oracle-panel rounded-[32px] p-6">
-            <div className="section-kicker !text-rose-200">{capabilities.worldSimAvailable ? WORLD_SIM_BRAND.name : WORLD_SIM_BRAND.previewName}</div>
-            <h3 className="mt-3 text-2xl font-display font-semibold text-white">Quando serve un livello di profondita in piu.</h3>
-            <div className="mt-5 space-y-3">
-              <div className="rounded-[22px] border border-white/10 bg-white/5 p-4 text-sm leading-7 text-slate-300">
-                Usa 12 mesi o Massimo rigore solo quando vuoi leggere un tema a piu strati e con piu contesto causale.
-              </div>
-              <div className="rounded-[22px] border border-white/10 bg-white/5 p-4 text-sm leading-7 text-slate-300">
-                {capabilities.worldSimAvailable ? WORLD_SIM_BRAND.honestNote : RUNTIME_COPY.worldSimPreview}
-              </div>
-            </div>
-          </div>
+          <WorldSimInlineCard data={worldSimPreviewScene} onOpen={() => onOpenWorldSimScene(worldSimPreviewScene, null)} />
         </section>
       )}
 
@@ -616,7 +714,7 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
           <div className="grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
             <div className="space-y-5">
               <div className="editorial-panel rounded-[28px] p-5">
-                <div className="section-kicker">Answer</div>
+                <div className="section-kicker">What may happen</div>
                 <div className="mt-3 flex flex-wrap items-center gap-3 text-sm font-medium text-slate-500">
                   <span className="rounded-full bg-slate-950 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-white">
                     {filters.horizon === 'now' ? '7 giorni' : filters.horizon}
@@ -631,6 +729,24 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
               </div>
 
               <CrystalCard card={generatedCard} onSave={handleSaveCard} isSaved={isCardSaved} />
+
+              <div className="editorial-panel rounded-[28px] p-5">
+                <div className="section-kicker">Local context</div>
+                {isLoadingInsights ? (
+                  <div className="mt-4 inline-flex items-center gap-2 text-sm font-medium text-slate-500">
+                    <Loader2 className="h-4 w-4 animate-spin text-[#1453e8]" />
+                    Recupero il contesto locale...
+                  </div>
+                ) : localInsights ? (
+                  <div className="mt-4 prose prose-sm max-w-none text-slate-600">
+                    <Markdown>{localInsights.text}</Markdown>
+                  </div>
+                ) : (
+                  <p className="mt-4 text-sm leading-7 text-slate-500">
+                    Quando la domanda ha un luogo chiaro, qui aggiungo il contesto locale senza togliere spazio alla previsione principale.
+                  </p>
+                )}
+              </div>
             </div>
 
             <div className="space-y-5">
@@ -657,23 +773,13 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
                 </div>
               </div>
 
-              <div className="editorial-panel rounded-[28px] p-5">
-                <div className="section-kicker">Local context</div>
-                {isLoadingInsights ? (
-                  <div className="mt-4 inline-flex items-center gap-2 text-sm font-medium text-slate-500">
-                    <Loader2 className="h-4 w-4 animate-spin text-[#1453e8]" />
-                    Recupero il contesto locale...
-                  </div>
-                ) : localInsights ? (
-                  <div className="mt-4 prose prose-sm max-w-none text-slate-600">
-                    <Markdown>{localInsights.text}</Markdown>
-                  </div>
-                ) : (
-                  <p className="mt-4 text-sm leading-7 text-slate-500">
-                    Quando la domanda ha un luogo chiaro, qui aggiungo il contesto locale senza togliere spazio alla previsione principale.
-                  </p>
-                )}
-              </div>
+              <WorldSimInlineCard
+                data={worldSimResultScene}
+                compact
+                job={generatedCard.world_sim_job || null}
+                onOpen={() => onOpenWorldSimScene(worldSimResultScene, generatedCard.world_sim_job || null)}
+                ctaLabel={generatedCard.world_sim?.enabled ? 'Apri il layer simulativo' : WORLD_SIM_BRAND.enterLabel}
+              />
             </div>
           </div>
 

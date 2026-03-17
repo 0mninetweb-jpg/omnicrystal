@@ -22,7 +22,10 @@ import { OnboardingState } from '../types/onboarding';
 import { mockCards } from '../data/mockData';
 import { useAppRuntime } from '../context/AppRuntimeContext';
 import { PRODUCT_BRAND, RUNTIME_COPY, SECTION_COPY, WORLD_SIM_BRAND } from '../content/brand';
+import { getDefaultWorldSimPreviewDataset } from '../lib/worldSimScene';
+import { formatProbabilityLabel, getMarketSignalLabel, getMarketSignalState, hasPredictionMarketFrame } from '../lib/predictionMarket';
 import { cn } from './CrystalCard';
+import type { WorldSimSceneData } from '../types/worldSim';
 
 type HomeProps = {
   user: any;
@@ -31,6 +34,7 @@ type HomeProps = {
   onNavigate: (view: 'forecast' | 'nextletter' | 'watchlist' | 'profile') => void;
   onForecastIntent: (query?: string) => void;
   onOpenTutorial: () => void;
+  onOpenWorldSimScene: (data: WorldSimSceneData) => void;
   onboardingState: OnboardingState;
 };
 
@@ -61,19 +65,6 @@ const CITY_PULSE: Array<{ city: string; signal: string; score: number; trend: 'u
   { city: 'Torino', signal: 'Manifattura in transizione', score: 77, trend: 'flat' },
 ];
 
-const WORLDSIM_PREVIEWS = [
-  {
-    title: 'Public opinion drift in Europa',
-    subtitle: 'Utile quando la previsione dipende da coalizioni, pressione pubblica e reazioni a catena.',
-    details: ['Who moves it', 'Where it can shift', 'What changes the odds'],
-  },
-  {
-    title: 'Escalation geopolitica',
-    subtitle: 'Utile quando uno shock puo propagarsi tra attori e sistemi, non solo nei titoli del giorno.',
-    details: ['Key actors', 'Pressure points', 'Possible spillovers'],
-  },
-];
-
 const GUEST_WATCHLIST: WatchlistPulseItem[] = [
   { id: 'guest-1', entity: 'Roma', type: 'City', pulse: 'Hot mobility', trend: 'up', domains: ['Tourism', 'Transit'] },
   { id: 'guest-2', entity: 'Italia', type: 'Country', pulse: 'Macro under watch', trend: 'flat', domains: ['Inflation', 'Energy'] },
@@ -86,6 +77,13 @@ function getWatchlistTrendTone(trend?: 'up' | 'down' | 'flat') {
   return 'text-slate-600 bg-slate-100 border-slate-200';
 }
 
+function getMarketTone(state: ReturnType<typeof getMarketSignalState>) {
+  if (state === 'calibrated') return 'border-sky-100 bg-sky-50 text-sky-700';
+  if (state === 'diverge') return 'border-rose-100 bg-rose-50 text-rose-700';
+  if (state === 'watch') return 'border-amber-100 bg-amber-50 text-amber-700';
+  return 'border-emerald-100 bg-emerald-50 text-emerald-700';
+}
+
 export function Home({
   user,
   isGuest,
@@ -93,6 +91,7 @@ export function Home({
   onNavigate,
   onForecastIntent,
   onOpenTutorial,
+  onOpenWorldSimScene,
   onboardingState,
 }: HomeProps) {
   const capabilities = useAppRuntime();
@@ -103,6 +102,7 @@ export function Home({
   const [isSavingQuote, setIsSavingQuote] = useState(false);
   const [watchlistItems, setWatchlistItems] = useState<WatchlistPulseItem[]>(GUEST_WATCHLIST);
   const [todayCards, setTodayCards] = useState<CardData[]>(mockCards.slice(0, 3));
+  const worldSimMode = capabilities.worldSimAvailable ? 'live' : 'preview';
 
   useEffect(() => {
     const fetchQuotes = async () => {
@@ -192,6 +192,19 @@ export function Home({
     [onForecastIntent, onNavigate, onboardingState.completedChecklist]
   );
 
+  const featuredWorldSimScene = useMemo(
+    () => getDefaultWorldSimPreviewDataset('public-opinion', worldSimMode),
+    [worldSimMode]
+  );
+
+  const worldSimPreviewCards = useMemo(
+    () => [
+      getDefaultWorldSimPreviewDataset('public-opinion', worldSimMode),
+      getDefaultWorldSimPreviewDataset('geopolitical-escalation', worldSimMode),
+    ],
+    [worldSimMode]
+  );
+
   const handleSaveQuote = async (quote: CrystalQuote) => {
     if (!user?.uid) {
       onLogin?.();
@@ -265,16 +278,14 @@ export function Home({
 
           <div className="oracle-panel rounded-[32px] p-6 md:p-7">
             <div className="section-kicker !text-rose-200">{worldSimLabel}</div>
-            <h3 className="mt-3 text-2xl font-display font-semibold text-white md:text-3xl">
-              Un layer premium per le domande piu delicate.
-            </h3>
+            <h3 className="mt-3 text-2xl font-display font-semibold text-white md:text-3xl">Una simulation chamber per leggere il mondo da sopra.</h3>
             <p className="mt-3 text-sm leading-7 text-slate-300">
               {capabilities.worldSimAvailable
-                ? 'Usalo quando il forecast dipende da reazioni a catena, attori chiave e punti di svolta difficili da leggere con un solo numero.'
+                ? 'Aprilo quando il forecast dipende da attori, attriti e reazioni a catena che non stanno bene dentro un solo numero.'
                 : RUNTIME_COPY.worldSimPreview}
             </p>
             <div className="mt-6 grid gap-3">
-              {WORLDSIM_PREVIEWS[0].details.map((item) => (
+              {['Who moves first', 'Where pressure builds', 'What changes the odds'].map((item) => (
                 <div
                   key={item}
                   className="flex items-center justify-between rounded-[20px] border border-white/10 bg-white/5 px-4 py-3 text-sm font-medium text-white"
@@ -284,6 +295,13 @@ export function Home({
                 </div>
               ))}
             </div>
+            <button
+              onClick={() => onOpenWorldSimScene(featuredWorldSimScene)}
+              className="mt-6 inline-flex items-center gap-2 rounded-full bg-white px-4 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-slate-100"
+            >
+              Apri la simulation chamber
+              <ArrowRight className="h-4 w-4" />
+            </button>
             <p className="mt-5 text-xs leading-6 text-slate-400">{WORLD_SIM_BRAND.honestNote}</p>
           </div>
         </div>
@@ -341,6 +359,13 @@ export function Home({
           <div className="mt-6 grid gap-4">
             {todayCards.map((card) => (
               <div key={card.card_id} className="rounded-[24px] border border-slate-200 bg-white p-5">
+                {(() => {
+                  const marketFrame = card.prediction_market_frame || card.world_sim?.prediction_market_frame || null;
+                  const hasMarketFrame = hasPredictionMarketFrame(marketFrame);
+                  const marketState = getMarketSignalState(marketFrame);
+
+                  return (
+                    <>
                 <div className="flex items-center justify-between gap-4">
                   <div>
                     <div className="text-sm font-semibold text-slate-950">{card.title}</div>
@@ -350,6 +375,19 @@ export function Home({
                     {Math.round(card.trust_layer.confidence_score * 100)}% trust
                   </span>
                 </div>
+                {hasMarketFrame && (
+                  <div className="mt-4 flex flex-wrap items-center gap-2">
+                    <span className={cn('rounded-full border px-3 py-1 text-[11px] font-semibold', getMarketTone(marketState))}>
+                      {getMarketSignalLabel(marketFrame)}
+                    </span>
+                    <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-medium text-slate-600">
+                      Market {formatProbabilityLabel(marketFrame?.implied_probability ?? marketFrame?.prior_probability)}
+                    </span>
+                  </div>
+                )}
+                    </>
+                  );
+                })()}
               </div>
             ))}
           </div>
@@ -393,13 +431,17 @@ export function Home({
           <div className="flex items-center justify-between gap-4">
             <div>
               <div className="section-kicker">{worldSimLabel}</div>
-              <h3 className="mt-3 text-2xl font-display font-semibold text-slate-950">Quando entra il layer premium.</h3>
+              <h3 className="mt-3 text-2xl font-display font-semibold text-slate-950">Quando vale la pena aprire il layer simulativo.</h3>
             </div>
           </div>
 
           <div className="mt-6 space-y-4">
-            {WORLDSIM_PREVIEWS.map((preview) => (
-              <div key={preview.title} className="rounded-[24px] border border-slate-200 bg-white p-5">
+            {worldSimPreviewCards.map((preview) => (
+              <button
+                key={preview.id}
+                onClick={() => onOpenWorldSimScene(preview)}
+                className="w-full rounded-[24px] border border-slate-200 bg-white p-5 text-left transition hover:border-slate-300 hover:-translate-y-0.5"
+              >
                 <div className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-rose-500">
                   <Sparkles className="h-4 w-4" />
                   {capabilities.worldSimAvailable ? WORLD_SIM_BRAND.name : WORLD_SIM_BRAND.previewName}
@@ -407,7 +449,7 @@ export function Home({
                 <h4 className="mt-3 text-lg font-display font-semibold text-slate-950">{preview.title}</h4>
                 <p className="mt-2 text-sm leading-7 text-slate-600">{preview.subtitle}</p>
                 <div className="mt-4 flex flex-wrap gap-2">
-                  {preview.details.map((detail) => (
+                  {preview.actors.slice(0, 3).map((detail) => (
                     <span
                       key={detail}
                       className="rounded-full border border-rose-100 bg-rose-50 px-3 py-1 text-[11px] font-semibold text-rose-700"
@@ -416,7 +458,7 @@ export function Home({
                     </span>
                   ))}
                 </div>
-              </div>
+              </button>
             ))}
             {!capabilities.worldSimAvailable && (
               <div className="rounded-[24px] border border-amber-200 bg-amber-50 p-4 text-sm leading-7 text-amber-800">

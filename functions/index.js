@@ -6,10 +6,24 @@ const { defineSecret } = require("firebase-functions/params");
 const googleTrends = require("google-trends-api");
 const Stripe = require("stripe");
 const {
-  getWorldSimDigest,
-  enhanceCardWithWorldSim,
-  enhanceNextletterWithWorldSim,
-} = require("./worldSim");
+  createManualWorldSimJob,
+  createMatrixSimulationJob,
+  maybeCreatePredictionWorldSimJob,
+  maybeCreateNextletterWorldSimJobs,
+  getWorldSimJobDetail,
+  getWorldSimJobResult,
+  getMatrixSimulationJobDetail,
+  getMatrixSimulationJobResult,
+  cancelWorldSimJob,
+  cancelMatrixSimulationJob,
+  getWorldSimRuntimeHealth,
+} = require("./worldSimJobs");
+const {
+  attachPolymarketToCard,
+  attachPolymarketToNextletter,
+  getPolymarketPulse,
+  getPolymarketRuntimeHealth,
+} = require("./polymarket");
 
 const GEMINI_API_KEY = defineSecret("GEMINI_API_KEY");
 const NIXTLA_API_KEY = defineSecret("NIXTLA_API_KEY");
@@ -273,6 +287,16 @@ function createApiError(code, message, status = 400, details) {
   error.status = status;
   error.details = details;
   return error;
+}
+
+function createWorldSimJobContext() {
+  return {
+    db,
+    admin,
+    withRetry,
+    fetchJson,
+    getGemini,
+  };
 }
 
 function getSourceView(req, fallback = "app") {
@@ -586,6 +610,10 @@ function normalizeCard(card, queryPlan) {
         license_summary: sanitizeList(card?.trust_layer?.provenance_summary?.license_summary),
       },
     },
+    prediction_market_frame:
+      card?.prediction_market_frame && typeof card.prediction_market_frame === "object"
+        ? { ...card.prediction_market_frame }
+        : null,
   };
 }
 
@@ -895,8 +923,16 @@ async function predict(queryText, queryPlan, userContext, options = {}) {
   if (domain) {
     const cached = await fetchCachedCard(queryText, queryPlan, domain, city, engine);
     if (cached) {
+      const enrichedCachedCard = await attachPolymarketToCard({
+        db,
+        admin,
+        fetchJson,
+        queryText,
+        queryPlan,
+        card: normalizeCard(cached, queryPlan),
+      });
       return {
-        ...cached,
+        ...enrichedCachedCard,
         _source: "cache",
         _billing: {
           action,
@@ -1069,31 +1105,18 @@ REGOLE FONDAMENTALI:
     })
   );
 
-  let card = normalizeCard(JSON.parse(response.text || "{}"), queryPlan);
-  try {
-    const worldSimDigest = await getWorldSimDigest({
-      ai,
-      db,
-      admin,
-      withRetry,
-      fetchJson,
-      queryText,
-      queryPlan,
-      userContext,
-      engine,
-      plan,
-      sidecarBaseUrl: process.env.WORLDSIM_BASE_URL,
-      sidecarApiKey: process.env.WORLDSIM_API_KEY,
-    });
-    if (worldSimDigest) {
-      card = enhanceCardWithWorldSim(card, worldSimDigest);
-    }
-  } catch (error) {
-    console.error("WorldSim unavailable:", error);
-  }
+  const baseCard = normalizeCard(JSON.parse(response.text || "{}"), queryPlan);
   if (domain) {
-    await saveCachedCard(card, queryText, queryPlan, domain, city, engine);
+    await saveCachedCard(baseCard, queryText, queryPlan, domain, city, engine);
   }
+  const card = await attachPolymarketToCard({
+    db,
+    admin,
+    fetchJson,
+    queryText,
+    queryPlan,
+    card: baseCard,
+  });
   return {
     ...card,
     _source: "live-server",
@@ -1188,27 +1211,13 @@ OUTPUT JSON:
       },
     })
   );
-  let letter = JSON.parse(response.text || "{}");
-
-  try {
-    letter = await enhanceNextletterWithWorldSim({
-      ai,
-      db,
-      admin,
-      withRetry,
-      fetchJson,
-      interests: topics,
-      userContext,
-      letter,
-      plan: isPlan(options.plan) ? options.plan : "free",
-      sidecarBaseUrl: process.env.WORLDSIM_BASE_URL,
-      sidecarApiKey: process.env.WORLDSIM_API_KEY,
-    });
-  } catch (error) {
-    console.error("Nextletter WorldSim unavailable:", error);
-  }
-
-  return letter;
+  const baseLetter = JSON.parse(response.text || "{}");
+  return attachPolymarketToNextletter({
+    db,
+    admin,
+    fetchJson,
+    letter: baseLetter,
+  });
 }
 
 async function generateCrystalQuotes() {
@@ -1376,7 +1385,12 @@ exports.api = onRequest(
       }
 
       if (req.method === "GET" && route === "/health") {
-        respondJson(res, 200, { ok: true, timestamp: new Date().toISOString() });
+        respondJson(res, 200, {
+          ok: true,
+          timestamp: new Date().toISOString(),
+          worldSim: getWorldSimRuntimeHealth(),
+          polymarket: getPolymarketRuntimeHealth(),
+        });
         return;
       }
 
@@ -1389,9 +1403,107 @@ exports.api = onRequest(
       const decodedUser = await requireUser(req);
       const sourceView = getSourceView(
         req,
-        route === "/predict" ? "search" : route === "/nextletter" ? "nextletter" : route === "/profile-chat" ? "profile" : "app"
+        route === "/predict"
+          ? "search"
+          : route === "/nextletter"
+            ? "nextletter"
+            : route.startsWith("/worldsim/")
+              ? "worldsim"
+              : route === "/profile-chat"
+                ? "profile"
+                : "app"
       );
       const userState = await syncUserState(decodedUser.uid, decodedUser);
+
+      if (req.method === "POST" && route === "/worldsim/jobs") {
+        const created = await createManualWorldSimJob(createWorldSimJobContext(), {
+          uid: decodedUser.uid,
+          plan: userState.plan,
+          source: typeof body.source === "string" ? body.source : "manual",
+          sourceRef: typeof body.sourceRef === "string" ? body.sourceRef : "manual",
+          queryText: body.query || "",
+          queryPlan: body.queryPlan || {},
+          userContext: body.userContext || null,
+          sourcePayload: body.sourcePayload || null,
+        });
+        respondJson(res, 200, created);
+        return;
+      }
+
+      if (req.method === "POST" && route === "/worldsim/interventions") {
+        const created = await createMatrixSimulationJob(createWorldSimJobContext(), {
+          uid: decodedUser.uid,
+          plan: userState.plan,
+          source: typeof body.source === "string" ? body.source : "matrix-simulation",
+          sourceRef: typeof body.sourceRef === "string" ? body.sourceRef : "worldsim-chamber",
+          queryText:
+            typeof body.baselineQuery === "string"
+              ? body.baselineQuery
+              : typeof body.query === "string"
+                ? body.query
+                : "",
+          queryPlan: body.queryPlan || {},
+          userContext: body.userContext || null,
+          interventionPayload: body.intervention || {},
+          branchParentId: typeof body.branchParentId === "string" ? body.branchParentId : null,
+        });
+        respondJson(res, 200, created);
+        return;
+      }
+
+      if (req.method === "GET" && /^\/worldsim\/jobs\/[^/]+$/.test(route)) {
+        const jobId = decodeURIComponent(route.split("/")[3] || "");
+        const detail = await getWorldSimJobDetail(createWorldSimJobContext(), decodedUser.uid, jobId);
+        respondJson(res, 200, detail);
+        return;
+      }
+
+      if (req.method === "GET" && /^\/worldsim\/jobs\/[^/]+\/result$/.test(route)) {
+        const jobId = decodeURIComponent(route.split("/")[3] || "");
+        const result = await getWorldSimJobResult(createWorldSimJobContext(), decodedUser.uid, jobId);
+        respondJson(res, 200, result);
+        return;
+      }
+
+      if (req.method === "POST" && /^\/worldsim\/jobs\/[^/]+\/cancel$/.test(route)) {
+        const jobId = decodeURIComponent(route.split("/")[3] || "");
+        const detail = await cancelWorldSimJob(createWorldSimJobContext(), decodedUser.uid, jobId);
+        respondJson(res, 200, detail);
+        return;
+      }
+
+      if (req.method === "GET" && /^\/worldsim\/interventions\/[^/]+$/.test(route)) {
+        const jobId = decodeURIComponent(route.split("/")[3] || "");
+        const detail = await getMatrixSimulationJobDetail(createWorldSimJobContext(), decodedUser.uid, jobId);
+        respondJson(res, 200, detail);
+        return;
+      }
+
+      if (req.method === "GET" && /^\/worldsim\/interventions\/[^/]+\/result$/.test(route)) {
+        const jobId = decodeURIComponent(route.split("/")[3] || "");
+        const result = await getMatrixSimulationJobResult(createWorldSimJobContext(), decodedUser.uid, jobId);
+        respondJson(res, 200, result);
+        return;
+      }
+
+      if (req.method === "POST" && /^\/worldsim\/interventions\/[^/]+\/cancel$/.test(route)) {
+        const jobId = decodeURIComponent(route.split("/")[3] || "");
+        const detail = await cancelMatrixSimulationJob(createWorldSimJobContext(), decodedUser.uid, jobId);
+        respondJson(res, 200, detail);
+        return;
+      }
+
+      if (req.method === "POST" && route === "/polymarket/pulse") {
+        const pulse = await getPolymarketPulse({
+          db,
+          admin,
+          fetchJson,
+          queryText: typeof body.query === "string" ? body.query : typeof body.queryText === "string" ? body.queryText : "",
+          queryPlan: body.queryPlan || {},
+        });
+        respondJson(res, 200, pulse);
+        return;
+      }
 
       if (req.method === "POST" && route === "/billing/create-checkout-session") {
         const plan = isPlan(body.plan) && body.plan !== "free" ? body.plan : null;
@@ -1458,7 +1570,7 @@ exports.api = onRequest(
         const actionSpec = getPredictSpec(body.queryPlan || {}, sourceView === "dashboard" ? "dashboard" : "search");
         ensureActionAllowed(userState, actionSpec);
         try {
-          const card = await predict(body.query || "", body.queryPlan || {}, body.userContext || null, {
+          const baseCard = await predict(body.query || "", body.queryPlan || {}, body.userContext || null, {
             engine: actionSpec.engine,
             action: actionSpec.action,
             cost: actionSpec.cost,
@@ -1469,6 +1581,16 @@ exports.api = onRequest(
             engine: actionSpec.engine,
             horizon: actionSpec.horizon,
             confidence: actionSpec.confidence,
+          });
+          const { card } = await maybeCreatePredictionWorldSimJob(createWorldSimJobContext(), {
+            uid: decodedUser.uid,
+            queryText: body.query || "",
+            queryPlan: body.queryPlan || {},
+            userContext: body.userContext || null,
+            plan: userState.plan,
+            engine: actionSpec.engine,
+            sourceRef: sourceView,
+            card: baseCard,
           });
           respondJson(res, 200, card);
           return;
@@ -1513,12 +1635,19 @@ exports.api = onRequest(
         };
         ensureActionAllowed(userState, actionSpec);
         try {
-          const letter = await generateNextletter(body.interests || [], body.userContext || null, {
+          const baseLetter = await generateNextletter(body.interests || [], body.userContext || null, {
             plan: userState.plan,
           });
           await consumeCredits(decodedUser.uid, decodedUser, actionSpec, sourceView, {
             route: "nextletter",
             topicCount: Array.isArray(body.interests) ? body.interests.length : 0,
+          });
+          const letter = await maybeCreateNextletterWorldSimJobs(createWorldSimJobContext(), {
+            uid: decodedUser.uid,
+            interests: body.interests || [],
+            userContext: body.userContext || null,
+            plan: userState.plan,
+            letter: baseLetter,
           });
           respondJson(res, 200, letter);
           return;

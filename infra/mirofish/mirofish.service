@@ -1,0 +1,24 @@
+[Unit]
+Description=MiroFish Original Runtime
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mirofish
+Group=mirofish
+WorkingDirectory=/opt/mirofish/backend
+EnvironmentFile=/opt/mirofish/.env
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONIOENCODING=utf-8
+Environment=FLASK_HOST=0.0.0.0
+Environment=FLASK_PORT=5001
+ExecStart=/opt/mirofish/backend/.venv/bin/python run.py
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

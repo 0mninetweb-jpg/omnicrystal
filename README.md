@@ -8,7 +8,7 @@ Crystal now ships with:
 
 - the existing Firebase/React app
 - the server-side prediction layer in `functions/`
-- an optional `world-sim/` sidecar for the Oracle path inspired by a MiroFish-style graph -> simulation -> report workflow
+- an optional `world-sim/` adapter that can run in fallback mode or orchestrate the original MiroFish/OASIS runtime on a dedicated VM
 
 ## Run locally
 
@@ -20,17 +20,20 @@ Crystal now ships with:
 4. Run the frontend:
    `npm run dev`
 
-## Optional Oracle WorldSim sidecar
+## Optional Oracle WorldSim adapter
 
-The Oracle path can call a dedicated Python sidecar.
+The Oracle path can call a dedicated Python adapter.
 
 1. Go to [`world-sim/`](C:/Users/Fiorenza/OneDrive/Desktop/Codex/crystal-review-0316/world-sim/README.md)
 2. Start the service on `http://localhost:8081`
-3. Set:
+3. Set for async WorldSim jobs:
+   - `MIROFISH_BASE_URL`
+   - `MIROFISH_API_KEY`
+4. Optionally set for the legacy synchronous sidecar path:
    - `WORLDSIM_BASE_URL`
    - `WORLDSIM_API_KEY`
 
-If the sidecar is not configured, Crystal falls back to an internal server-side WorldSim generation path inside Firebase Functions.
+If the adapter is not configured against the original VM, it still works in fallback mode and returns a local async WorldSim digest.
 
 ## Cloud Run deploy
 
@@ -40,6 +43,8 @@ When `omnicrystal` is on `Blaze`, you can deploy the sidecar with:
 cd world-sim
 .\deploy-cloudrun.ps1
 ```
+
+For the full `GCE VM + Cloud Run adapter` rollout, use the step-by-step operational kit in [infra/mirofish](C:/Users/Fiorenza/OneDrive/Desktop/Codex/crystal-review-0316/infra/mirofish/README.md).
 
 Then copy the resulting values into:
 

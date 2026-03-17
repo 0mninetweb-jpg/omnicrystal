@@ -2,7 +2,7 @@ import React from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Check, Gem, Lock, Sparkles, X, Zap } from 'lucide-react';
 import { cn } from './CrystalCard';
-import { formatCredits, formatPrice, getPlanLabel, PLAN_OFFERS } from '../lib/crystalPlans';
+import { formatCredits, formatPrice, getPlanLabel, getWorldSimPlanTier, PLAN_OFFERS } from '../lib/crystalPlans';
 import { PRODUCT_BRAND, WORLD_SIM_BRAND } from '../content/brand';
 import type { BillingInterval, EntitlementSnapshot, PlanId, UpgradeIntent } from '../types/entitlements';
 
@@ -108,6 +108,7 @@ export function UpgradeModal({
             <div className="relative grid grid-cols-1 gap-6 p-8 md:grid-cols-2 md:p-10">
               {plans.map((plan) => {
                 const offer = PLAN_OFFERS[plan];
+                const worldSimTier = getWorldSimPlanTier(plan);
                 const isRecommended = recommendedPlan === plan;
                 const isCurrent = entitlements.plan === plan;
 
@@ -151,6 +152,10 @@ export function UpgradeModal({
                         <Lock className="h-4 w-4 text-sky-400" />
                         Watchlist fino a {offer.watchlistLimit}
                       </div>
+                      <div className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm font-bold text-white">
+                        <Sparkles className="h-4 w-4 text-rose-300" />
+                        WorldSim {worldSimTier.depthLabel} · {worldSimTier.agentCount} agenti
+                      </div>
                     </div>
 
                     <div className="mb-8 space-y-3">
@@ -160,11 +165,9 @@ export function UpgradeModal({
                           <span>{feature}</span>
                         </div>
                       ))}
-                      {plan === 'pro' && (
-                        <div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm font-bold text-rose-200">
-                          {WORLD_SIM_BRAND.name} e i forecast premium entrano in gioco quando la query richiede 12 mesi o Massimo Rigore.
-                        </div>
-                      )}
+                      <div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm font-bold text-rose-200">
+                        {WORLD_SIM_BRAND.name} fa parte di ogni piano. Cambiano risoluzione, coda e profondita: {worldSimTier.monthlyRunsLabel}, {worldSimTier.queueLabel.toLowerCase()}.
+                      </div>
                     </div>
 
                     {isGuest ? (

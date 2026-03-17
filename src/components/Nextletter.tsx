@@ -16,19 +16,25 @@ import {
 import { AnimatePresence, motion } from 'framer-motion';
 import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
-import { generateCrystalQuotes, generateNextletter } from '../services/geminiService';
-import { CrystalQuote } from '../types/crystal';
+import { generateCrystalQuotes, generateNextletter, getWorldSimJobResult } from '../services/geminiService';
+import { CrystalQuote, PredictionMarketFrame } from '../types/crystal';
 import { useCrystalPlan } from '../context/CrystalPlanContext';
 import { useAppRuntime } from '../context/AppRuntimeContext';
 import { ACTION_CATALOG, formatCredits, getPlanLabel } from '../lib/crystalPlans';
+import { formatProbabilityLabel, formatSignedDelta, getMarketSignalLabel, getMarketSignalState, hasPredictionMarketFrame } from '../lib/predictionMarket';
+import { createWorldSimSceneData } from '../lib/worldSimScene';
 import { RUNTIME_COPY, SECTION_COPY, WORLD_SIM_BRAND } from '../content/brand';
 import { cn } from './CrystalCard';
+import { WorldSimInlineCard } from './WorldSimInlineCard';
+import type { WorldSimJobRef, WorldSimJobResult } from '../types/worldSimJob';
+import { isTerminalWorldSimJobStatus as isWorldSimJobTerminal } from '../types/worldSimJob';
 
 interface NextletterProps {
   user: any;
   isGuest?: boolean;
   onLogin?: () => void;
   onGenerateCard?: (query: string) => void;
+  onOpenWorldSimScene: (data: any, job?: WorldSimJobRef | null) => void;
 }
 
 type GeneratedSection = {
@@ -42,18 +48,15 @@ type GeneratedSection = {
   impact?: string;
   so_what?: string;
   query_suggestion?: string;
+  prediction_market_frame?: PredictionMarketFrame | null;
   world_sim?: {
     simulation_mode?: string;
     narrative_arc?: string;
     pivotal_actors?: string[];
     intervention_points?: string[];
-    prediction_market_frame?: {
-      outcome?: string;
-      horizon?: string;
-      resolution_criteria?: string;
-      reference_market?: string;
-    };
+    prediction_market_frame?: PredictionMarketFrame | null;
   };
+  world_sim_job?: WorldSimJobRef | null;
 };
 
 type GeneratedLetter = {
@@ -104,6 +107,13 @@ function getImpactTone(impact?: string) {
   return 'bg-emerald-50 text-emerald-700 border-emerald-100';
 }
 
+function getMarketTone(state: ReturnType<typeof getMarketSignalState>) {
+  if (state === 'calibrated') return 'border-sky-100 bg-sky-50 text-sky-700';
+  if (state === 'diverge') return 'border-rose-100 bg-rose-50 text-rose-700';
+  if (state === 'watch') return 'border-amber-100 bg-amber-50 text-amber-700';
+  return 'border-emerald-100 bg-emerald-50 text-emerald-700';
+}
+
 function getSectionIcon(topic?: string) {
   const normalized = (topic || '').toLowerCase();
   if (normalized.includes('energy')) return <Zap className="h-5 w-5" />;
@@ -111,7 +121,7 @@ function getSectionIcon(topic?: string) {
   return <Lightbulb className="h-5 w-5" />;
 }
 
-export function Nextletter({ user, isGuest, onLogin, onGenerateCard }: NextletterProps) {
+export function Nextletter({ user, isGuest, onLogin, onGenerateCard, onOpenWorldSimScene }: NextletterProps) {
   const { entitlements, runMeteredAction } = useCrystalPlan();
   const capabilities = useAppRuntime();
   const [activeEdition, setActiveEdition] = useState<'global' | 'personal'>('global');
@@ -126,6 +136,17 @@ export function Nextletter({ user, isGuest, onLogin, onGenerateCard }: Nextlette
   const [savedQuotes, setSavedQuotes] = useState<string[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [generationError, setGenerationError] = useState<string | null>(null);
+  const nextletterWorldSimPreview = useMemo(
+    () =>
+      createWorldSimSceneData({
+        title: 'WorldSim inside Nextletter',
+        subtitle: 'Usa la stessa camera di simulazione per leggere attori, pressioni e punti di svolta anche dentro il briefing.',
+        question: 'Quale dinamica merita una lettura piu profonda questa settimana?',
+        mode: capabilities.worldSimAvailable ? 'live' : 'preview',
+        sourceLabel: 'Nextletter layer',
+      }),
+    [capabilities.worldSimAvailable]
+  );
 
   useEffect(() => {
     const fetchQuotes = async () => {
@@ -165,6 +186,86 @@ export function Nextletter({ user, isGuest, onLogin, onGenerateCard }: Nextlette
     if (customTopic.trim()) topics.push(customTopic.trim());
     return topics;
   }, [customTopic, selectedTopics]);
+
+  const pendingWorldSimJobIds = useMemo(() => {
+    if (!generatedLetter?.sections?.length) return [];
+    return Array.from(
+      new Set(
+        generatedLetter.sections
+          .map((section) => section.world_sim_job)
+          .filter((job): job is WorldSimJobRef => Boolean(job?.jobId))
+          .filter((job) => !isWorldSimJobTerminal(job.status))
+          .map((job) => job.jobId)
+      )
+    );
+  }, [generatedLetter]);
+
+  useEffect(() => {
+    if (pendingWorldSimJobIds.length === 0) return;
+
+    let active = true;
+    let timer: number | undefined;
+
+    const poll = async () => {
+      try {
+        const results = await Promise.all(
+          pendingWorldSimJobIds.map((jobId) => getWorldSimJobResult(jobId) as Promise<WorldSimJobResult<any, any, GeneratedSection>>)
+        );
+        if (!active) return;
+
+        setGeneratedLetter((current) => {
+          if (!current?.sections?.length) return current;
+          const resultMap = new Map(results.map((result) => [result.job.jobId, result]));
+
+          return {
+            ...current,
+            sections: current.sections.map((section) => {
+              const jobId = section.world_sim_job?.jobId;
+              if (!jobId) return section;
+              const result = resultMap.get(jobId);
+              if (!result) return section;
+
+              if (result.section) {
+                return {
+                  ...result.section,
+                  world_sim_job: result.job,
+                };
+              }
+
+              return {
+                ...section,
+                world_sim_job: result.job,
+                world_sim: result.digest
+                  ? {
+                      ...(section.world_sim || {}),
+                      ...result.digest,
+                    }
+                  : section.world_sim,
+              };
+            }),
+          };
+        });
+
+        if (results.some((result) => !isWorldSimJobTerminal(result.job.status))) {
+          timer = window.setTimeout(poll, 5000);
+        }
+      } catch (jobError) {
+        console.error('Nextletter WorldSim polling error:', jobError);
+        if (active) {
+          timer = window.setTimeout(poll, 7000);
+        }
+      }
+    };
+
+    void poll();
+
+    return () => {
+      active = false;
+      if (timer) {
+        window.clearTimeout(timer);
+      }
+    };
+  }, [pendingWorldSimJobIds]);
 
   const handleSaveQuote = async (quote: CrystalQuote) => {
     if (!user?.uid) {
@@ -218,106 +319,181 @@ export function Nextletter({ user, isGuest, onLogin, onGenerateCard }: Nextlette
     }
   };
 
-  const renderSection = (section: GeneratedSection, index: number) => (
-    <article key={`${section.title || 'section'}-${index}`} className="rounded-[30px] border border-slate-200 bg-white p-6 shadow-[0_16px_35px_rgba(15,23,42,0.05)]">
-      <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-        <div className="flex gap-4">
-          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[18px] bg-[#e8eefc] text-[#1453e8]">
-            {getSectionIcon(section.topic)}
-          </div>
-          <div>
-            <div className="section-kicker">{section.topic || `Section ${index + 1}`}</div>
-            <h3 className="mt-2 text-2xl font-display font-semibold text-slate-950">{section.title || 'Nextletter'}</h3>
-          </div>
-        </div>
+  const renderSection = (section: GeneratedSection, index: number) => {
+    const sectionMarketFrame = section.prediction_market_frame || section.world_sim?.prediction_market_frame || null;
+    const hasMarketFrame = hasPredictionMarketFrame(sectionMarketFrame);
+    const marketState = getMarketSignalState(sectionMarketFrame);
+    const sectionWorldSimScene = createWorldSimSceneData({
+      title: section.title || section.topic || `Section ${index + 1}`,
+      subtitle: section.content,
+      question: section.query_suggestion || `Cosa potrebbe cambiare davvero il quadro di ${section.title || section.topic || 'questa sezione'}?`,
+      mode:
+        capabilities.worldSimAvailable &&
+        (section.world_sim_job?.status === 'completed' || Boolean(section.world_sim?.narrative_arc))
+          ? 'live'
+          : 'preview',
+      sourceLabel:
+        section.world_sim_job && section.world_sim_job.status !== 'completed'
+          ? 'MiroFish async job'
+          : section.world_sim
+            ? 'Nextletter section'
+            : 'Preview dataset',
+      narrativeArc: section.world_sim?.narrative_arc,
+      actors: section.world_sim?.pivotal_actors,
+      interventionPoints: section.world_sim?.intervention_points,
+      marketFrame: sectionMarketFrame || null,
+      job: section.world_sim_job || null,
+    });
 
-        <div className="flex flex-wrap gap-2">
-          {typeof section.probability === 'number' && (
-            <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
-              {section.probability}% probability
-            </span>
-          )}
-          {section.horizon && (
-            <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
-              {section.horizon}
-            </span>
-          )}
-          {section.impact && (
-            <span className={cn('rounded-full border px-3 py-1 text-xs font-semibold', getImpactTone(section.impact))}>
-              {section.impact} impact
-            </span>
-          )}
-        </div>
-      </div>
-
-      <div className="mt-5 grid gap-5 xl:grid-cols-[1.05fr_0.95fr]">
-        <div className="space-y-4">
-          <div>
-            <div className="section-kicker !text-slate-500">Summary</div>
-            <p className="mt-3 text-sm leading-8 text-slate-600">{section.content}</p>
-          </div>
-          {section.historical_context && (
-            <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-4">
-              <div className="section-kicker !text-slate-500">Why It Matters</div>
-              <p className="mt-3 text-sm leading-7 text-slate-600">{section.historical_context}</p>
+    return (
+      <article key={`${section.title || 'section'}-${index}`} className="rounded-[30px] border border-slate-200 bg-white p-6 shadow-[0_16px_35px_rgba(15,23,42,0.05)]">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+          <div className="flex gap-4">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[18px] bg-[#e8eefc] text-[#1453e8]">
+              {getSectionIcon(section.topic)}
             </div>
-          )}
+            <div>
+              <div className="section-kicker">{section.topic || `Section ${index + 1}`}</div>
+              <h3 className="mt-2 text-2xl font-display font-semibold text-slate-950">{section.title || 'Nextletter'}</h3>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            {typeof section.probability === 'number' && (
+              <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
+                {section.probability}% probability
+              </span>
+            )}
+            {section.horizon && (
+              <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
+                {section.horizon}
+              </span>
+            )}
+            {section.impact && (
+              <span className={cn('rounded-full border px-3 py-1 text-xs font-semibold', getImpactTone(section.impact))}>
+                {section.impact} impact
+              </span>
+            )}
+          </div>
         </div>
 
-        <div className="space-y-4">
-          {section.so_what && (
-            <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-4">
-              <div className="section-kicker !text-slate-500">What To Do</div>
-              <p className="mt-3 text-sm leading-7 text-slate-600">{section.so_what}</p>
+        <div className="mt-5 grid gap-5 xl:grid-cols-[1.05fr_0.95fr]">
+          <div className="space-y-4">
+            <div>
+              <div className="section-kicker !text-slate-500">Summary</div>
+              <p className="mt-3 text-sm leading-8 text-slate-600">{section.content}</p>
             </div>
-          )}
-
-          {section.world_sim && (
-            <div className="rounded-[24px] border border-rose-200 bg-rose-50 p-4">
-              <div className="section-kicker !text-rose-600">
-                {capabilities.worldSimAvailable ? WORLD_SIM_BRAND.name : WORLD_SIM_BRAND.previewName}
+            {section.historical_context && (
+              <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-4">
+                <div className="section-kicker !text-slate-500">Why It Matters</div>
+                <p className="mt-3 text-sm leading-7 text-slate-600">{section.historical_context}</p>
               </div>
-              {section.world_sim.narrative_arc && <p className="mt-3 text-sm leading-7 text-rose-800">{section.world_sim.narrative_arc}</p>}
-              {(section.world_sim.pivotal_actors || []).length > 0 && (
-                <div className="mt-4">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-rose-600">Pivotal actors</div>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {(section.world_sim.pivotal_actors || []).map((actor) => (
-                      <span key={actor} className="rounded-full border border-rose-100 bg-white px-3 py-1 text-xs font-semibold text-rose-700">
-                        {actor}
-                      </span>
+            )}
+          </div>
+
+          <div className="space-y-4">
+            {section.so_what && (
+              <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-4">
+                <div className="section-kicker !text-slate-500">What To Do</div>
+                <p className="mt-3 text-sm leading-7 text-slate-600">{section.so_what}</p>
+              </div>
+            )}
+
+            {hasMarketFrame && (
+              <div className="rounded-[24px] border border-slate-200 bg-white p-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="section-kicker !text-slate-500">What the market is pricing</div>
+                  <span className={cn('rounded-full border px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em]', getMarketTone(marketState))}>
+                    {getMarketSignalLabel(sectionMarketFrame)}
+                  </span>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600">
+                    Market {formatProbabilityLabel(sectionMarketFrame?.implied_probability ?? sectionMarketFrame?.prior_probability)}
+                  </span>
+                  <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600">
+                    Delta {formatSignedDelta(sectionMarketFrame?.divergence_vs_crystal)}
+                  </span>
+                </div>
+                {(sectionMarketFrame?.market_question || sectionMarketFrame?.reference_market) && (
+                  <p className="mt-3 text-sm leading-7 text-slate-600">
+                    {sectionMarketFrame?.market_question || sectionMarketFrame?.reference_market}
+                  </p>
+                )}
+                {sectionMarketFrame?.calibration_note && (
+                  <p className="mt-3 text-sm leading-7 text-slate-500">{sectionMarketFrame.calibration_note}</p>
+                )}
+              </div>
+            )}
+
+            {section.world_sim && (
+              <div className="rounded-[24px] border border-rose-200 bg-rose-50 p-4">
+                <div className="section-kicker !text-rose-600">
+                  {section.world_sim_job && section.world_sim_job.status !== 'completed'
+                    ? `${WORLD_SIM_BRAND.name} in progress`
+                    : capabilities.worldSimAvailable
+                      ? WORLD_SIM_BRAND.name
+                      : WORLD_SIM_BRAND.previewName}
+                </div>
+                {section.world_sim_job && (
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <span className="rounded-full border border-rose-200 bg-white px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-rose-700">
+                      {section.world_sim_job.status}
+                    </span>
+                    <span className="text-xs font-medium text-rose-700">
+                      {Math.round((section.world_sim_job.progress || 0) * 100)}% · {section.world_sim_job.agentCount} agenti
+                    </span>
+                  </div>
+                )}
+                {section.world_sim.narrative_arc && <p className="mt-3 text-sm leading-7 text-rose-800">{section.world_sim.narrative_arc}</p>}
+                {(section.world_sim.pivotal_actors || []).length > 0 && (
+                  <div className="mt-4">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-rose-600">Pivotal actors</div>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {(section.world_sim.pivotal_actors || []).map((actor) => (
+                        <span key={actor} className="rounded-full border border-rose-100 bg-white px-3 py-1 text-xs font-semibold text-rose-700">
+                          {actor}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {(section.world_sim.intervention_points || []).length > 0 && (
+                  <div className="mt-4 space-y-2">
+                    {(section.world_sim.intervention_points || []).map((point) => (
+                      <div key={point} className="flex items-start gap-3 text-sm leading-7 text-rose-800">
+                        <div className="mt-2 h-2.5 w-2.5 shrink-0 rounded-full bg-rose-400" />
+                        <span>{point}</span>
+                      </div>
                     ))}
                   </div>
-                </div>
-              )}
-              {(section.world_sim.intervention_points || []).length > 0 && (
-                <div className="mt-4 space-y-2">
-                  {(section.world_sim.intervention_points || []).map((point) => (
-                    <div key={point} className="flex items-start gap-3 text-sm leading-7 text-rose-800">
-                      <div className="mt-2 h-2.5 w-2.5 shrink-0 rounded-full bg-rose-400" />
-                      <span>{point}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
+                )}
+                <button
+                  onClick={() => onOpenWorldSimScene(sectionWorldSimScene, section.world_sim_job || null)}
+                  className="mt-4 inline-flex items-center gap-2 rounded-full border border-rose-200 bg-white px-4 py-2 text-sm font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100/70"
+                >
+                  Apri il layer simulativo
+                  <ArrowRight className="h-4 w-4" />
+                </button>
+              </div>
+            )}
+          </div>
         </div>
-      </div>
 
-      {section.query_suggestion && (
-        <div className="mt-5 border-t border-slate-200 pt-5">
-          <button
-            onClick={() => onGenerateCard?.(section.query_suggestion || '')}
-            className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
-          >
-            Apri forecast collegato
-            <ArrowRight className="h-4 w-4" />
-          </button>
-        </div>
-      )}
-    </article>
-  );
+        {section.query_suggestion && (
+          <div className="mt-5 border-t border-slate-200 pt-5">
+            <button
+              onClick={() => onGenerateCard?.(section.query_suggestion || '')}
+              className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+            >
+              Apri forecast collegato
+              <ArrowRight className="h-4 w-4" />
+            </button>
+          </div>
+        )}
+      </article>
+    );
+  };
 
   return (
     <div className="space-y-6">
@@ -542,6 +718,15 @@ export function Nextletter({ user, isGuest, onLogin, onGenerateCard }: Nextlette
                     <p className="mt-3 text-sm leading-7 text-slate-500">
                       Free ti fa provare il prodotto. Plus e Pro lo rendono piu continuo e personale.
                     </p>
+                  </div>
+
+                  <div className="mt-5">
+                    <WorldSimInlineCard
+                      compact
+                      data={nextletterWorldSimPreview}
+                      onOpen={() => onOpenWorldSimScene(nextletterWorldSimPreview, null)}
+                      ctaLabel="Apri il layer di Nextletter"
+                    />
                   </div>
                 </div>
               </section>

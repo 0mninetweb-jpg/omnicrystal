@@ -7,6 +7,7 @@ import type {
   PlanId,
   PlanStatus,
 } from '../types/entitlements';
+import type { MatrixInterventionCategory } from '../types/worldSim';
 
 type BillingOffer = {
   monthlyPrice: number;
@@ -16,6 +17,16 @@ type BillingOffer = {
   watchlistLimit: number;
   headline: string;
   features: string[];
+};
+
+export type WorldSimPlanTier = {
+  agentCount: number;
+  monthlyRunsLabel: string;
+  queueLabel: string;
+  depthLabel: string;
+  matrixBranchLimit: number;
+  matrixCategories: MatrixInterventionCategory[];
+  matrixLabel: string;
 };
 
 export const DEFAULT_FREE_PROFILE_MESSAGES = 10;
@@ -28,8 +39,8 @@ export const PLAN_OFFERS: Record<PlanId, BillingOffer> = {
     yearlyEquivalentMonthly: 0,
     creditsPerCycle: 15,
     watchlistLimit: 5,
-    headline: 'Il modo piu semplice per provare il prodotto con crediti mensili inclusi.',
-    features: ['15 crediti / mese', '5 entita in watchlist', 'Tutte le aree dell app in preview completa'],
+    headline: 'Il modo piu semplice per provare Forecast e WorldSim con un budget leggero ma reale.',
+    features: ['15 crediti / mese', '5 entita in watchlist', 'WorldSim Lite incluso'],
   },
   plus: {
     monthlyPrice: 12,
@@ -37,8 +48,8 @@ export const PLAN_OFFERS: Record<PlanId, BillingOffer> = {
     yearlyEquivalentMonthly: 8.25,
     creditsPerCycle: 120,
     watchlistLimit: 25,
-    headline: 'Il piano giusto se vuoi usare Crystal ogni settimana.',
-    features: ['120 crediti / mese', '25 entita in watchlist', 'Forecast fino a 6 mesi'],
+    headline: 'Il piano giusto se vuoi usare Crystal ogni settimana con un WorldSim piu continuo.',
+    features: ['120 crediti / mese', '25 entita in watchlist', 'Forecast fino a 6 mesi', 'WorldSim Plus incluso'],
   },
   pro: {
     monthlyPrice: 29,
@@ -46,8 +57,52 @@ export const PLAN_OFFERS: Record<PlanId, BillingOffer> = {
     yearlyEquivalentMonthly: 20.75,
     creditsPerCycle: 400,
     watchlistLimit: 100,
-    headline: 'Per forecast piu profondi, orizzonti lunghi e layer premium.',
-    features: ['400 crediti / mese', '100 entita in watchlist', '12 mesi + Massimo Rigore'],
+    headline: 'Per forecast piu profondi, orizzonti lunghi e la massima risoluzione simulativa.',
+    features: ['400 crediti / mese', '100 entita in watchlist', '12 mesi + Massimo Rigore', 'WorldSim Deep incluso'],
+  },
+};
+
+export const WORLD_SIM_PLAN_TIERS: Record<PlanId, WorldSimPlanTier> = {
+  free: {
+    agentCount: 120,
+    monthlyRunsLabel: 'Prove leggere e qualche run personale',
+    queueLabel: 'Queue condivisa',
+    depthLabel: 'Lite simulation',
+    matrixBranchLimit: 2,
+    matrixCategories: ['marketing_attention', 'media_narrative', 'pricing_product'],
+    matrixLabel: 'Matrix Simulation Lite',
+  },
+  plus: {
+    agentCount: 400,
+    monthlyRunsLabel: 'Uso continuo per Forecast e Nextletter',
+    queueLabel: 'Queue prioritaria standard',
+    depthLabel: 'Expanded simulation',
+    matrixBranchLimit: 5,
+    matrixCategories: [
+      'marketing_attention',
+      'media_narrative',
+      'policy_regulation',
+      'pricing_product',
+      'social_shock',
+    ],
+    matrixLabel: 'Matrix Simulation Plus',
+  },
+  pro: {
+    agentCount: 1000,
+    monthlyRunsLabel: 'Uso intenso e chamber completa',
+    queueLabel: 'Queue prioritaria alta',
+    depthLabel: 'Deep simulation',
+    matrixBranchLimit: 12,
+    matrixCategories: [
+      'marketing_attention',
+      'media_narrative',
+      'policy_regulation',
+      'pricing_product',
+      'social_shock',
+      'conflict_systemic_shock',
+      'health_disruption_shock',
+    ],
+    matrixLabel: 'Matrix Simulation Deep',
   },
 };
 
@@ -189,6 +244,10 @@ export function getPlanLabel(plan: PlanId) {
   if (plan === 'plus') return 'Plus';
   if (plan === 'pro') return 'Pro';
   return 'Free';
+}
+
+export function getWorldSimPlanTier(plan: PlanId) {
+  return WORLD_SIM_PLAN_TIERS[plan];
 }
 
 export function formatPrice(plan: PlanId, interval: BillingInterval) {

@@ -1,3 +1,5 @@
+import type { WorldSimJobRef } from './worldSimJob';
+
 export interface TrustLayer {
   confidence_score: number;
   confidence_tier: 'low' | 'medium' | 'high';
@@ -37,6 +39,23 @@ export interface PredictionMarketFrame {
   resolution_criteria: string;
   reference_market?: string;
   prior_probability?: number | null;
+  market_id?: string | null;
+  market_slug?: string | null;
+  market_question?: string;
+  market_url?: string | null;
+  implied_probability?: number | null;
+  match_confidence?: number | null;
+  market_quality?: number | null;
+  open_interest?: number | null;
+  volume_24h?: number | null;
+  liquidity?: number | null;
+  price_updated_at?: string | null;
+  divergence_vs_crystal?: number | null;
+  calibration_applied?: boolean;
+  calibration_note?: string;
+  crystal_probability?: number | null;
+  calibrated_probability?: number | null;
+  price_change_7d?: number | null;
 }
 
 export interface WorldSimCounterfactual {
@@ -70,6 +89,8 @@ export interface WorldSimDigest {
   cache_status?: string;
   generated_at?: string;
   notes?: string[];
+  matrix_mode?: 'observe' | 'intervene';
+  matrix_branch_id?: string | null;
 }
 
 export interface CardData {
@@ -93,7 +114,9 @@ export interface CardData {
     note?: string;
   }[];
   trust_layer: TrustLayer;
+  prediction_market_frame?: PredictionMarketFrame | null;
   world_sim?: WorldSimDigest;
+  world_sim_job?: WorldSimJobRef | null;
   _source?: string;
   _billing?: {
     action: string;

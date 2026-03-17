@@ -109,8 +109,21 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    match /polymarket_search_cache/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /polymarket_signal_cache/{document=**} {
+      allow read, write: if false;
+    }
+
     match /cached_cards/{domain}/{city}/{cardId} {
       allow read: if isAuthenticated();
+      allow write: if false;
+    }
+
+    match /worldsim_jobs/{jobId} {
+      allow read: if isAuthenticated() && resource.data.uid == request.auth.uid;
       allow write: if false;
     }
 

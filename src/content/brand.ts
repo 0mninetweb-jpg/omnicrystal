@@ -1,8 +1,8 @@
 export const PRODUCT_BRAND = {
   name: 'Crystal',
-  shellLabel: 'Forecasts, made readable',
-  tagline: 'Capire cosa puo succedere dopo, in modo semplice.',
-  tutorialLabel: 'See how it works',
+  shellLabel: 'Read what may happen next',
+  tagline: 'Previsioni leggibili, senza rumore inutile.',
+  tutorialLabel: 'How it works',
   tutorialReplayLabel: 'Replay tutorial',
   plansLabel: 'Plans',
   plansTitle: 'Crystal Plans',
@@ -12,18 +12,26 @@ export const PRODUCT_BRAND = {
 export const WORLD_SIM_BRAND = {
   name: 'WorldSim',
   previewName: 'WorldSim Preview',
-  shortDescription: 'Un layer premium di simulazione per le domande piu delicate.',
-  honestNote: 'Aggiunge profondita allo scenario. Non sostituisce il forecast base.',
+  matrixName: 'Matrix Simulation',
+  observeLabel: 'Observe',
+  interveneLabel: 'Intervene',
+  shortDescription: 'Una simulation chamber premium per leggere attori, attriti e reazioni a catena.',
+  honestNote: 'Usa lo stesso motore per tutti i piani: cambiano profondita, coda e numero di agenti. Non sostituisce il forecast base.',
+  previewNote: 'Preview mode: la scena e pronta, ma il backend live non e ancora collegato.',
+  liveNote: 'Live mode: questa scena sta leggendo il digest corrente del layer simulativo.',
+  matrixPreviewNote:
+    'Matrix Simulation usa interventi strutturati e una simulazione ipotetica. Finche il runtime completo non e live, i branch restano una preview guidata.',
+  enterLabel: 'Apri la simulation chamber',
 };
 
 export const SECTION_COPY = {
   home: {
     navDescription: 'Il punto di partenza: segnali chiave, temi salvati e una lettura rapida di quello che conta oggi.',
     headerDescription: 'Una vista semplice dei segnali da seguire, dei temi salvati e di cosa merita attenzione adesso.',
-    heroKicker: 'A clearer way to read what may happen next',
-    heroTitle: 'Un modo piu semplice per capire cosa puo succedere dopo.',
+    heroKicker: 'Start here',
+    heroTitle: 'Capisci piu in fretta cosa potrebbe succedere dopo.',
     heroBody:
-      'Fai una domanda chiara e Crystal la trasforma in una previsione leggibile: probabilita, motivi principali e prossimi segnali da tenere d occhio.',
+      'Fai una domanda chiara e Crystal la traduce in una lettura semplice: cosa puo succedere, perche e plausibile e cosa conviene guardare adesso.',
   },
   forecast: {
     navDescription: 'Fai una domanda e ottieni una risposta chiara, i motivi dietro il numero e cosa osservare dopo.',
@@ -31,7 +39,7 @@ export const SECTION_COPY = {
     heroKicker: 'Forecast',
     heroTitle: 'Una domanda chiara. Una risposta chiara.',
     heroBody:
-      'Crystal riordina un tema complesso in un forecast leggibile: cosa puo succedere, perche sembra plausibile e quanto fidarsi del risultato.',
+      'Crystal ordina un tema complesso in tre livelli semplici: cosa puo succedere, perche sembra plausibile e quando vale la pena entrare nel layer WorldSim.',
   },
   nextletter: {
     navDescription: 'La tua lettura del giorno: segnali, contesto e mosse possibili, senza tono teatrale.',
@@ -39,7 +47,7 @@ export const SECTION_COPY = {
     heroKicker: 'Nextletter',
     heroTitle: 'La lettura quotidiana, resa piu utile.',
     heroBody:
-      'Usa la Global Edition per orientarti velocemente. Usa la Personal Edition per filtrare i segnali intorno ai tuoi interessi.',
+      'Usa la Global Edition per orientarti in pochi minuti. Usa la Personal Edition per rileggere i segnali piu vicini ai tuoi interessi.',
   },
   watchlist: {
     navDescription: 'Tieni sotto controllo citta, paesi e temi in una lista ordinata, con stato e pulse sempre leggibili.',
@@ -63,9 +71,9 @@ export const TUTORIAL_STEPS = [
   {
     id: 'what',
     kicker: 'What Crystal does',
-    title: 'Crystal trasforma una domanda sul futuro in una risposta leggibile.',
+    title: 'Crystal prende una domanda sul futuro e la rende leggibile.',
     description:
-      'Invece di mostrarti solo testo, prova a darti una posizione chiara: cosa puo succedere, perche sembra plausibile e cosa osservare adesso.',
+      'Invece di restituirti solo testo, prova a darti un punto di vista chiaro: cosa puo succedere, perche e plausibile e cosa osservare adesso.',
     bullets: [
       'Ricevi una risposta diretta, non solo un riassunto.',
       'Vedi i motivi principali dietro al forecast.',
@@ -75,9 +83,9 @@ export const TUTORIAL_STEPS = [
   {
     id: 'layers',
     kicker: 'Forecast vs WorldSim',
-    title: 'Il forecast risponde. WorldSim aggiunge profondita.',
+    title: 'Il forecast risponde. WorldSim apre la camera di simulazione.',
     description:
-      'La previsione base produce il numero e i motivi principali. WorldSim entra nei casi piu delicati per mostrare come possono reagire attori e sistemi.',
+      'La previsione base produce la risposta leggibile. WorldSim entra solo quando servono attori, attriti e reazioni a catena.',
     bullets: [
       'Forecast: risposta, probabilita, rischio e prossimi segnali.',
       'WorldSim: attori chiave, punti di svolta e scenari piu profondi.',
@@ -100,9 +108,7 @@ export const TUTORIAL_STEPS = [
 
 export const RUNTIME_COPY = {
   forecastPreview:
-    'Le previsioni live non sono ancora collegate in questa versione. Puoi esplorare il prodotto, ma le risposte AI complete richiedono il backend attivo.',
-  worldSimPreview:
-    'WorldSim e mostrato come preview finche il backend live non e connesso.',
-  worldSimLive:
-    'WorldSim e disponibile su questa versione per le query premium ad alto impatto.',
+    'Le previsioni live complete richiedono ancora il backend attivo. Intanto puoi esplorare il prodotto e vedere come sono organizzate le risposte.',
+  worldSimPreview: WORLD_SIM_BRAND.previewNote,
+  worldSimLive: WORLD_SIM_BRAND.liveNote,
 };

@@ -8,3 +8,6 @@ firebase-debug.log
 *.log
 .env*
 !.env.example
+world-sim/.venv/
+world-sim/.runtime/
+world-sim/__pycache__/

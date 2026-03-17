@@ -468,3 +468,84 @@ export async function getLocalInsights(query: string, entities: any[]) {
     throw error;
   }
 }
+
+export async function getPolymarketPulse(query: string, queryPlan: any) {
+  return requestServer<any>('polymarket/pulse', {
+    body: {
+      query,
+      queryPlan,
+    },
+  });
+}
+
+export async function createWorldSimJob(query: string, queryPlan: any, userContext?: any, source = 'manual', sourceRef = 'manual') {
+  return requestServer<any>('worldsim/jobs', {
+    body: {
+      query,
+      queryPlan,
+      userContext,
+      source,
+      sourceRef,
+    },
+  });
+}
+
+export async function getWorldSimJob(jobId: string) {
+  return requestServer<any>(`worldsim/jobs/${encodeURIComponent(jobId)}`, {
+    method: 'GET',
+  });
+}
+
+export async function getWorldSimJobResult(jobId: string) {
+  return requestServer<any>(`worldsim/jobs/${encodeURIComponent(jobId)}/result`, {
+    method: 'GET',
+  });
+}
+
+export async function cancelWorldSimJob(jobId: string) {
+  return requestServer<any>(`worldsim/jobs/${encodeURIComponent(jobId)}/cancel`, {
+    body: {},
+  });
+}
+
+export async function createMatrixSimulationJob(
+  baselineQuery: string,
+  queryPlan: any,
+  intervention: any,
+  options?: {
+    branchParentId?: string | null;
+    source?: string;
+    sourceRef?: string;
+    userContext?: any;
+  }
+) {
+  return requestServer<any>('worldsim/interventions', {
+    body: {
+      baselineQuery,
+      queryPlan,
+      intervention,
+      branchParentId: options?.branchParentId || null,
+      source: options?.source || 'matrix-simulation',
+      sourceRef: options?.sourceRef || 'worldsim-chamber',
+      userContext: options?.userContext || null,
+    },
+  });
+}
+
+export async function getMatrixSimulationJob(jobId: string) {
+  return requestServer<any>(`worldsim/interventions/${encodeURIComponent(jobId)}`, {
+    method: 'GET',
+  });
+}
+
+export async function getMatrixSimulationJobResult(jobId: string) {
+  return requestServer<any>(`worldsim/interventions/${encodeURIComponent(jobId)}/result`, {
+    method: 'GET',
+  });
+}
+
+export async function cancelMatrixSimulationJob(jobId: string) {
+  return requestServer<any>(`worldsim/interventions/${encodeURIComponent(jobId)}/cancel`, {
+    body: {},
+  });
+}

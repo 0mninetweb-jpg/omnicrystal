@@ -40,6 +40,7 @@ async function probeRuntimeCapabilities(): Promise<RuntimeCapabilities> {
   runtimeRequest = (async () => {
     const clientFallback = hasClientForecastFallback();
     let apiAvailable = false;
+    let healthPayload: any = null;
 
     try {
       const controller = new AbortController();
@@ -54,8 +55,8 @@ async function probeRuntimeCapabilities(): Promise<RuntimeCapabilities> {
 
         const contentType = response.headers.get('content-type') || '';
         if (response.ok && contentType.includes('application/json')) {
-          const payload = await response.json();
-          apiAvailable = payload?.ok === true;
+          healthPayload = await response.json();
+          apiAvailable = healthPayload?.ok === true;
         } else if (response.ok) {
           const text = await response.text();
           apiAvailable = !looksLikeHtml(text);
@@ -69,7 +70,7 @@ async function probeRuntimeCapabilities(): Promise<RuntimeCapabilities> {
 
     const forecastAvailable = apiAvailable || clientFallback;
     const worldSimFlag = import.meta.env.VITE_WORLDSIM_AVAILABLE === 'true';
-    const worldSimAvailable = apiAvailable && worldSimFlag;
+    const worldSimAvailable = apiAvailable && (healthPayload?.worldSim?.asyncJobs === true || worldSimFlag);
 
     const capabilities: RuntimeCapabilities = {
       isChecking: false,

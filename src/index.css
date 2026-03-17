@@ -154,13 +154,87 @@
   animation: editorialFloat 5s ease-in-out infinite;
 }
 
+@keyframes worldSpin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes worldSpinReverse {
+  from {
+    transform: rotate(360deg);
+  }
+  to {
+    transform: rotate(0deg);
+  }
+}
+
+@keyframes worldScan {
+  0% {
+    transform: translateY(-8%);
+    opacity: 0.22;
+  }
+  50% {
+    opacity: 0.48;
+  }
+  100% {
+    transform: translateY(108%);
+    opacity: 0.12;
+  }
+}
+
+.world-sim-grid {
+  background-image:
+    linear-gradient(rgba(148, 163, 184, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 184, 0.08) 1px, transparent 1px);
+  background-size: 28px 28px;
+  mask-image: radial-gradient(circle at center, black 30%, transparent 92%);
+}
+
+.world-sim-globe {
+  background:
+    radial-gradient(circle at 28% 28%, rgba(255, 255, 255, 0.35), transparent 24%),
+    radial-gradient(circle at 62% 40%, rgba(59, 130, 246, 0.32), transparent 36%),
+    radial-gradient(circle at 45% 68%, rgba(244, 63, 94, 0.16), transparent 38%),
+    linear-gradient(180deg, rgba(15, 23, 42, 0.15), rgba(15, 23, 42, 0.55));
+  box-shadow:
+    inset 0 0 60px rgba(255, 255, 255, 0.08),
+    inset 0 -20px 50px rgba(15, 23, 42, 0.32);
+}
+
+.world-sim-ring {
+  animation: worldSpin 24s linear infinite;
+}
+
+.world-sim-ring--delay {
+  animation: worldSpinReverse 32s linear infinite;
+}
+
+.world-sim-scan {
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    rgba(56, 189, 248, 0.14) 45%,
+    rgba(244, 63, 94, 0.12) 55%,
+    transparent 100%
+  );
+  animation: worldScan 7s linear infinite;
+}
+
+.world-sim-node {
+  animation: editorialFloat 6s ease-in-out infinite;
+}
+
 @media (max-width: 1023px) {
   .mobile-content-safe {
-    padding-bottom: calc(7.75rem + env(safe-area-inset-bottom, 0px));
+    padding-bottom: calc(8.4rem + env(safe-area-inset-bottom, 0px));
   }
 
   .mobile-nav-safe {
-    bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
-    padding-bottom: calc(0.55rem + env(safe-area-inset-bottom, 0px));
+    bottom: calc(0.9rem + env(safe-area-inset-bottom, 0px));
+    padding-bottom: calc(0.7rem + env(safe-area-inset-bottom, 0px));
   }
 }

@@ -1,9 +1,16 @@
 const crypto = require("node:crypto");
 const { Type } = require("@google/genai");
+const { attachPolymarketToWorldSimDigest } = require("./polymarket");
 
 const WORLD_SIM_CACHE_VERSION = "oracle-world-sim-v1";
 const WORLD_SIM_CACHE_TTL_HOURS = 24;
-const SUPPORTED_DOMAIN_PREFIXES = ["A.11.geopolitics"];
+const SUPPORTED_DOMAIN_PREFIXES = [
+  "A.1.macro",
+  "A.2.markets",
+  "A.7.city_pulse",
+  "A.10.consumer",
+  "A.11.geopolitics",
+];
 
 function clamp01(value, fallback = 0.5) {
   const num = Number(value);
@@ -18,6 +25,11 @@ function sanitizeList(list) {
 
 function safeText(value, fallback = "") {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
+function toNullableNumber(value) {
+  const next = Number(value);
+  return Number.isFinite(next) ? next : null;
 }
 
 function createWorldSimCacheKey(queryText, queryPlan = {}, plan = "free", engine = "standard") {
@@ -41,15 +53,38 @@ function createWorldSimCacheKey(queryText, queryPlan = {}, plan = "free", engine
 }
 
 function matchesWorldSimKeywords(queryText = "") {
-  return /(election|elections|coalition|sanction|tariff|trade war|geopolitic|border|public opinion|protest|government|parliament|ceasefire|war|embargo|dazi|sanzioni|elezioni|coalizione|conflitto|governo|opinione pubblica)/i.test(
+  return /(election|elections|coalition|sanction|tariff|trade war|geopolitic|border|public opinion|protest|government|parliament|ceasefire|war|embargo|market|macro|inflation|rates|city|urban|mobility|tourism|culture|media|attention|narrative|dazi|sanzioni|elezioni|coalizione|conflitto|governo|opinione pubblica|inflazione|tassi|citta|mobilita|turismo|cultura|attenzione)/i.test(
     queryText
   );
+}
+
+function resolveWorldSimTemplate(queryPlan = {}, queryText = "") {
+  const domain = safeText(queryPlan?.domain || queryPlan?.domain_id).toLowerCase();
+  const corpus = `${domain} ${queryText}`.toLowerCase();
+
+  if (domain.startsWith("a.11.") || /(election|government|coalition|war|geopolit|sanction|tariff|border|public opinion|elezion|governo|coalizione|guerra|sanzion|dazi)/i.test(corpus)) {
+    return "geopolitics-public-opinion";
+  }
+
+  if (domain.startsWith("a.1.") || domain.startsWith("a.2.") || /(market|macro|inflation|rates|bond|equity|crypto|oil|energy|pil|inflazione|tassi|borsa|energia)/i.test(corpus)) {
+    return "macro-markets";
+  }
+
+  if (domain.startsWith("a.7.") || /(city|urban|mobility|tourism|rent|housing|crime|roma|milano|citta|mobilita|turismo|affitti)/i.test(corpus)) {
+    return "city-local";
+  }
+
+  if (domain.startsWith("a.10.") || /(culture|media|attention|creator|audience|streaming|viral|narrative|cultura|media|attenzione|streaming)/i.test(corpus)) {
+    return "culture-media";
+  }
+
+  return "public-discourse";
 }
 
 function supportsWorldSim(queryPlan = {}, queryText = "", engine = "standard", plan = "free") {
   const domain = queryPlan?.domain || queryPlan?.domain_id || "";
   const supportedDomain = SUPPORTED_DOMAIN_PREFIXES.some((prefix) => domain.startsWith(prefix));
-  if (plan !== "pro" || engine !== "oracle") {
+  if (!["free", "plus", "pro"].includes(plan)) {
     return false;
   }
   return supportedDomain || matchesWorldSimKeywords(queryText);
@@ -121,6 +156,23 @@ function normalizePredictionMarketFrame(frame, queryPlan = {}) {
     resolution_criteria: safeText(frame.resolution_criteria),
     reference_market: safeText(frame.reference_market),
     prior_probability: frame.prior_probability == null ? null : clamp01(frame.prior_probability, null),
+    market_id: safeText(frame.market_id) || null,
+    market_slug: safeText(frame.market_slug) || null,
+    market_question: safeText(frame.market_question) || null,
+    market_url: safeText(frame.market_url) || null,
+    implied_probability: frame.implied_probability == null ? null : clamp01(frame.implied_probability, null),
+    match_confidence: frame.match_confidence == null ? null : clamp01(frame.match_confidence, null),
+    market_quality: frame.market_quality == null ? null : clamp01(frame.market_quality, null),
+    open_interest: toNullableNumber(frame.open_interest),
+    volume_24h: toNullableNumber(frame.volume_24h),
+    liquidity: toNullableNumber(frame.liquidity),
+    price_updated_at: safeText(frame.price_updated_at) || null,
+    divergence_vs_crystal: toNullableNumber(frame.divergence_vs_crystal),
+    calibration_applied: Boolean(frame.calibration_applied),
+    calibration_note: safeText(frame.calibration_note),
+    crystal_probability: frame.crystal_probability == null ? null : clamp01(frame.crystal_probability, null),
+    calibrated_probability: frame.calibrated_probability == null ? null : clamp01(frame.calibrated_probability, null),
+    price_change_7d: toNullableNumber(frame.price_change_7d),
   };
 }
 
@@ -202,7 +254,7 @@ async function saveWorldSimDigest(db, admin, cacheKey, digest, metadata = {}) {
   );
 }
 
-async function buildGraphSeedPack({ ai, queryText, queryPlan, userContext, withRetry }) {
+async function buildGraphSeedPack({ ai, queryText, queryPlan, userContext, withRetry, template }) {
   const contextString = userContext
     ? `
 CONTESTO UTENTE:
@@ -215,7 +267,7 @@ CONTESTO UTENTE:
     ai.models.generateContent({
       model: "gemini-3.1-pro-preview",
       contents: `Sei il GraphRAG retriever di Crystal Oracle.
-Devi creare un world seed pack grounded per una simulazione geopolitica/public opinion.
+Devi creare un world seed pack grounded per una simulazione di tipo "${template || "public-discourse"}".
 
 QUERY: "${queryText}"
 QUERY PLAN: ${JSON.stringify(queryPlan)}
@@ -287,7 +339,7 @@ Restituisci JSON con:
   return JSON.parse(response.text || "{}");
 }
 
-async function simulateWithGemini({ ai, queryText, queryPlan, seedPack, withRetry, simulationMode }) {
+async function simulateWithGemini({ ai, queryText, queryPlan, seedPack, withRetry, simulationMode, template }) {
   const response = await withRetry(async () =>
     ai.models.generateContent({
       model: "gemini-3.1-pro-preview",
@@ -296,6 +348,7 @@ Non devi inventare un mondo: devi simulare solo le dinamiche compatibili con il 
 
 QUERY: "${queryText}"
 QUERY PLAN: ${JSON.stringify(queryPlan)}
+TEMPLATE: ${template || "public-discourse"}
 SIMULATION MODE: ${simulationMode}
 WORLD SEED PACK: ${JSON.stringify(seedPack)}
 
@@ -420,15 +473,24 @@ async function getWorldSimDigest({
     return null;
   }
 
+  const template = resolveWorldSimTemplate(queryPlan, queryText);
   const cacheKey = createWorldSimCacheKey(queryText, queryPlan, plan, engine);
   const { digest: freshDigest, snapshot } = await getCachedDigest(db, cacheKey);
 
   if (freshDigest) {
-    return normalizeWorldSimDigest(freshDigest, {
+    const normalizedFreshDigest = normalizeWorldSimDigest(freshDigest, {
       simulation_mode: "cache_hit",
       cache_status: "fresh",
       queryPlan,
       generated_at: snapshot?.generatedAt?.toISOString?.() || new Date().toISOString(),
+    });
+    return attachPolymarketToWorldSimDigest({
+      db,
+      admin,
+      fetchJson,
+      queryText,
+      queryPlan,
+      digest: normalizedFreshDigest,
     });
   }
 
@@ -445,6 +507,7 @@ async function getWorldSimDigest({
         query_plan: queryPlan,
         user_context: userContext,
         simulation_mode: simulationMode,
+        template,
       },
     });
   } else {
@@ -454,6 +517,7 @@ async function getWorldSimDigest({
       queryPlan,
       userContext,
       withRetry,
+      template,
     });
     rawDigest = await simulateWithGemini({
       ai,
@@ -462,6 +526,7 @@ async function getWorldSimDigest({
       seedPack,
       withRetry,
       simulationMode,
+      template,
     });
   }
 
@@ -471,14 +536,24 @@ async function getWorldSimDigest({
     queryPlan,
   });
 
-  await saveWorldSimDigest(db, admin, cacheKey, normalized, {
+  const enrichedDigest = await attachPolymarketToWorldSimDigest({
+    db,
+    admin,
+    fetchJson,
+    queryText,
+    queryPlan,
+    digest: normalized,
+  });
+
+  await saveWorldSimDigest(db, admin, cacheKey, enrichedDigest, {
     query: queryText,
     domain: queryPlan?.domain || queryPlan?.domain_id || "",
     engine,
     plan,
+    template,
   });
 
-  return normalized;
+  return enrichedDigest;
 }
 
 function normalizeScenarioLabel(label) {
@@ -578,7 +653,18 @@ function enhanceCardWithWorldSim(card, digest) {
   if (!card || !digest || !digest.enabled) return card;
 
   const next = JSON.parse(JSON.stringify(card));
-  next.world_sim = digest;
+  const mergedMarketFrame = digest.prediction_market_frame || next.prediction_market_frame
+    ? {
+        ...(next.prediction_market_frame || {}),
+        ...(digest.prediction_market_frame || {}),
+      }
+    : null;
+
+  next.prediction_market_frame = mergedMarketFrame;
+  next.world_sim = {
+    ...digest,
+    prediction_market_frame: mergedMarketFrame,
+  };
   next.scenario_set = mergeScenarioSet(next.scenario_set, digest.scenario_frequencies, digest.probability_delta);
 
   const worldSimDrivers = digest.pivotal_actors.slice(0, 3).map((actor, index) => ({
@@ -704,12 +790,21 @@ async function enhanceNextletterWithWorldSim({
 
       if (!digest) continue;
 
+      const mergedMarketFrame = digest.prediction_market_frame || section.prediction_market_frame
+        ? {
+            ...(section.prediction_market_frame || {}),
+            ...(digest.prediction_market_frame || {}),
+          }
+        : null;
+
+      section.prediction_market_frame = mergedMarketFrame;
+
       section.world_sim = {
         simulation_mode: digest.simulation_mode,
         narrative_arc: digest.narrative_arc,
         pivotal_actors: digest.pivotal_actors,
         intervention_points: digest.intervention_points,
-        prediction_market_frame: digest.prediction_market_frame,
+        prediction_market_frame: mergedMarketFrame,
       };
 
       if (digest.narrative_arc) {
@@ -734,6 +829,7 @@ module.exports = {
   WORLD_SIM_CACHE_TTL_HOURS,
   WORLD_SIM_CACHE_VERSION,
   supportsWorldSim,
+  resolveWorldSimTemplate,
   getWorldSimDigest,
   enhanceCardWithWorldSim,
   enhanceNextletterWithWorldSim,
