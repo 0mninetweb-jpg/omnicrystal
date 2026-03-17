@@ -232,11 +232,25 @@ export function Home({
 
   return (
     <div className="space-y-8 md:space-y-10">
-      <section className="editorial-panel overflow-hidden rounded-[36px] px-6 py-8 md:px-8 md:py-10">
-        <div className="grid gap-7 lg:grid-cols-[1.2fr_0.8fr] lg:items-end">
-          <div>
-            <div className="section-kicker">{SECTION_COPY.home.heroKicker}</div>
-            <h2 className="mt-4 max-w-3xl text-4xl font-display font-semibold tracking-tight text-slate-950 md:text-6xl">
+      <section className="hero-surface overflow-hidden rounded-[40px] px-6 py-8 md:px-8 md:py-10">
+        <div className="hero-mesh pointer-events-none absolute inset-0 opacity-70" />
+        <div className="pointer-events-none absolute right-[-80px] top-[-80px] h-[260px] w-[260px] rounded-full bg-[rgba(20,83,232,0.09)] blur-[90px]" />
+        <div className="pointer-events-none absolute bottom-[-120px] left-[20%] h-[220px] w-[220px] rounded-full bg-[rgba(217,93,116,0.08)] blur-[100px]" />
+
+        <div className="relative grid gap-7 lg:grid-cols-[1.18fr_0.82fr] lg:items-end">
+          <div className="max-w-4xl">
+            <div className="flex flex-wrap gap-2">
+              <span className="hero-chip inline-flex items-center rounded-full px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-600">
+                {SECTION_COPY.home.heroKicker}
+              </span>
+              <span className="hero-chip inline-flex items-center rounded-full px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-600">
+                Light-first shell
+              </span>
+              <span className="hero-chip inline-flex items-center rounded-full px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-600">
+                {worldSimLabel}
+              </span>
+            </div>
+            <h2 className="mt-5 max-w-3xl text-4xl font-display font-semibold tracking-[-0.04em] text-slate-950 md:text-7xl md:leading-[0.96]">
               {SECTION_COPY.home.heroTitle}
             </h2>
             <p className="mt-5 max-w-2xl text-base leading-8 text-slate-600 md:text-lg">{SECTION_COPY.home.heroBody}</p>
@@ -266,12 +280,32 @@ export function Home({
               )}
             </div>
 
-            <div className="mt-8 flex flex-wrap gap-2">
+            <div className="mt-8 grid gap-3 sm:grid-cols-3">
+              <div className="metric-card rounded-[24px] px-4 py-4">
+                <div className="section-kicker !text-slate-500">Forecast</div>
+                <div className="mt-2 text-2xl font-display font-semibold text-slate-950">Direct</div>
+                <div className="mt-2 text-sm leading-6 text-slate-600">Ask one concrete question and get a readable answer fast.</div>
+              </div>
+              <div className="metric-card rounded-[24px] px-4 py-4">
+                <div className="section-kicker !text-slate-500">{worldSimLabel}</div>
+                <div className="mt-2 text-2xl font-display font-semibold text-slate-950">Layered</div>
+                <div className="mt-2 text-sm leading-6 text-slate-600">Open the observatory when actors and pressure matter more than a single number.</div>
+              </div>
+              <div className="metric-card rounded-[24px] px-4 py-4">
+                <div className="section-kicker !text-slate-500">Runtime</div>
+                <div className="mt-2 text-2xl font-display font-semibold capitalize text-slate-950">{capabilities.runtimeMode}</div>
+                <div className="mt-2 text-sm leading-6 text-slate-600">{capabilities.statusDetail}</div>
+              </div>
+            </div>
+
+            <div className="editorial-divider mt-8" />
+
+            <div className="mt-6 flex flex-wrap gap-2">
               {HERO_EXAMPLES.map((example) => (
                 <button
                   key={example}
                   onClick={() => onForecastIntent(example)}
-                  className="rounded-full border border-slate-200 bg-white/80 px-4 py-2 text-left text-xs font-medium text-slate-600 transition hover:border-slate-300 hover:text-slate-950"
+                  className="hero-chip rounded-full px-4 py-2 text-left text-xs font-medium text-slate-600 transition hover:border-slate-300 hover:text-slate-950"
                 >
                   {example}
                 </button>
@@ -279,22 +313,36 @@ export function Home({
             </div>
           </div>
 
-          <div className="oracle-panel rounded-[36px] p-6 md:p-7">
-            <div className="section-kicker !text-rose-200">{worldSimLabel}</div>
-            <h3 className="mt-3 text-2xl font-display font-semibold text-white md:text-3xl">{WORLD_SIM_BRAND.teaserTitle}</h3>
+          <div className="oracle-panel relative overflow-hidden rounded-[38px] p-6 md:p-7">
+            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_72%_18%,rgba(255,255,255,0.12),transparent_30%),radial-gradient(circle_at_20%_90%,rgba(56,189,248,0.12),transparent_34%)]" />
+            <div className="relative">
+            <div className="flex items-center justify-between gap-3">
+              <div className="section-kicker !text-rose-200">{worldSimLabel}</div>
+              <span className="glass-panel rounded-full px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-200">
+                {capabilities.worldSimAvailable ? 'Simulation live' : 'Guided preview'}
+              </span>
+            </div>
+            <h3 className="mt-3 max-w-md text-2xl font-display font-semibold text-white md:text-[2rem] md:leading-tight">{WORLD_SIM_BRAND.teaserTitle}</h3>
               <p className="mt-3 text-sm leading-7 text-slate-300">
                 {capabilities.worldSimAvailable
                   ? WORLD_SIM_BRAND.teaserBody
                   : RUNTIME_COPY.worldSimPreview}
             </p>
-            <div className="mt-6 grid gap-3">
-              {['Who moves first', 'Where pressure builds', 'What changes the odds'].map((item) => (
+            <div className="mt-6 grid gap-3 sm:grid-cols-3">
+              {[
+                ['Actors', 'Who moves first'],
+                ['Pressure', 'Where pressure builds'],
+                ['Delta', 'What changes the odds'],
+              ].map(([kicker, item]) => (
                 <div
                   key={item}
-                  className="flex items-center justify-between rounded-[20px] border border-white/10 bg-white/5 px-4 py-3 text-sm font-medium text-white"
+                  className="glass-panel rounded-[22px] px-4 py-4 text-white"
                 >
-                  <span>{item}</span>
-                  <Waypoints className="h-4 w-4 text-rose-200" />
+                  <div className="section-kicker !text-slate-300">{kicker}</div>
+                  <div className="mt-2 flex items-center justify-between gap-3 text-sm font-medium">
+                    <span>{item}</span>
+                    <Waypoints className="h-4 w-4 text-rose-200" />
+                  </div>
                 </div>
               ))}
             </div>
@@ -306,12 +354,13 @@ export function Home({
               <ArrowRight className="h-4 w-4" />
             </button>
             <p className="mt-5 text-xs leading-6 text-slate-400">{WORLD_SIM_BRAND.honestNote}</p>
+            </div>
           </div>
         </div>
       </section>
 
       {!checklistItems.every((item) => item.done) && (
-        <section className="editorial-panel content-auto rounded-[30px] px-6 py-6 md:px-7">
+        <section className="editorial-panel content-auto rounded-[32px] px-6 py-6 md:px-7">
           <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
             <div>
               <div className="section-kicker">First Moves</div>
@@ -332,7 +381,7 @@ export function Home({
                 onClick={item.action}
                 className={cn(
                   'rounded-[24px] border px-5 py-5 text-left transition',
-                  item.done ? 'border-emerald-100 bg-emerald-50' : 'border-slate-200 bg-white hover:border-slate-300'
+                  item.done ? 'border-emerald-100 bg-emerald-50' : 'data-well hover:border-slate-300'
                 )}
               >
                 <div className="flex items-start justify-between gap-4">
@@ -356,12 +405,12 @@ export function Home({
       )}
 
       <section className="content-auto grid gap-5 xl:grid-cols-[1.05fr_0.95fr]">
-        <div className="editorial-panel rounded-[34px] p-6 md:p-7">
+        <div className="editorial-panel rounded-[36px] p-6 md:p-7">
           <div className="section-kicker">Today</div>
           <h3 className="mt-3 text-2xl font-display font-semibold text-slate-950">The signals worth reading right now.</h3>
           <div className="mt-6 grid gap-4">
             {todayCards.map((card) => (
-              <div key={card.card_id} className="rounded-[24px] border border-slate-200 bg-white p-5">
+              <div key={card.card_id} className="data-well rounded-[26px] p-5">
                 {(() => {
                   const marketFrame = card.prediction_market_frame || card.world_sim?.prediction_market_frame || null;
                   const hasMarketFrame = hasPredictionMarketFrame(marketFrame);
@@ -396,11 +445,11 @@ export function Home({
           </div>
         </div>
 
-        <div className="editorial-panel rounded-[34px] p-6 md:p-7">
+        <div className="editorial-panel rounded-[36px] p-6 md:p-7">
           <div className="section-kicker">Briefing Preview</div>
           <h3 className="mt-3 text-2xl font-display font-semibold text-slate-950">A cleaner preview of Nextletter.</h3>
           <div className="mt-6 space-y-4">
-            <div className="rounded-[24px] border border-slate-200 bg-white p-5">
+            <div className="data-well rounded-[26px] p-5">
               <div className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
                 <Mail className="h-4 w-4 text-[#1453e8]" />
                 Global Edition
@@ -409,7 +458,7 @@ export function Home({
                 The signals that matter, arranged into a calmer daily read.
               </p>
             </div>
-            <div className="rounded-[24px] border border-slate-200 bg-white p-5">
+            <div className="data-well rounded-[26px] p-5">
               <div className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
                 <Sparkles className="h-4 w-4 text-rose-500" />
                 {worldSimLabel}
@@ -430,7 +479,7 @@ export function Home({
       </section>
 
       <section className="content-auto grid gap-5 xl:grid-cols-[0.95fr_1.05fr]">
-        <div className="editorial-panel rounded-[34px] p-6 md:p-7">
+        <div className="editorial-panel rounded-[36px] p-6 md:p-7">
           <div className="flex items-center justify-between gap-4">
             <div>
               <div className="section-kicker">{worldSimLabel}</div>
@@ -443,7 +492,7 @@ export function Home({
               <button
                 key={preview.id}
                 onClick={() => onOpenWorldSimScene(preview)}
-                className="w-full rounded-[24px] border border-slate-200 bg-white p-5 text-left transition hover:border-slate-300 hover:-translate-y-0.5"
+                className="data-well w-full rounded-[26px] p-5 text-left transition hover:border-slate-300 hover:-translate-y-0.5"
               >
                 <div className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-rose-500">
                   <Sparkles className="h-4 w-4" />
@@ -472,14 +521,14 @@ export function Home({
         </div>
 
         <div className="grid gap-5 md:grid-cols-2">
-          <div className="editorial-panel rounded-[34px] p-6">
+          <div className="editorial-panel rounded-[36px] p-6">
             <div className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
               <Radar className="h-4 w-4 text-amber-500" />
               Signals to watch
             </div>
             <div className="mt-5 space-y-3">
               {SIGNALS_TO_WATCH.map((hazard) => (
-                <div key={hazard.id} className="rounded-[22px] border border-slate-200 bg-white p-4">
+                <div key={hazard.id} className="data-well rounded-[24px] p-4">
                   <div className="flex items-center justify-between gap-4">
                     <div>
                       <div className="text-sm font-semibold text-slate-950">{hazard.title}</div>
@@ -496,14 +545,14 @@ export function Home({
             </div>
           </div>
 
-          <div className="editorial-panel rounded-[34px] p-6">
+          <div className="editorial-panel rounded-[36px] p-6">
             <div className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
               <Globe2 className="h-4 w-4 text-emerald-500" />
               City Pulse
             </div>
             <div className="mt-5 space-y-3">
               {CITY_PULSE.map((city) => (
-                <div key={city.city} className="rounded-[22px] border border-slate-200 bg-white p-4">
+                <div key={city.city} className="data-well rounded-[24px] p-4">
                   <div className="flex items-center justify-between gap-4">
                     <div>
                       <div className="text-sm font-semibold text-slate-950">{city.city}</div>
@@ -524,7 +573,7 @@ export function Home({
       </section>
 
       <section className="content-auto grid gap-5 xl:grid-cols-[0.92fr_1.08fr]">
-        <div className="editorial-panel rounded-[34px] p-6 md:p-7">
+        <div className="editorial-panel rounded-[36px] p-6 md:p-7">
           <div className="flex items-center justify-between gap-4">
             <div>
               <div className="section-kicker">Watchlist Pulse</div>
@@ -539,7 +588,7 @@ export function Home({
           </div>
           <div className="mt-6 space-y-3">
             {watchlistItems.slice(0, 4).map((item) => (
-              <div key={item.id} className="rounded-[24px] border border-slate-200 bg-white p-4">
+              <div key={item.id} className="data-well rounded-[26px] p-4">
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <div className="flex items-center gap-2">
@@ -570,7 +619,7 @@ export function Home({
           </div>
         </div>
 
-        <div className="editorial-panel rounded-[34px] p-6 md:p-7">
+        <div className="editorial-panel rounded-[36px] p-6 md:p-7">
           <div className="flex items-center justify-between gap-4">
             <div>
               <div className="section-kicker">Crystal Quotes</div>
@@ -584,7 +633,7 @@ export function Home({
               <button
                 key={quote.quote_id}
                 onClick={() => setSelectedQuote(quote)}
-                className="rounded-[24px] border border-slate-200 bg-white p-5 text-left transition hover:-translate-y-0.5 hover:border-slate-300"
+                className="data-well rounded-[26px] p-5 text-left transition hover:-translate-y-0.5 hover:border-slate-300"
               >
                 <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
                   <Quote className="h-4 w-4 text-[#1453e8]" />

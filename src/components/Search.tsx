@@ -552,11 +552,23 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
 
   return (
     <div className="space-y-7">
-      <section className="editorial-panel overflow-hidden rounded-[36px] p-6 md:p-8">
-        <div className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr] lg:items-end">
-          <div>
-            <div className="section-kicker">{SECTION_COPY.forecast.heroKicker}</div>
-            <h2 className="mt-4 max-w-3xl text-4xl font-display font-semibold tracking-tight text-slate-950 md:text-5xl">
+      <section className="hero-surface overflow-hidden rounded-[40px] p-6 md:p-8">
+        <div className="hero-mesh pointer-events-none absolute inset-0 opacity-70" />
+        <div className="pointer-events-none absolute right-[-70px] top-[-80px] h-[250px] w-[250px] rounded-full bg-[rgba(20,83,232,0.1)] blur-[90px]" />
+        <div className="relative grid gap-6 lg:grid-cols-[1.15fr_0.85fr] lg:items-end">
+          <div className="max-w-4xl">
+            <div className="flex flex-wrap gap-2">
+              <span className="hero-chip inline-flex items-center rounded-full px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-600">
+                {SECTION_COPY.forecast.heroKicker}
+              </span>
+              <span className="hero-chip inline-flex items-center rounded-full px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-600">
+                Command studio
+              </span>
+              <span className="hero-chip inline-flex items-center rounded-full px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-600">
+                {runtimeModeLabel}
+              </span>
+            </div>
+            <h2 className="mt-5 max-w-3xl text-4xl font-display font-semibold tracking-[-0.04em] text-slate-950 md:text-6xl md:leading-[0.97]">
               {SECTION_COPY.forecast.heroTitle}
             </h2>
             <p className="mt-4 max-w-2xl text-base leading-8 text-slate-600">{SECTION_COPY.forecast.heroBody}</p>
@@ -573,6 +585,26 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
               </button>
             </div>
 
+            <div className="mt-7 grid gap-3 sm:grid-cols-3">
+              <div className="metric-card rounded-[24px] px-4 py-4">
+                <div className="section-kicker !text-slate-500">What may happen</div>
+                <div className="mt-2 text-xl font-display font-semibold text-slate-950">Answer first</div>
+                <div className="mt-2 text-sm leading-6 text-slate-600">Keep the question concrete and Crystal answers in one readable pass.</div>
+              </div>
+              <div className="metric-card rounded-[24px] px-4 py-4">
+                <div className="section-kicker !text-slate-500">Why</div>
+                <div className="mt-2 text-xl font-display font-semibold text-slate-950">Drivers next</div>
+                <div className="mt-2 text-sm leading-6 text-slate-600">Read the reasoning, context, and the next signals worth watching.</div>
+              </div>
+              <div className="metric-card rounded-[24px] px-4 py-4">
+                <div className="section-kicker !text-slate-500">{worldSimResultScene.mode === 'live' ? WORLD_SIM_BRAND.name : WORLD_SIM_BRAND.previewName}</div>
+                <div className="mt-2 text-xl font-display font-semibold text-slate-950">Open only when needed</div>
+                <div className="mt-2 text-sm leading-6 text-slate-600">Use the deeper layer when actors, pressure, or chain reactions change the read.</div>
+              </div>
+            </div>
+
+            <div className="editorial-divider mt-8" />
+
             <div className="mt-6 flex flex-wrap gap-2">
               {HERO_EXAMPLES.map((example) => (
                 <button
@@ -581,7 +613,7 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
                     setQuery(example);
                     void handleSearch(example);
                   }}
-                  className="rounded-full border border-slate-200 bg-white/80 px-4 py-2 text-left text-xs font-medium text-slate-600 transition hover:border-slate-300 hover:text-slate-950"
+                  className="hero-chip rounded-full px-4 py-2 text-left text-xs font-medium text-slate-600 transition hover:border-slate-300 hover:text-slate-950"
                 >
                   {example}
                 </button>
@@ -589,7 +621,7 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
             </div>
           </div>
 
-            <div className="signal-board rounded-[30px] p-5">
+            <div className="premium-strip rounded-[32px] p-5">
               <div className="section-kicker">Current Access</div>
               <div className="mt-3 flex flex-wrap items-center gap-3">
                 <span className="rounded-full bg-slate-950 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-white">
@@ -600,20 +632,20 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
                 </span>
               </div>
               <div className="mt-4 text-sm leading-7 text-slate-500">
-              Get a direct answer, the core reasoning behind it, and the next signals worth watching.
+              A calmer studio for direct forecasts, deeper reasoning, and selective simulation layers.
               </div>
-            <div className="mt-4 rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-600">
+            <div className="mt-4 rounded-[20px] border border-slate-200 bg-white/82 px-4 py-3 text-sm font-medium text-slate-600">
               {capabilities.message}
             </div>
           </div>
         </div>
       </section>
 
-      <section className="editorial-panel rounded-[34px] p-5 md:p-6">
+      <section className="command-surface rounded-[36px] p-5 md:p-6">
         <form onSubmit={handleSearch} className="space-y-5">
-          <div className="rounded-[28px] border border-slate-200 bg-white p-4 shadow-[0_16px_35px_rgba(15,23,42,0.05)]">
+          <div className="data-well rounded-[30px] p-4">
             <div className="flex flex-col gap-4 md:flex-row md:items-center">
-              <div className="flex min-w-0 flex-1 items-center gap-3 rounded-[22px] bg-slate-50 px-4 py-4">
+              <div className="flex min-w-0 flex-1 items-center gap-3 rounded-[24px] bg-slate-50/90 px-4 py-4">
                 <SearchIcon className="h-5 w-5 shrink-0 text-[#1453e8]" />
                 <input
                   type="text"
@@ -645,7 +677,7 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
             <button
               type="button"
               onClick={() => setIsAdvancedOpen((current) => !current)}
-              className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+              className="hero-chip inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
             >
               <Filter className="h-4 w-4 text-[#1453e8]" />
               Filters
@@ -656,7 +688,7 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
             </div>
           </div>
 
-          <div className="grid gap-3 rounded-[24px] border border-slate-200 bg-white p-4 md:grid-cols-3">
+          <div className="grid gap-3 rounded-[28px] border border-white/80 bg-white/78 p-4 shadow-[0_18px_38px_rgba(15,23,42,0.05)] md:grid-cols-3">
             {[
               'What may happen: a direct and readable answer.',
               'Why: the main drivers behind the forecast.',

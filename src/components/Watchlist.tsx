@@ -230,17 +230,25 @@ export function Watchlist({ user, isGuest, onLogin, onChecklistComplete }: Watch
 
   return (
     <div className="space-y-6">
-      <section className="editorial-panel rounded-[36px] p-6 md:p-7">
-        <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <div className="section-kicker">{SECTION_COPY.watchlist.heroKicker}</div>
-            <h2 className="mt-3 text-4xl font-display font-semibold tracking-tight text-slate-950 md:text-5xl">
+      <section className="hero-surface rounded-[40px] p-6 md:p-7">
+        <div className="hero-mesh pointer-events-none absolute inset-0 opacity-70" />
+        <div className="relative flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+          <div className="max-w-4xl">
+            <div className="flex flex-wrap gap-2">
+              <span className="hero-chip inline-flex items-center rounded-full px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-600">
+                {SECTION_COPY.watchlist.heroKicker}
+              </span>
+              <span className="hero-chip inline-flex items-center rounded-full px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-600">
+                Pulse board
+              </span>
+            </div>
+            <h2 className="mt-4 text-4xl font-display font-semibold tracking-[-0.04em] text-slate-950 md:text-6xl md:leading-[0.98]">
               {SECTION_COPY.watchlist.heroTitle}
             </h2>
             <p className="mt-4 max-w-2xl text-base leading-8 text-slate-600">{SECTION_COPY.watchlist.heroBody}</p>
           </div>
 
-          <div className="signal-board rounded-[30px] p-5">
+          <div className="premium-strip rounded-[32px] p-5">
             <div className="section-kicker">Current Capacity</div>
             <div className="mt-3 flex flex-wrap items-center gap-3">
               <span className="rounded-full bg-slate-950 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-white">
@@ -254,7 +262,7 @@ export function Watchlist({ user, isGuest, onLogin, onChecklistComplete }: Watch
         </div>
       </section>
 
-      <section className="editorial-panel rounded-[34px] p-6">
+      <section className="command-surface rounded-[36px] p-6">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div className="text-sm leading-7 text-slate-500">
             Save a city, country, or sector. Watchlist then feeds that context back into Home, Forecast, and Nextletter.

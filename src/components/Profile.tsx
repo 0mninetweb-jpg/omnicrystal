@@ -178,17 +178,25 @@ export function Profile({ user, isGuest, onLogin }: ProfileProps) {
 
   return (
     <div className="space-y-6">
-      <section className="editorial-panel rounded-[36px] p-6 md:p-7">
-        <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr] lg:items-end">
-          <div>
-            <div className="section-kicker">{SECTION_COPY.profile.heroKicker}</div>
-            <h2 className="mt-3 text-4xl font-display font-semibold tracking-tight text-slate-950 md:text-5xl">
+      <section className="hero-surface rounded-[40px] p-6 md:p-7">
+        <div className="hero-mesh pointer-events-none absolute inset-0 opacity-70" />
+        <div className="relative grid gap-6 lg:grid-cols-[1.1fr_0.9fr] lg:items-end">
+          <div className="max-w-4xl">
+            <div className="flex flex-wrap gap-2">
+              <span className="hero-chip inline-flex items-center rounded-full px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-600">
+                {SECTION_COPY.profile.heroKicker}
+              </span>
+              <span className="hero-chip inline-flex items-center rounded-full px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-600">
+                Guided setup
+              </span>
+            </div>
+            <h2 className="mt-4 text-4xl font-display font-semibold tracking-[-0.04em] text-slate-950 md:text-6xl md:leading-[0.98]">
               {SECTION_COPY.profile.heroTitle}
             </h2>
             <p className="mt-4 max-w-2xl text-base leading-8 text-slate-600">{SECTION_COPY.profile.heroBody}</p>
           </div>
 
-          <div className="signal-board rounded-[30px] p-5">
+          <div className="premium-strip rounded-[32px] p-5">
             <div className="section-kicker">Profile Progress</div>
             <div className="mt-3 flex items-center gap-3">
               <span className="rounded-full bg-slate-950 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-white">
@@ -207,7 +215,7 @@ export function Profile({ user, isGuest, onLogin }: ProfileProps) {
                   : `AI messages cost ${formatCredits(ACTION_CATALOG.profile_ai_message.cost)}.`}
             </div>
             {!capabilities.forecastAvailable && (
-              <div className="mt-4 rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-600">
+              <div className="mt-4 rounded-[20px] border border-slate-200 bg-white/82 px-4 py-3 text-sm font-medium text-slate-600">
                 {RUNTIME_COPY.forecastPreview}
               </div>
             )}
@@ -216,7 +224,7 @@ export function Profile({ user, isGuest, onLogin }: ProfileProps) {
       </section>
 
       <section className="grid gap-5 xl:grid-cols-[0.95fr_1.05fr]">
-        <div className="editorial-panel rounded-[34px] p-6">
+        <div className="editorial-panel rounded-[36px] p-6">
           <div className="section-kicker">Why This Matters</div>
           <div className="mt-5 space-y-3">
             {[

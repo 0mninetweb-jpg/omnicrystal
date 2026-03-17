@@ -500,17 +500,25 @@ export function Nextletter({ user, isGuest, onLogin, onGenerateCard, onOpenWorld
 
   return (
     <div className="space-y-6">
-      <section className="editorial-panel content-auto rounded-[36px] p-6 md:p-7">
-        <div className="grid gap-6 lg:grid-cols-[1.05fr_0.95fr] lg:items-end">
-          <div>
-            <div className="section-kicker">{SECTION_COPY.nextletter.heroKicker}</div>
-            <h2 className="mt-3 text-4xl font-display font-semibold tracking-tight text-slate-950 md:text-5xl">
+      <section className="hero-surface content-auto rounded-[40px] p-6 md:p-7">
+        <div className="hero-mesh pointer-events-none absolute inset-0 opacity-70" />
+        <div className="relative grid gap-6 lg:grid-cols-[1.05fr_0.95fr] lg:items-end">
+          <div className="max-w-4xl">
+            <div className="flex flex-wrap gap-2">
+              <span className="hero-chip inline-flex items-center rounded-full px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-600">
+                {SECTION_COPY.nextletter.heroKicker}
+              </span>
+              <span className="hero-chip inline-flex items-center rounded-full px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-600">
+                Briefing rhythm
+              </span>
+            </div>
+            <h2 className="mt-4 text-4xl font-display font-semibold tracking-[-0.04em] text-slate-950 md:text-6xl md:leading-[0.98]">
               {SECTION_COPY.nextletter.heroTitle}
             </h2>
             <p className="mt-4 max-w-2xl text-base leading-8 text-slate-600">{SECTION_COPY.nextletter.heroBody}</p>
           </div>
 
-          <div className="signal-board rounded-[30px] p-5">
+          <div className="premium-strip rounded-[32px] p-5">
             <div className="section-kicker">Edition Access</div>
             <div className="mt-3 flex flex-wrap items-center gap-3">
               <span className="rounded-full bg-slate-950 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-white">
@@ -523,15 +531,15 @@ export function Nextletter({ user, isGuest, onLogin, onGenerateCard, onOpenWorld
             <div className="mt-4 text-sm leading-7 text-slate-500">
               Personal Edition uses {formatCredits(ACTION_CATALOG.nextletter_personal.cost)} for each successful generation.
             </div>
-            <div className="mt-4 rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-600">
+            <div className="mt-4 rounded-[20px] border border-slate-200 bg-white/82 px-4 py-3 text-sm font-medium text-slate-600">
               {capabilities.message}
             </div>
           </div>
         </div>
       </section>
 
-      <section className="editorial-panel content-auto rounded-[34px] p-5">
-        <div className="inline-flex rounded-full border border-slate-200 bg-white p-1">
+      <section className="command-surface content-auto rounded-[36px] p-5">
+        <div className="inline-flex rounded-full border border-slate-200 bg-white/88 p-1 shadow-[0_12px_24px_rgba(15,23,42,0.05)]">
           <button
               onClick={() => setActiveEdition('global')}
               className={cn(
