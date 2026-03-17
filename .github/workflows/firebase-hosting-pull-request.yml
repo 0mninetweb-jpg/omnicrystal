@@ -32,5 +32,5 @@ jobs:
       - uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}
-          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_OMNICRYSTAL_3B286 }}
-          projectId: omnicrystal-3b286
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_OMNICRYSTAL }}
+          projectId: omnicrystal

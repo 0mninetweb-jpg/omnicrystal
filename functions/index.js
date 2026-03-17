@@ -1405,7 +1405,7 @@ exports.api = onRequest(
         const returnUrl =
           typeof body.returnUrl === "string" && body.returnUrl.startsWith("http")
             ? body.returnUrl
-            : req.headers.origin || "https://omnicrystal-3b286.web.app";
+            : req.headers.origin || "https://omnicrystal.web.app";
 
         const session = await stripe.checkout.sessions.create({
           mode: "subscription",

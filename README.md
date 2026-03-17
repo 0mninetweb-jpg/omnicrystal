@@ -34,7 +34,7 @@ If the sidecar is not configured, Crystal falls back to an internal server-side 
 
 ## Cloud Run deploy
 
-When `omnicrystal-3b286` is upgraded to `Blaze`, you can deploy the sidecar with:
+When `omnicrystal` is on `Blaze`, you can deploy the sidecar with:
 
 ```powershell
 cd world-sim
@@ -43,7 +43,7 @@ cd world-sim
 
 Then copy the resulting values into:
 
-- [`functions/.env.example`](C:/Users/Fiorenza/OneDrive/Desktop/Codex/crystal-review-0316/functions/.env.example) as a real `functions/.env.omnicrystal-3b286`
+- [`functions/.env.example`](C:/Users/Fiorenza/OneDrive/Desktop/Codex/crystal-review-0316/functions/.env.example) as a real `functions/.env.omnicrystal`
 - or your deployed Functions runtime env
 
 Current blocker from this machine:

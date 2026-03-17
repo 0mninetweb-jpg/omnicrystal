@@ -1,10 +1,9 @@
 {
-  "projectId": "omnicrystal-3b286",
-  "appId": "1:842934848408:web:4ca8c6fca2b48441cbb9ed",
-  "apiKey": "AIzaSyCZYaKwJKiVIWXoksIGuZi7aX7Y36cGVJU",
-  "authDomain": "omnicrystal-3b286.firebaseapp.com",
+  "projectId": "omnicrystal",
+  "appId": "1:294034419055:web:2babcf77e9961b74ba8c9a",
+  "apiKey": "AIzaSyDub1v_F47PsTYK_JYjEbs9qAnWvE1_i_k",
+  "authDomain": "omnicrystal.firebaseapp.com",
   "firestoreDatabaseId": "(default)",
-  "storageBucket": "omnicrystal-3b286.firebasestorage.app",
-  "messagingSenderId": "842934848408",
-  "measurementId": "G-04TWTM11KH"
+  "storageBucket": "omnicrystal.firebasestorage.app",
+  "messagingSenderId": "294034419055"
 }

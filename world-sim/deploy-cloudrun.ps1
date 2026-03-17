@@ -1,5 +1,5 @@
 param(
-  [string]$ProjectId = "omnicrystal-3b286",
+  [string]$ProjectId = "omnicrystal",
   [string]$Region = "europe-west1",
   [string]$ServiceName = "crystal-world-sim",
   [string]$ImageName = "crystal-world-sim",

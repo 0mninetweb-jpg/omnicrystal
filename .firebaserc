@@ -1,12 +1,12 @@
 {
   "projects": {
-    "default": "omnicrystal-3b286"
+    "default": "omnicrystal"
   },
   "targets": {
-    "omnicrystal-3b286": {
+    "omnicrystal": {
       "hosting": {
         "live": [
-          "omnicrystal-3b286"
+          "omnicrystal"
         ]
       }
     }
