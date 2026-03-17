@@ -1,71 +1,111 @@
-import React, { useState, useEffect } from 'react';
-import { Bell, BellOff, Settings2, Plus, Search, MapPin, Activity, Sparkles, ChevronRight, Globe2, Lock, EyeOff } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { cn } from './CrystalCard';
+import React, { useEffect, useState } from 'react';
+import {
+  Activity,
+  Bell,
+  BellOff,
+  BookmarkPlus,
+  ChevronRight,
+  Globe2,
+  Lock,
+  MapPin,
+  Plus,
+  Trash2,
+} from 'lucide-react';
+import { AnimatePresence, motion } from 'framer-motion';
+import { collection, deleteDoc, doc, onSnapshot, orderBy, query, serverTimestamp, setDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
-import { collection, onSnapshot, doc, setDoc, deleteDoc, query, orderBy, serverTimestamp } from 'firebase/firestore';
 import { useCrystalPlan } from '../context/CrystalPlanContext';
 import { getPlanLabel } from '../lib/crystalPlans';
+import { cn } from './CrystalCard';
 
 interface WatchlistProps {
   user: any;
   isGuest?: boolean;
   onLogin?: () => void;
+  onChecklistComplete?: () => void;
 }
 
-export function Watchlist({ user, isGuest, onLogin }: WatchlistProps) {
+type WatchlistItem = {
+  id: string;
+  entity: string;
+  type: string;
+  domains: string[];
+  alerts: boolean;
+  pulse: string;
+  trend?: 'up' | 'down' | 'flat';
+};
+
+const GUEST_ITEMS: WatchlistItem[] = [
+  { id: 'guest-1', entity: 'Roma', type: 'City', domains: ['Tourism', 'Mobility', 'Weather'], alerts: true, pulse: 'High activity', trend: 'up' },
+  { id: 'guest-2', entity: 'Italia', type: 'Country', domains: ['Inflation', 'Macro', 'Energy'], alerts: true, pulse: 'Under watch', trend: 'flat' },
+  { id: 'guest-3', entity: 'AI orchestration', type: 'Industry', domains: ['Jobs', 'Adoption'], alerts: false, pulse: 'Acceleration', trend: 'up' },
+];
+
+function getTone(trend?: 'up' | 'down' | 'flat') {
+  if (trend === 'up') return 'border-emerald-100 bg-emerald-50 text-emerald-700';
+  if (trend === 'down') return 'border-rose-100 bg-rose-50 text-rose-700';
+  return 'border-slate-200 bg-slate-100 text-slate-600';
+}
+
+export function Watchlist({ user, isGuest, onLogin, onChecklistComplete }: WatchlistProps) {
   const { entitlements, openUpgrade } = useCrystalPlan();
   const [isAdding, setIsAdding] = useState(false);
   const [newEntity, setNewEntity] = useState('');
-  const [watchlistItems, setWatchlistItems] = useState<any[]>([]);
+  const [watchlistItems, setWatchlistItems] = useState<WatchlistItem[]>(GUEST_ITEMS);
   const [limitMessage, setLimitMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!user) {
-      setWatchlistItems([
-        { id: '1', entity: 'Roma', type: 'City', domains: ['Tourism', 'Mobility', 'Weather'], alerts: true, pulse: 'High Activity', trend: 'up' },
-        { id: '2', entity: 'Italia', type: 'Country', domains: ['Inflation', 'Macro', 'Energy'], alerts: true, pulse: 'Stable', trend: 'flat' },
-        { id: '3', entity: 'Tech Sector', type: 'Industry', domains: ['Jobs', 'Adoption'], alerts: false, pulse: 'Bullish', trend: 'up' },
-        { id: '4', entity: 'Milano', type: 'City', domains: ['Real Estate', 'Events'], alerts: true, pulse: 'Overheating', trend: 'up' },
-        { id: '5', entity: 'Eurozone', type: 'Region', domains: ['Interest Rates', 'GDP'], alerts: false, pulse: 'Cooling', trend: 'down' },
-      ]);
+    if (!user?.uid) {
+      setWatchlistItems(GUEST_ITEMS);
       return;
     }
-    
-    const path = `users/${user.uid}/watchlist`;
-    const q = query(
-      collection(db, 'users', user.uid, 'watchlist'),
-      orderBy('createdAt', 'desc')
+
+    const watchlistQuery = query(collection(db, 'users', user.uid, 'watchlist'), orderBy('createdAt', 'desc'));
+    const unsubscribe = onSnapshot(
+      watchlistQuery,
+      (snapshot) => {
+        const items = snapshot.docs.map((item) => ({
+          id: item.id,
+          entity: String(item.data().entity || 'Entity'),
+          type: String(item.data().type || 'Custom'),
+          domains: Array.isArray(item.data().domains) ? item.data().domains.map(String) : [],
+          alerts: Boolean(item.data().alerts),
+          pulse: String(item.data().pulse || 'Monitoring'),
+          trend:
+            item.data().trend === 'down' || item.data().trend === 'up' || item.data().trend === 'flat'
+              ? item.data().trend
+              : 'flat',
+        }));
+        setWatchlistItems(items);
+      },
+      (error) => handleFirestoreError(error, OperationType.LIST, `users/${user.uid}/watchlist`)
     );
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const items: any[] = [];
-      snapshot.forEach((doc) => {
-        items.push({ id: doc.id, ...doc.data() });
-      });
-      setWatchlistItems(items);
-    }, (err) => {
-      handleFirestoreError(err, OperationType.LIST, path);
-    });
-
     return () => unsubscribe();
-  }, [user]);
+  }, [user?.uid]);
+
+  useEffect(() => {
+    if (user?.uid && watchlistItems.length > 0) {
+      onChecklistComplete?.();
+    }
+  }, [onChecklistComplete, user?.uid, watchlistItems.length]);
 
   const toggleAlerts = async (id: string, currentAlerts: boolean) => {
-    if (!user) return;
-    
-    const path = `users/${user.uid}/watchlist/${id}`;
+    if (!user?.uid) return;
+
     try {
-      await setDoc(doc(db, 'users', user.uid, 'watchlist', id), {
-        alerts: !currentAlerts
-      }, { merge: true });
-    } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, path);
+      await setDoc(doc(db, 'users', user.uid, 'watchlist', id), { alerts: !currentAlerts }, { merge: true });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `users/${user.uid}/watchlist/${id}`);
     }
   };
 
   const handleAddEntity = async () => {
-    if (!newEntity.trim() || !user) return;
+    if (!newEntity.trim()) return;
+    if (!user?.uid) {
+      onLogin?.();
+      return;
+    }
 
     if (watchlistItems.length >= entitlements.watchlistLimit) {
       if (entitlements.plan === 'pro') {
@@ -84,217 +124,234 @@ export function Watchlist({ user, isGuest, onLogin }: WatchlistProps) {
       }
       return;
     }
-    
-    const path = `users/${user.uid}/watchlist`;
+
     try {
-      const newItemRef = doc(collection(db, 'users', user.uid, 'watchlist'));
-      await setDoc(newItemRef, {
-        entity: newEntity,
-        type: 'Custom', // Default type for now
-        domains: ['General'], // Default domain
+      const reference = doc(collection(db, 'users', user.uid, 'watchlist'));
+      await setDoc(reference, {
+        entity: newEntity.trim(),
+        type: 'Custom',
+        domains: ['General'],
         alerts: true,
         pulse: 'Monitoring',
-        createdAt: serverTimestamp()
+        trend: 'flat',
+        createdAt: serverTimestamp(),
       });
       setNewEntity('');
       setIsAdding(false);
       setLimitMessage(null);
-    } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, path);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `users/${user.uid}/watchlist`);
     }
   };
 
   const removeEntity = async (id: string) => {
-    if (!user) return;
-    
-    const path = `users/${user.uid}/watchlist/${id}`;
+    if (!user?.uid) return;
     try {
       await deleteDoc(doc(db, 'users', user.uid, 'watchlist', id));
-    } catch (err) {
-      handleFirestoreError(err, OperationType.DELETE, path);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `users/${user.uid}/watchlist/${id}`);
     }
   };
 
   return (
-    <div className="space-y-8">
-      {/* Header & Add */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-        <div>
-          <h2 className="text-3xl font-display font-bold text-slate-900 mb-2">La tua Watchlist</h2>
-          <p className="text-slate-500 font-medium">Monitora entità e domini specifici per ricevere alert predittivi.</p>
-        </div>
-        {!isGuest && (
-          <div className="inline-flex items-center gap-3 rounded-2xl border border-indigo-100 bg-white px-4 py-3 text-sm font-bold text-slate-700 shadow-sm">
-            <span>{watchlistItems.length} / {entitlements.watchlistLimit}</span>
-            <span className="rounded-full bg-indigo-50 px-3 py-1 text-[10px] uppercase tracking-[0.18em] text-indigo-600">
-              {getPlanLabel(entitlements.plan)}
-            </span>
+    <div className="space-y-6">
+      <section className="editorial-panel rounded-[32px] p-6 md:p-7">
+        <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <div className="section-kicker">Watchlist Pulse</div>
+            <h2 className="mt-3 text-4xl font-display font-semibold tracking-tight text-slate-950 md:text-5xl">
+              Monitora le entita che vuoi tenere sotto osservazione.
+            </h2>
+            <p className="mt-4 max-w-2xl text-base leading-8 text-slate-600">
+              La watchlist di Crystal non e una lista passiva: ti mostra status, pulse e limiti in modo pulito, senza
+              trasformarsi in una schermata settings-heavy.
+            </p>
           </div>
-        )}
-        {isGuest ? (
-          <button 
-            onClick={onLogin}
-            className="px-6 py-4 bg-indigo-600 text-white rounded-2xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 flex items-center justify-center gap-3 group"
-          >
-            <Lock className="w-5 h-5" />
-            Accedi per gestire
-          </button>
-        ) : (
-          <button 
-            onClick={() => setIsAdding(true)}
-            className="px-6 py-4 bg-indigo-600 text-white rounded-2xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 flex items-center justify-center gap-3 group"
-          >
-            Aggiungi Entità
-            <Plus className="w-5 h-5 group-hover:rotate-90 transition-transform" />
-          </button>
-        )}
-      </div>
 
-      <AnimatePresence>
-        {isAdding && (
-          <motion.div 
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            className="overflow-hidden"
-          >
-            <div className="p-8 bg-white rounded-[32px] border-2 border-indigo-100 shadow-xl shadow-indigo-50 mb-8">
-              <div className="flex items-center gap-4 mb-6">
-                <div className="w-12 h-12 bg-indigo-50 rounded-2xl flex items-center justify-center">
-                  <Search className="w-6 h-6 text-indigo-600" />
-                </div>
-                <div>
-                  <h3 className="text-xl font-display font-bold text-slate-900">Nuovo Monitoraggio</h3>
-                  <p className="text-sm text-slate-500 font-medium">Cerca una città, un paese o un settore industriale.</p>
-                </div>
-              </div>
-              <div className="flex flex-col sm:flex-row gap-4">
-                <input 
-                  type="text" 
-                  value={newEntity}
-                  onChange={(e) => {
-                    setNewEntity(e.target.value);
-                    if (limitMessage) setLimitMessage(null);
-                  }}
-                  onKeyDown={(e) => e.key === 'Enter' && handleAddEntity()}
-                  placeholder="Es: Milano, Giappone, Semiconduttori..."
-                  className="flex-1 px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-slate-700"
-                />
-                <div className="flex gap-2">
-                  <button onClick={() => setIsAdding(false)} className="px-6 py-4 text-slate-400 font-bold hover:text-slate-600 transition-colors">
-                    Annulla
-                  </button>
-                  <button 
-                    onClick={handleAddEntity}
-                    className="px-8 py-4 bg-indigo-600 text-white rounded-2xl font-bold hover:bg-indigo-700 transition-all shadow-md shadow-indigo-200"
-                  >
-                    Aggiungi
-                  </button>
-                </div>
-              </div>
-              {limitMessage && (
-                <p className="mt-4 text-sm font-bold text-rose-500">{limitMessage}</p>
-              )}
+          <div className="rounded-[28px] border border-slate-200 bg-white p-5">
+            <div className="section-kicker">Current Capacity</div>
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              <span className="rounded-full bg-slate-950 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-white">
+                {isGuest ? 'Guest' : getPlanLabel(entitlements.plan)}
+              </span>
+              <span className="text-sm font-semibold text-slate-700">
+                {isGuest ? 'Accedi per salvare la tua watchlist' : `${watchlistItems.length} / ${entitlements.watchlistLimit} entita`}
+              </span>
             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+          </div>
+        </div>
+      </section>
 
-      {/* List */}
-      <div className="grid grid-cols-1 gap-4">
-        <AnimatePresence>
-          {watchlistItems.length === 0 ? (
-            <motion.div 
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="flex flex-col items-center justify-center p-12 bg-white rounded-[40px] border border-slate-100 shadow-sm text-center"
+      <section className="editorial-panel rounded-[32px] p-6">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div className="text-sm leading-7 text-slate-500">
+            Salva una citta, un paese o un settore. Crystal lo riusa in Home, Forecast e briefing.
+          </div>
+          {isGuest ? (
+            <button
+              onClick={onLogin}
+              className="inline-flex items-center gap-2 rounded-full bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800"
             >
-              <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mb-6">
-                <EyeOff className="w-10 h-10 text-slate-300" />
-              </div>
-              <h3 className="text-2xl font-display font-bold text-slate-900 mb-2">Nessuna entità monitorata</h3>
-              <p className="text-slate-500 max-w-md mx-auto mb-8">
-                Aggiungi città, paesi o settori industriali alla tua watchlist per ricevere alert predittivi e monitorare i trend in tempo reale.
-              </p>
-              {!isGuest && (
-                <button 
-                  onClick={() => setIsAdding(true)}
-                  className="px-6 py-3 bg-indigo-50 text-indigo-600 rounded-2xl font-bold hover:bg-indigo-100 transition-all flex items-center justify-center gap-2"
-                >
-                  <Plus className="w-5 h-5" />
-                  Aggiungi la tua prima entità
-                </button>
-              )}
-            </motion.div>
+              <Lock className="h-4 w-4" />
+              Accedi per gestire
+            </button>
           ) : (
-            watchlistItems.map((item) => (
-              <motion.div 
-                key={item.id}
-                layout
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.95 }}
-                whileHover={{ x: 4 }}
-                className="bg-white p-6 md:p-8 rounded-[40px] border border-slate-100 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-8 group hover:border-indigo-200 transition-all"
-              >
-                <div className="flex items-start gap-6">
-                  <div className="w-16 h-16 bg-slate-50 rounded-[24px] flex items-center justify-center text-slate-400 group-hover:bg-indigo-50 group-hover:text-indigo-600 transition-all shadow-sm group-hover:shadow">
-                    {item.type === 'City' ? <MapPin className="w-8 h-8" /> : item.type === 'Country' ? <Globe2 className="w-8 h-8" /> : <Activity className="w-8 h-8" />}
+            <button
+              onClick={() => setIsAdding((current) => !current)}
+              className="inline-flex items-center gap-2 rounded-full bg-[#1453e8] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#1248c8]"
+            >
+              <BookmarkPlus className="h-4 w-4" />
+              Aggiungi entita
+            </button>
+          )}
+        </div>
+
+        <AnimatePresence initial={false}>
+          {isAdding && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="overflow-hidden"
+            >
+              <div className="mt-5 rounded-[28px] border border-slate-200 bg-white p-5">
+                <div className="grid gap-3 md:grid-cols-[1fr_auto]">
+                  <input
+                    type="text"
+                    value={newEntity}
+                    onChange={(event) => {
+                      setNewEntity(event.target.value);
+                      if (limitMessage) setLimitMessage(null);
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        void handleAddEntity();
+                      }
+                    }}
+                    placeholder="Es: Milano, Giappone, semiconduttori..."
+                    className="rounded-[22px] border border-slate-200 bg-slate-50 px-5 py-4 text-sm font-medium text-slate-900 outline-none transition focus:border-[#1453e8] focus:bg-white"
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setIsAdding(false)}
+                      className="rounded-full border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-950"
+                    >
+                      Annulla
+                    </button>
+                    <button
+                      onClick={() => void handleAddEntity()}
+                      className="inline-flex items-center gap-2 rounded-full bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800"
+                    >
+                      <Plus className="h-4 w-4" />
+                      Aggiungi
+                    </button>
+                  </div>
+                </div>
+                {limitMessage && <p className="mt-4 text-sm font-medium text-rose-600">{limitMessage}</p>}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </section>
+
+      <section className="grid gap-4">
+        {watchlistItems.length === 0 ? (
+          <div className="editorial-panel rounded-[32px] p-10 text-center">
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-slate-100 text-slate-400">
+              <Activity className="h-8 w-8" />
+            </div>
+            <h3 className="mt-5 text-2xl font-display font-semibold text-slate-950">Nessuna entita monitorata.</h3>
+            <p className="mx-auto mt-3 max-w-xl text-sm leading-7 text-slate-500">
+              Aggiungi il tuo primo nodo alla watchlist per far comparire il pulse in Home e avere un contesto piu
+              utile nei forecast.
+            </p>
+          </div>
+        ) : (
+          watchlistItems.map((item) => (
+            <motion.div
+              key={item.id}
+              layout
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 16 }}
+              className="editorial-panel rounded-[30px] p-5 md:p-6"
+            >
+              <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+                <div className="flex items-start gap-4">
+                  <div className="flex h-14 w-14 items-center justify-center rounded-[20px] border border-slate-200 bg-white text-slate-500">
+                    {item.type.toLowerCase().includes('city') ? (
+                      <MapPin className="h-6 w-6" />
+                    ) : item.type.toLowerCase().includes('country') ? (
+                      <Globe2 className="h-6 w-6" />
+                    ) : (
+                      <Activity className="h-6 w-6" />
+                    )}
                   </div>
                   <div>
-                    <div className="flex items-center gap-3 mb-2">
-                      <h3 className="text-2xl font-display font-bold text-slate-900">{item.entity}</h3>
-                      <span className="px-3 py-1 bg-slate-100 text-slate-500 text-[10px] font-bold rounded-full uppercase tracking-widest">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="text-2xl font-display font-semibold text-slate-950">{item.entity}</h3>
+                      <span className="rounded-full bg-slate-100 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
                         {item.type}
                       </span>
                     </div>
-                    <div className="flex flex-wrap gap-2">
-                      {item.domains.map((d: string) => (
-                        <span key={d} className="text-[11px] font-bold text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full border border-indigo-100/50">
-                          {d}
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {item.domains.map((domain) => (
+                        <span
+                          key={domain}
+                          className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-medium text-slate-600"
+                        >
+                          {domain}
                         </span>
                       ))}
                     </div>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-10">
-                  <div className="hidden md:block text-right">
-                    <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">PULSE STATUS</div>
-                    <div className="flex items-center justify-end gap-2 font-bold text-slate-900">
-                      <Sparkles className="w-4 h-4 text-indigo-500" />
-                      {item.pulse}
+                <div className="flex flex-col gap-4 md:flex-row md:items-center md:gap-5">
+                  <div className="rounded-[20px] border border-slate-200 bg-white px-4 py-3">
+                    <div className="section-kicker">Pulse</div>
+                    <div className="mt-2 flex items-center gap-3">
+                      <span className={cn('rounded-full border px-3 py-1 text-xs font-semibold', getTone(item.trend))}>
+                        {item.pulse}
+                      </span>
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-3">
-                    <button 
-                      onClick={() => toggleAlerts(item.id, item.alerts)}
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => void toggleAlerts(item.id, item.alerts)}
                       className={cn(
-                        "w-12 h-12 rounded-2xl border flex items-center justify-center transition-all",
-                        item.alerts ? "bg-emerald-50 border-emerald-200 text-emerald-600 hover:bg-emerald-100" : "bg-slate-50 border-slate-200 text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+                        'flex h-12 w-12 items-center justify-center rounded-full border transition',
+                        item.alerts
+                          ? 'border-emerald-200 bg-emerald-50 text-emerald-600'
+                          : 'border-slate-200 bg-white text-slate-500 hover:text-slate-900'
                       )}
-                      title={item.alerts ? "Disattiva Alert" : "Attiva Alert"}
+                      title={item.alerts ? 'Disattiva alert' : 'Attiva alert'}
                     >
-                      {item.alerts ? <Bell className="w-5 h-5" /> : <BellOff className="w-5 h-5" />}
+                      {item.alerts ? <Bell className="h-5 w-5" /> : <BellOff className="h-5 w-5" />}
                     </button>
-                    <button 
-                      onClick={() => removeEntity(item.id)}
-                      className="w-12 h-12 rounded-2xl border border-rose-100 bg-rose-50 text-rose-500 hover:bg-rose-100 transition-all flex items-center justify-center opacity-0 group-hover:opacity-100 focus:opacity-100"
-                      title="Rimuovi"
-                    >
-                      <Settings2 className="w-5 h-5" />
-                    </button>
-                    <button className="w-12 h-12 rounded-2xl bg-slate-50 text-slate-300 flex items-center justify-center hover:bg-indigo-50 hover:text-indigo-600 transition-all">
-                      <ChevronRight className="w-6 h-6" />
+
+                    {!isGuest && (
+                      <button
+                        onClick={() => void removeEntity(item.id)}
+                        className="flex h-12 w-12 items-center justify-center rounded-full border border-rose-100 bg-rose-50 text-rose-600 transition hover:bg-rose-100"
+                        title="Rimuovi"
+                      >
+                        <Trash2 className="h-5 w-5" />
+                      </button>
+                    )}
+
+                    <button className="flex h-12 w-12 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 transition hover:border-slate-300 hover:text-slate-950">
+                      <ChevronRight className="h-5 w-5" />
                     </button>
                   </div>
                 </div>
-              </motion.div>
-            ))
-          )}
-        </AnimatePresence>
-      </div>
+              </div>
+            </motion.div>
+          ))
+        )}
+      </section>
     </div>
   );
 }

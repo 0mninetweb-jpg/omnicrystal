@@ -1,13 +1,26 @@
-import React, { useState, useEffect } from 'react';
-import { Mail, Globe2, User, ArrowRight, Zap, Calendar, Lock, ChevronRight, Plus, Loader2, Trophy, Laptop, TrendingUp, Lightbulb, Check, Database, Sparkles, Quote, Shield, Activity, Bookmark } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { cn } from './CrystalCard';
-import { generateNextletter, generateCrystalQuotes } from '../services/geminiService';
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  ArrowRight,
+  Bookmark,
+  Check,
+  Globe2,
+  Lightbulb,
+  Loader2,
+  Lock,
+  Mail,
+  Shield,
+  Sparkles,
+  User,
+  Zap,
+} from 'lucide-react';
+import { AnimatePresence, motion } from 'framer-motion';
+import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
-import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { generateCrystalQuotes, generateNextletter } from '../services/geminiService';
 import { CrystalQuote } from '../types/crystal';
 import { useCrystalPlan } from '../context/CrystalPlanContext';
 import { ACTION_CATALOG, formatCredits, getPlanLabel } from '../lib/crystalPlans';
+import { cn } from './CrystalCard';
 
 interface NextletterProps {
   user: any;
@@ -16,23 +29,93 @@ interface NextletterProps {
   onGenerateCard?: (query: string) => void;
 }
 
+type GeneratedSection = {
+  topic?: string;
+  icon?: string;
+  title?: string;
+  content?: string;
+  historical_context?: string;
+  probability?: number;
+  horizon?: string;
+  impact?: string;
+  so_what?: string;
+  query_suggestion?: string;
+  world_sim?: {
+    simulation_mode?: string;
+    narrative_arc?: string;
+    pivotal_actors?: string[];
+    intervention_points?: string[];
+    prediction_market_frame?: {
+      outcome?: string;
+      horizon?: string;
+      resolution_criteria?: string;
+      reference_market?: string;
+    };
+  };
+};
+
+type GeneratedLetter = {
+  title?: string;
+  subtitle?: string;
+  sections?: GeneratedSection[];
+};
+
 const PREDEFINED_TOPICS = [
-  { id: 'calcio', label: '⚽ Calcio & Sport' },
-  { id: 'bollette', label: '💡 Risparmio Bollette' },
-  { id: 'tech', label: '🛠️ Tool & Produttività' },
-  { id: 'finanza', label: '📈 Finanza & Crypto' },
-  { id: 'eventi', label: '🎉 Eventi Locali' },
-  { id: 'intrattenimento', label: '🎬 Intrattenimento' },
+  { id: 'sport', label: 'Sport e attenzione collettiva' },
+  { id: 'energy', label: 'Energia e costo della vita' },
+  { id: 'ai', label: 'AI, lavoro e produttivita' },
+  { id: 'markets', label: 'Mercati e segnali macro' },
+  { id: 'cities', label: 'Citta, mobilita e turismo' },
+  { id: 'culture', label: 'Cultura e media behavior' },
 ];
+
+const GLOBAL_SECTIONS: GeneratedSection[] = [
+  {
+    topic: 'Energy',
+    title: 'Stress energetico europeo',
+    content:
+      'Le pressioni su energia e logistica restano il nodo piu chiaro del trimestre. Non e ancora un allarme uniforme, ma il rapporto rischio/tempo di reazione si sta stringendo.',
+    probability: 72,
+    horizon: '90d',
+    impact: 'High',
+    so_what: 'Se il tuo business e esposto ai costi fissi, anticipa ora le decisioni tariffarie e la pianificazione di cassa.',
+    historical_context:
+      'Quando la frizione geopolitica si combina con magazzini piu fragili, il repricing arriva quasi sempre prima al retail che al discorso pubblico.',
+  },
+  {
+    topic: 'AI adoption',
+    title: 'Automazione service e lavoro knowledge',
+    content:
+      'L accelerazione vera non sta nei tool singoli, ma nei sistemi che orchestrano agenti, dati e processi. E li che si apre il gap tra chi ottimizza e chi rincorre.',
+    probability: 64,
+    horizon: '6m',
+    impact: 'Medium',
+    so_what: 'Posizionati su coordinamento, controllo di qualita e integrazione dei flussi, non solo sulla produzione manuale.',
+    historical_context:
+      'Le tecnologie che comprimono i margini operativi si diffondono prima nelle funzioni ripetitive, poi cambiano il ruolo dei team piu esposti.',
+  },
+];
+
+function getImpactTone(impact?: string) {
+  if ((impact || '').toLowerCase() === 'high') return 'bg-rose-50 text-rose-700 border-rose-100';
+  if ((impact || '').toLowerCase() === 'medium') return 'bg-amber-50 text-amber-700 border-amber-100';
+  return 'bg-emerald-50 text-emerald-700 border-emerald-100';
+}
+
+function getSectionIcon(topic?: string) {
+  const normalized = (topic || '').toLowerCase();
+  if (normalized.includes('energy')) return <Zap className="h-5 w-5" />;
+  if (normalized.includes('market')) return <Shield className="h-5 w-5" />;
+  return <Lightbulb className="h-5 w-5" />;
+}
 
 export function Nextletter({ user, isGuest, onLogin, onGenerateCard }: NextletterProps) {
   const { entitlements, runMeteredAction } = useCrystalPlan();
   const [activeEdition, setActiveEdition] = useState<'global' | 'personal'>('global');
-  const [isBuilding, setIsBuilding] = useState(false);
   const [selectedTopics, setSelectedTopics] = useState<string[]>([]);
   const [customTopic, setCustomTopic] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
-  const [generatedLetter, setGeneratedLetter] = useState<any>(null);
+  const [generatedLetter, setGeneratedLetter] = useState<GeneratedLetter | null>(null);
   const [userContext, setUserContext] = useState<any>(null);
   const [crystalQuotes, setCrystalQuotes] = useState<CrystalQuote[]>([]);
   const [isLoadingQuotes, setIsLoadingQuotes] = useState(false);
@@ -41,649 +124,482 @@ export function Nextletter({ user, isGuest, onLogin, onGenerateCard }: Nextlette
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
-    if (user) {
-      const fetchContext = async () => {
-        const path = `users/${user.uid}`;
-        try {
-          const docRef = doc(db, 'users', user.uid);
-          const docSnap = await getDoc(docRef);
-          if (docSnap.exists()) {
-            setUserContext(docSnap.data());
-          }
-        } catch (err) {
-          handleFirestoreError(err, OperationType.GET, path);
-        }
-      };
-      fetchContext();
-    }
-
     const fetchQuotes = async () => {
       setIsLoadingQuotes(true);
       try {
         const result = await generateCrystalQuotes();
-        setCrystalQuotes(result.quotes || []);
+        setCrystalQuotes((result.quotes || []).slice(0, 4));
       } catch (error) {
-        console.error("Error fetching quotes:", error);
+        console.error('Error fetching quotes:', error);
       } finally {
         setIsLoadingQuotes(false);
       }
     };
-    fetchQuotes();
-  }, [user]);
+
+    void fetchQuotes();
+  }, []);
+
+  useEffect(() => {
+    if (!user?.uid) return;
+
+    const fetchContext = async () => {
+      try {
+        const snapshot = await getDoc(doc(db, 'users', user.uid));
+        if (snapshot.exists()) {
+          setUserContext(snapshot.data());
+        }
+      } catch (error) {
+        handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
+      }
+    };
+
+    void fetchContext();
+  }, [user?.uid]);
+
+  const allPersonalTopics = useMemo(() => {
+    const topics = [...selectedTopics];
+    if (customTopic.trim()) topics.push(customTopic.trim());
+    return topics;
+  }, [customTopic, selectedTopics]);
 
   const handleSaveQuote = async (quote: CrystalQuote) => {
-    if (!user) return;
+    if (!user?.uid) {
+      onLogin?.();
+      return;
+    }
+
     setIsSaving(true);
     try {
-      const quoteRef = doc(db, 'users', user.uid, 'saved_quotes', quote.quote_id);
-      await setDoc(quoteRef, {
+      await setDoc(doc(db, 'users', user.uid, 'saved_quotes', quote.quote_id), {
         ...quote,
-        savedAt: serverTimestamp()
+        savedAt: serverTimestamp(),
       });
-      setSavedQuotes(prev => [...prev, quote.quote_id]);
-    } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, `users/${user.uid}/saved_quotes`);
+      setSavedQuotes((current) => (current.includes(quote.quote_id) ? current : [...current, quote.quote_id]));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `users/${user.uid}/saved_quotes/${quote.quote_id}`);
     } finally {
       setIsSaving(false);
     }
   };
 
   const toggleTopic = (topic: string) => {
-    setSelectedTopics(prev => 
-      prev.includes(topic) ? prev.filter(t => t !== topic) : [...prev, topic]
-    );
+    setSelectedTopics((current) => (current.includes(topic) ? current.filter((item) => item !== topic) : [...current, topic]));
   };
 
   const handleGenerate = async () => {
-    const allTopics = [...selectedTopics];
-    if (customTopic.trim()) {
-      allTopics.push(customTopic.trim());
-    }
-
-    if (allTopics.length === 0) return;
-
+    if (allPersonalTopics.length === 0) return;
     setIsGenerating(true);
     try {
-      const result = await runMeteredAction(
+      const letter = await runMeteredAction(
         ACTION_CATALOG.nextletter_personal,
-        () => generateNextletter(allTopics, userContext),
+        () => generateNextletter(allPersonalTopics, userContext),
         {
           sourceView: 'nextletter',
           insufficientCreditsMessage:
             'La tua Nextletter personale richiede 3 crediti. Passa a Plus o Pro per riceverla con continuita.',
         }
       );
-      setGeneratedLetter(result);
-      setIsBuilding(false);
+      setGeneratedLetter(letter);
     } catch (error) {
-      console.error("Error generating nextletter:", error);
+      console.error('Error generating nextletter:', error);
     } finally {
       setIsGenerating(false);
     }
   };
 
-  const getIcon = (iconName: string) => {
-    const icons: any = { Trophy, Zap, Laptop, TrendingUp, Calendar, Lightbulb, Globe2, Shield, Activity, Landmark: Database };
-    const Icon = icons[iconName] || Lightbulb;
-    return <Icon className="w-6 h-6" />;
-  };
+  const renderSection = (section: GeneratedSection, index: number) => (
+    <article key={`${section.title || 'section'}-${index}`} className="rounded-[30px] border border-slate-200 bg-white p-6 shadow-[0_16px_35px_rgba(15,23,42,0.05)]">
+      <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+        <div className="flex gap-4">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[18px] bg-[#e8eefc] text-[#1453e8]">
+            {getSectionIcon(section.topic)}
+          </div>
+          <div>
+            <div className="section-kicker">{section.topic || `Section ${index + 1}`}</div>
+            <h3 className="mt-2 text-2xl font-display font-semibold text-slate-950">{section.title || 'Crystal Briefing'}</h3>
+          </div>
+        </div>
 
-  return (
-    <div className="max-w-4xl mx-auto space-y-12">
-      {/* Header */}
-      <div className="text-center space-y-6 mb-16">
-        <motion.div 
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="inline-flex items-center justify-center p-4 bg-sky-500/10 rounded-3xl text-sky-400 mb-2 border border-sky-500/20 shadow-lg shadow-sky-500/5"
-        >
-          <Mail className="w-10 h-10" />
-        </motion.div>
-        <h1 className="text-5xl md:text-7xl font-display font-bold text-white tracking-tight leading-none">
-          Nextletter
-        </h1>
-        <p className="text-xl text-slate-400 font-medium max-w-xl mx-auto leading-relaxed">
-          Non riassumiamo il passato. Anticipiamo il futuro. <br className="hidden md:block"/>
-          La tua curatela di eventi, tendenze e azioni per i prossimi 30 giorni.
-        </p>
+        <div className="flex flex-wrap gap-2">
+          {typeof section.probability === 'number' && (
+            <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
+              {section.probability}% probability
+            </span>
+          )}
+          {section.horizon && (
+            <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
+              {section.horizon}
+            </span>
+          )}
+          {section.impact && (
+            <span className={cn('rounded-full border px-3 py-1 text-xs font-semibold', getImpactTone(section.impact))}>
+              {section.impact} impact
+            </span>
+          )}
+        </div>
       </div>
 
-      {/* Edition Toggle */}
-      <div className="flex p-1.5 bg-white/5 backdrop-blur-xl rounded-2xl max-w-md mx-auto border border-white/10 shadow-2xl">
-        <button
-          onClick={() => setActiveEdition('global')}
-          className={cn(
-            "flex-1 flex items-center justify-center gap-2.5 py-3.5 px-6 rounded-xl font-bold text-sm transition-all duration-300",
-            activeEdition === 'global' 
-              ? "bg-white text-black shadow-xl" 
-              : "text-slate-500 hover:text-slate-300"
-          )}
-        >
-          <Globe2 className="w-4 h-4" />
-          Crystal Edition
-        </button>
-        <button
-          onClick={() => setActiveEdition('personal')}
-          className={cn(
-            "flex-1 flex items-center justify-center gap-2.5 py-3.5 px-6 rounded-xl font-bold text-sm transition-all duration-300",
-            activeEdition === 'personal' 
-              ? "bg-white text-black shadow-xl" 
-              : "text-slate-500 hover:text-slate-300"
-          )}
-        >
-          <User className="w-4 h-4" />
-          Personal Edition
-        </button>
-      </div>
-
-      {/* Content Area */}
-      <AnimatePresence mode="wait">
-        {activeEdition === 'global' && (
-          <motion.article 
-            key="global"
-            initial={{ opacity: 0, y: 30 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -30 }}
-            className="space-y-12"
-          >
-            {/* Crystal Quotes Section */}
-            <section className="space-y-6">
-              <div className="flex items-center justify-between mb-8">
-                <div className="flex flex-col">
-                  <h2 className="text-sm font-bold text-slate-400 uppercase tracking-[0.3em]">Crystal Quotes</h2>
-                  <p className="text-xs text-slate-600 mt-1 uppercase tracking-widest">Le chiamate dirette dell'Oracolo</p>
-                </div>
-                <div className="h-px flex-1 bg-white/5 mx-8" />
-              </div>
-
-              <div className="grid grid-cols-1 gap-6">
-                {isLoadingQuotes ? (
-                  <div className="py-12 flex justify-center">
-                    <Loader2 className="w-8 h-8 text-sky-500 animate-spin" />
-                  </div>
-                ) : (
-                  crystalQuotes.map((quote, i) => (
-                    <motion.div 
-                      key={quote.quote_id}
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: i * 0.1 }}
-                      className="bg-[#0a0a0a] p-8 rounded-[40px] border border-white/10 shadow-sm relative overflow-hidden group hover:shadow-xl hover:shadow-sky-500/10 transition-all cursor-pointer"
-                      onClick={() => setSelectedQuote(quote)}
-                    >
-                      <div className="absolute top-0 right-0 p-6 opacity-5 group-hover:opacity-10 transition-opacity">
-                        <Quote className="w-24 h-24 text-sky-500" />
-                      </div>
-                      <div className="flex items-center gap-3 mb-4 relative z-10">
-                        <span className="text-[10px] font-bold text-sky-400 uppercase tracking-[0.2em] bg-sky-500/10 px-3 py-1 rounded-full border border-sky-500/20">
-                          {quote.context}
-                        </span>
-                      </div>
-                      <p className="text-2xl font-display font-bold text-white leading-tight mb-6 relative z-10">
-                        "{quote.text}"
-                      </p>
-                      <div className="flex items-center justify-between relative z-10">
-                        <span className="text-xs font-bold text-slate-400 italic">{quote.author}</span>
-                        <button className="flex items-center gap-2 text-xs font-bold text-sky-400 hover:text-sky-300 transition-colors">
-                          Vedi Analisi <ChevronRight className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </motion.div>
-                  ))
-                )}
-              </div>
-            </section>
-
-            {/* Main Newspaper Section */}
-            <div className="bg-[#0a0a0a] rounded-[48px] border border-white/10 shadow-2xl overflow-hidden relative">
-              <div className="bg-[#050505] text-white p-10 md:p-20 text-center relative overflow-hidden border-b border-white/10">
-                <div className="absolute inset-0 premium-gradient opacity-10 pointer-events-none" />
-                <div className="absolute top-0 left-0 w-full h-full bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] opacity-10 mix-blend-overlay"></div>
-                
-                <motion.span 
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="inline-block px-4 py-1.5 bg-white/5 rounded-full text-[10px] font-bold tracking-[0.3em] uppercase mb-8 backdrop-blur-md border border-white/10 text-sky-300"
-                >
-                  The Crystal Times • Issue #42
-                </motion.span>
-                
-                <h2 className="text-4xl md:text-6xl font-display font-bold leading-[1.1] mb-8 tracking-tight">
-                  Lo Shock Energetico Autunnale e l'Automazione del Service
-                </h2>
-                
-                <p className="text-slate-400 font-serif text-xl md:text-2xl max-w-2xl mx-auto italic leading-relaxed opacity-80">
-                  Preparati ai due macro-trend che ridefiniranno i costi operativi e il mercato del lavoro nel prossimo trimestre.
-                </p>
-              </div>
-
-              <div className="p-10 md:p-20 space-y-20 font-serif text-xl text-slate-300 leading-relaxed">
-                <section className="space-y-8">
-                  <div className="flex items-center gap-4 mb-4">
-                    <div className="w-12 h-12 bg-amber-500/10 rounded-2xl flex items-center justify-center border border-amber-500/20">
-                      <Zap className="w-6 h-6 text-amber-400" /> 
-                    </div>
-                    <span className="text-xs font-bold text-amber-400 uppercase tracking-[0.3em]">Macroeconomia / Energia</span>
-                  </div>
-                  <h3 className="text-3xl md:text-4xl font-sans font-bold text-white tracking-tight">
-                    1. Il Rincaro Energetico Imminente: Analisi dei Driver Geopolitici
-                  </h3>
-                  <p>
-                    I nostri modelli predittivi indicano una probabilità del <strong className="text-white">72%</strong> di un picco dei costi energetici in Europa. A differenza delle fluttuazioni stagionali, questo spike è guidato da una convergenza di tagli OPEC+ e tensioni logistiche nel Mar Rosso che influenzeranno i prezzi del GNL.
-                  </p>
-                  <p className="text-lg text-slate-400">
-                    Analizzando i pattern storici degli ultimi 20 anni, in particolare la crisi del 2008 e lo shock del 2022, osserviamo una correlazione diretta tra la riduzione delle scorte strategiche e l'aumento della volatilità nei contratti a termine.
-                  </p>
-                  <div className="bg-amber-500/5 border border-amber-500/20 p-8 rounded-[32px] relative overflow-hidden group">
-                    <div className="absolute top-0 left-0 w-1 h-full bg-amber-500" />
-                    <h4 className="font-sans font-bold text-amber-400 text-xs uppercase tracking-[0.2em] mb-4">L'Azione Strategica</h4>
-                    <p className="text-slate-300 text-lg m-0 leading-relaxed">
-                      Hai una finestra di circa 3 settimane prima che i fornitori retail adeguino le tariffe. <strong className="text-white">Azione consigliata:</strong> Blocca ora una tariffa fissa a 12 mesi se il tuo contratto è in scadenza o variabile.
-                    </p>
-                  </div>
-                </section>
-
-                <div className="h-px w-full bg-gradient-to-r from-transparent via-white/5 to-transparent" />
-
-                <section className="space-y-8">
-                  <div className="flex items-center gap-4 mb-4">
-                    <div className="w-12 h-12 bg-sky-500/10 rounded-2xl flex items-center justify-center border border-sky-500/20">
-                      <Globe2 className="w-6 h-6 text-sky-400" /> 
-                    </div>
-                    <span className="text-xs font-bold text-sky-400 uppercase tracking-[0.3em]">Tecnologia / Lavoro</span>
-                  </div>
-                  <h3 className="text-3xl md:text-4xl font-sans font-bold text-white tracking-tight">
-                    2. Disruption nel Customer Service: L'Era dell'AI Orchestration
-                  </h3>
-                  <p>
-                    L'adozione di agenti AI vocali autonomi sta superando la fase di test. Prevediamo che entro fine anno il <strong className="text-white">40%</strong> dei contact center Tier 1 sarà automatizzato. Non è una "news tech", è un imminente shift del mercato del lavoro che Crystal ha tracciato attraverso l'analisi dei brevetti e degli investimenti R&D delle Big Tech.
-                  </p>
-                  <p className="text-lg text-slate-400">
-                    Il modello predittivo suggerisce che le aziende che non integreranno sistemi di orchestrazione entro i prossimi 90 giorni subiranno un calo della competitività del 15% rispetto ai "first adopters".
-                  </p>
-                  <div className="bg-sky-500/5 border border-sky-500/20 p-8 rounded-[32px] relative overflow-hidden group">
-                    <div className="absolute top-0 left-0 w-1 h-full bg-sky-500" />
-                    <h4 className="font-sans font-bold text-sky-400 text-xs uppercase tracking-[0.2em] mb-4">Il Tuo Posizionamento</h4>
-                    <p className="text-slate-300 text-lg m-0 leading-relaxed">
-                      Il 15 del prossimo mese si terrà il summit europeo sull'AI Orchestration. <strong className="text-white">Azione consigliata:</strong> Iscriviti per posizionarti come gestore di queste tecnologie, non come vittima dell'automazione.
-                    </p>
-                  </div>
-                </section>
-              </div>
+      <div className="mt-5 grid gap-5 xl:grid-cols-[1.05fr_0.95fr]">
+        <div className="space-y-4">
+          <div>
+            <div className="section-kicker !text-slate-500">Summary</div>
+            <p className="mt-3 text-sm leading-8 text-slate-600">{section.content}</p>
+          </div>
+          {section.historical_context && (
+            <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-4">
+              <div className="section-kicker !text-slate-500">Why It Matters</div>
+              <p className="mt-3 text-sm leading-7 text-slate-600">{section.historical_context}</p>
             </div>
-          </motion.article>
-        )}
+          )}
+        </div>
 
-        {activeEdition === 'personal' && (
-          <motion.article 
-            key="personal"
-            initial={{ opacity: 0, y: 30 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -30 }}
-          >
-            {isGuest ? (
-              <div className="bg-[#0a0a0a] p-16 rounded-[48px] border border-white/10 shadow-2xl text-center relative overflow-hidden">
-                <div className="absolute inset-0 premium-gradient opacity-5 pointer-events-none" />
-                <div className="relative z-10">
-                  <div className="w-24 h-24 bg-white/5 rounded-[32px] flex items-center justify-center mx-auto mb-8 border border-white/10 shadow-xl">
-                    <Lock className="w-10 h-10 text-slate-400" />
-                  </div>
-                  <h2 className="text-4xl font-display font-bold text-white mb-6 tracking-tight">La tua Nextletter Privata</h2>
-                  <p className="text-slate-400 text-xl mb-10 max-w-md mx-auto leading-relaxed">
-                    Accedi e configura il tuo profilo per ricevere un'edizione editoriale cucita su misura per la tua città, il tuo lavoro e i tuoi interessi.
-                  </p>
-                  <button 
-                    onClick={onLogin}
-                    className="px-10 py-5 bg-white text-black rounded-2xl font-bold text-lg hover:bg-sky-50 transition-all shadow-2xl"
-                  >
-                    Accedi per sbloccare
-                  </button>
-                </div>
-              </div>
-            ) : generatedLetter ? (
-              <div className="bg-[#0a0a0a] rounded-[48px] border border-white/10 shadow-2xl overflow-hidden">
-                <div className="premium-gradient text-white p-10 md:p-20 relative overflow-hidden border-b border-white/10">
-                  <div className="absolute top-0 right-0 p-12 opacity-10 pointer-events-none">
-                    <User className="w-64 h-64" />
-                  </div>
-                  <motion.span 
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="inline-block px-4 py-1.5 bg-white/10 rounded-full text-[10px] font-bold tracking-[0.3em] uppercase mb-8 backdrop-blur-md border border-white/20 text-sky-200"
-                  >
-                    Generata per {user?.displayName || 'Te'} • Oggi
-                  </motion.span>
-                  <h2 className="text-4xl md:text-6xl font-display font-bold leading-[1.1] mb-8 tracking-tight">
-                    {generatedLetter.title || 'La tua Nextletter'}
-                  </h2>
-                  <p className="text-sky-100 font-serif text-xl md:text-2xl max-w-2xl italic leading-relaxed opacity-90">
-                    {generatedLetter.subtitle || 'Ecco i consigli e le azioni per i prossimi giorni.'}
-                  </p>
-                </div>
+        <div className="space-y-4">
+          {section.so_what && (
+            <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-4">
+              <div className="section-kicker !text-slate-500">What To Do</div>
+              <p className="mt-3 text-sm leading-7 text-slate-600">{section.so_what}</p>
+            </div>
+          )}
 
-                <div className="p-10 md:p-20 space-y-20 font-serif text-xl text-slate-300 leading-relaxed">
-                  {generatedLetter.sections?.map((section: any, idx: number) => (
-                    <React.Fragment key={idx}>
-                      <div className="flex flex-col md:flex-row gap-10">
-                        <div className="flex-shrink-0 w-16 h-16 bg-sky-500/10 text-sky-400 rounded-2xl flex items-center justify-center border border-sky-500/20 shadow-lg shadow-sky-500/5">
-                          {getIcon(section.icon)}
-                        </div>
-                        <div className="flex-1 space-y-8">
-                          <div className="flex flex-wrap items-center gap-4">
-                            <span className="text-xs font-bold text-sky-400 uppercase tracking-[0.2em]">{section.topic}</span>
-                            <div className="flex items-center gap-2.5">
-                              <span className="text-[10px] font-bold px-3 py-1.5 bg-white/5 text-slate-400 rounded-xl uppercase border border-white/10 tracking-wider">
-                                Horizon: {section.horizon || '7d'}
-                              </span>
-                              <span className="text-[10px] font-bold px-3 py-1.5 bg-white/5 text-slate-400 rounded-xl uppercase border border-white/10 tracking-wider">
-                                Prob: {section.probability || 80}%
-                              </span>
-                              <span className={cn(
-                                "text-[10px] font-bold px-3 py-1.5 rounded-xl uppercase border tracking-wider",
-                                section.impact === 'High' ? 'bg-rose-500/10 text-rose-400 border-rose-500/20' : 
-                                section.impact === 'Medium' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' : 
-                                'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
-                              )}>
-                                Impact: {section.impact || 'Medium'}
-                              </span>
-                            </div>
-                          </div>
-                          <h3 className="text-3xl md:text-4xl font-sans font-bold text-white tracking-tight">
-                            {section.title}
-                          </h3>
-                          <div className="space-y-6">
-                            <p className="text-slate-400 leading-relaxed">
-                              {section.content}
-                            </p>
-                            {section.historical_context && (
-                              <div className="bg-white/5 p-8 rounded-[32px] border border-white/5 text-[15px] text-slate-400 italic flex gap-4 leading-relaxed">
-                                <Database className="w-5 h-5 mt-0.5 flex-shrink-0 text-slate-600" />
-                                <p>{section.historical_context}</p>
-                              </div>
-                            )}
-                            {section.world_sim?.narrative_arc && (
-                              <div className="rounded-[32px] border border-rose-500/20 bg-rose-500/5 p-8">
-                                <div className="mb-4 flex items-center gap-3">
-                                  <span className="rounded-full border border-rose-500/20 bg-rose-500/10 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-rose-300">
-                                    Oracle WorldSim
-                                  </span>
-                                  <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">
-                                    {section.world_sim.simulation_mode || 'delta sim'}
-                                  </span>
-                                </div>
-                                <p className="text-[15px] text-slate-300 leading-relaxed mb-4">
-                                  {section.world_sim.narrative_arc}
-                                </p>
-                                {section.world_sim.pivotal_actors?.length > 0 && (
-                                  <div className="flex flex-wrap gap-2 mb-4">
-                                    {section.world_sim.pivotal_actors.map((actor: string) => (
-                                      <span key={actor} className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-bold text-white">
-                                        {actor}
-                                      </span>
-                                    ))}
-                                  </div>
-                                )}
-                                {section.world_sim.prediction_market_frame?.outcome && (
-                                  <p className="text-[13px] text-slate-400 leading-relaxed">
-                                    Outcome: <span className="text-slate-200">{section.world_sim.prediction_market_frame.outcome}</span>
-                                    {' · '}
-                                    Horizon: <span className="text-slate-200">{section.world_sim.prediction_market_frame.horizon}</span>
-                                  </p>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                          <div className="inline-flex items-center gap-4 text-sky-400 font-sans text-lg bg-sky-500/5 px-8 py-8 rounded-[40px] border border-sky-500/20 w-full shadow-inner">
-                            <ArrowRight className="w-6 h-6 flex-shrink-0 text-sky-500" /> 
-                            <span className="leading-relaxed"><strong className="font-bold uppercase tracking-[0.2em] text-[11px] mr-3 text-sky-300 block mb-1">Azione Strategica</strong> {section.so_what || section.action}</span>
-                          </div>
-                          {onGenerateCard && section.query_suggestion && (
-                            <button
-                              onClick={() => onGenerateCard(section.query_suggestion)}
-                              className="inline-flex items-center gap-3 px-8 py-4 bg-white text-black rounded-2xl text-sm font-bold hover:bg-slate-200 transition-all shadow-xl"
-                            >
-                              <Sparkles className="w-4 h-4" />
-                              Genera carta predittiva
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                      {idx < generatedLetter.sections.length - 1 && <div className="h-px w-full bg-gradient-to-r from-transparent via-white/5 to-transparent" />}
-                    </React.Fragment>
-                  ))}
-                </div>
-                <div className="p-10 bg-white/5 border-t border-white/10 text-center">
-                  <button 
-                    onClick={() => {
-                      setGeneratedLetter(null);
-                      setIsBuilding(true);
-                    }}
-                    className="text-sm font-bold text-slate-400 hover:text-white transition-colors tracking-widest uppercase"
-                  >
-                    Crea una nuova edizione
-                  </button>
-                </div>
-              </div>
-            ) : isBuilding ? (
-              <div className="bg-[#0a0a0a] p-10 md:p-20 rounded-[48px] border border-white/10 shadow-2xl relative overflow-hidden">
-                <div className="absolute inset-0 premium-gradient opacity-5 pointer-events-none" />
-                <div className="relative z-10">
-                  <div className="mb-10 flex flex-wrap items-center justify-between gap-4 rounded-[28px] border border-white/10 bg-white/5 p-6">
-                    <div>
-                      <div className="text-[10px] font-bold uppercase tracking-[0.25em] text-slate-500">PERSONAL EDITION</div>
-                      <div className="mt-2 text-lg font-bold text-white">
-                        {getPlanLabel(entitlements.plan)} · {entitlements.creditsBalance} crediti disponibili
-                      </div>
-                    </div>
-                    <div className="rounded-full border border-sky-500/20 bg-sky-500/10 px-4 py-2 text-sm font-bold text-sky-300">
-                      Costo: {formatCredits(ACTION_CATALOG.nextletter_personal.cost)}
-                    </div>
-                  </div>
-
-                  <div className="text-center mb-16">
-                    <h2 className="text-4xl md:text-5xl font-display font-bold text-white mb-6 tracking-tight">Cosa ti interessa?</h2>
-                    <p className="text-xl text-slate-400 font-medium max-w-xl mx-auto leading-relaxed">Seleziona gli argomenti per la tua Nextletter personalizzata. Analizzeremo i prossimi 30 giorni per te.</p>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-12">
-                    {PREDEFINED_TOPICS.map(topic => (
-                      <button
-                        key={topic.id}
-                        onClick={() => toggleTopic(topic.label)}
-                        className={cn(
-                          "p-8 rounded-[32px] border-2 transition-all flex items-center justify-between group relative overflow-hidden",
-                          selectedTopics.includes(topic.label)
-                            ? "bg-sky-500/10 border-sky-500 shadow-2xl shadow-sky-500/10"
-                            : "bg-white/5 border-white/10 hover:border-white/20"
-                        )}
-                      >
-                        <span className="font-bold text-xl text-white relative z-10">{topic.label}</span>
-                        <div className={cn(
-                          "w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 relative z-10",
-                          selectedTopics.includes(topic.label) ? "bg-sky-500 text-white scale-110" : "bg-white/10 text-slate-400 group-hover:bg-white/20"
-                        )}>
-                          {selectedTopics.includes(topic.label) && <Check className="w-5 h-5" />}
-                        </div>
-                      </button>
+          {section.world_sim && (
+            <div className="rounded-[24px] border border-rose-200 bg-rose-50 p-4">
+              <div className="section-kicker !text-rose-600">Oracle WorldSim</div>
+              {section.world_sim.narrative_arc && <p className="mt-3 text-sm leading-7 text-rose-800">{section.world_sim.narrative_arc}</p>}
+              {(section.world_sim.pivotal_actors || []).length > 0 && (
+                <div className="mt-4">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-rose-600">Pivotal actors</div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {(section.world_sim.pivotal_actors || []).map((actor) => (
+                      <span key={actor} className="rounded-full border border-rose-100 bg-white px-3 py-1 text-xs font-semibold text-rose-700">
+                        {actor}
+                      </span>
                     ))}
                   </div>
+                </div>
+              )}
+              {(section.world_sim.intervention_points || []).length > 0 && (
+                <div className="mt-4 space-y-2">
+                  {(section.world_sim.intervention_points || []).map((point) => (
+                    <div key={point} className="flex items-start gap-3 text-sm leading-7 text-rose-800">
+                      <div className="mt-2 h-2.5 w-2.5 shrink-0 rounded-full bg-rose-400" />
+                      <span>{point}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
 
-                  <div className="mb-16">
-                    <label className="block text-[11px] font-bold text-slate-400 mb-4 uppercase tracking-[0.3em] px-2">Altro? Scrivilo qui</label>
+      {section.query_suggestion && (
+        <div className="mt-5 border-t border-slate-200 pt-5">
+          <button
+            onClick={() => onGenerateCard?.(section.query_suggestion || '')}
+            className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+          >
+            Apri forecast collegato
+            <ArrowRight className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+    </article>
+  );
+
+  return (
+    <div className="space-y-6">
+      <section className="editorial-panel rounded-[32px] p-6 md:p-7">
+        <div className="grid gap-6 lg:grid-cols-[1.05fr_0.95fr] lg:items-end">
+          <div>
+            <div className="section-kicker">Briefing Layer</div>
+            <h2 className="mt-3 text-4xl font-display font-semibold tracking-tight text-slate-950 md:text-5xl">
+              Nextletter rende i segnali leggibili, non teatrali.
+            </h2>
+            <p className="mt-4 max-w-2xl text-base leading-8 text-slate-600">
+              Crystal Briefing per vedere i macro segnali principali. Personal Briefing per trasformare interessi, profilo
+              e world simulation in una lettura piu utile.
+            </p>
+          </div>
+
+          <div className="rounded-[28px] border border-slate-200 bg-white p-5">
+            <div className="section-kicker">Edition Access</div>
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              <span className="rounded-full bg-slate-950 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-white">
+                {isGuest ? 'Guest' : getPlanLabel(entitlements.plan)}
+              </span>
+              <span className="text-sm font-semibold text-slate-700">
+                {isGuest ? 'Crystal Briefing visibile da subito' : `${entitlements.creditsBalance} crediti disponibili`}
+              </span>
+            </div>
+            <div className="mt-4 text-sm leading-7 text-slate-500">
+              Personal Briefing consuma {formatCredits(ACTION_CATALOG.nextletter_personal.cost)} per generazione riuscita.
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="editorial-panel rounded-[32px] p-5">
+        <div className="inline-flex rounded-full border border-slate-200 bg-white p-1">
+          <button
+            onClick={() => setActiveEdition('global')}
+            className={cn(
+              'rounded-full px-4 py-2 text-sm font-semibold transition',
+              activeEdition === 'global' ? 'bg-slate-950 text-white' : 'text-slate-600'
+            )}
+          >
+            <span className="inline-flex items-center gap-2">
+              <Globe2 className="h-4 w-4" />
+              Crystal Briefing
+            </span>
+          </button>
+          <button
+            onClick={() => setActiveEdition('personal')}
+            className={cn(
+              'rounded-full px-4 py-2 text-sm font-semibold transition',
+              activeEdition === 'personal' ? 'bg-slate-950 text-white' : 'text-slate-600'
+            )}
+          >
+            <span className="inline-flex items-center gap-2">
+              <User className="h-4 w-4" />
+              Personal Briefing
+            </span>
+          </button>
+        </div>
+      </section>
+
+      <AnimatePresence mode="wait">
+        {activeEdition === 'global' ? (
+          <motion.div key="global" initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -14 }} className="space-y-6">
+            <section className="editorial-panel rounded-[32px] p-6 md:p-7">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <div className="section-kicker">Global Edition</div>
+                  <h3 className="mt-3 text-3xl font-display font-semibold text-slate-950">I macro segnali che stanno cambiando il quadro.</h3>
+                </div>
+                <div className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-600">
+                  Aggiornato oggi
+                </div>
+              </div>
+
+              <div className="mt-6 space-y-5">{GLOBAL_SECTIONS.map(renderSection)}</div>
+            </section>
+
+            <section className="editorial-panel rounded-[32px] p-6 md:p-7">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <div className="section-kicker">Crystal Quotes</div>
+                  <h3 className="mt-3 text-3xl font-display font-semibold text-slate-950">Le chiamate dirette del motore editoriale.</h3>
+                </div>
+                {isLoadingQuotes && <Loader2 className="h-5 w-5 animate-spin text-slate-400" />}
+              </div>
+
+              <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                {crystalQuotes.map((quote) => (
+                  <button
+                    key={quote.quote_id}
+                    onClick={() => setSelectedQuote(quote)}
+                    className="rounded-[24px] border border-slate-200 bg-white p-5 text-left transition hover:-translate-y-0.5 hover:border-slate-300"
+                  >
+                    <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                      <Mail className="h-4 w-4 text-[#1453e8]" />
+                      {quote.context}
+                    </div>
+                    <p className="mt-4 text-lg font-display font-semibold leading-tight text-slate-950">&quot;{quote.text}&quot;</p>
+                    <div className="mt-4 text-xs font-medium text-slate-500">{quote.author}</div>
+                  </button>
+                ))}
+              </div>
+            </section>
+          </motion.div>
+        ) : (
+          <motion.div key="personal" initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -14 }} className="space-y-6">
+            {isGuest ? (
+              <section className="editorial-panel rounded-[32px] p-10 text-center">
+                <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-[28px] bg-slate-950 text-white">
+                  <Lock className="h-9 w-9" />
+                </div>
+                <h3 className="mt-6 text-3xl font-display font-semibold text-slate-950">La tua Personal Briefing edition.</h3>
+                <p className="mx-auto mt-3 max-w-xl text-base leading-8 text-slate-600">
+                  Accedi per generare briefing personali basati su profilo, interessi, segnali live e, quando serve,
+                  Oracle WorldSim.
+                </p>
+                <button
+                  onClick={onLogin}
+                  className="mt-6 inline-flex items-center gap-2 rounded-full bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800"
+                >
+                  Accedi per sbloccare
+                </button>
+              </section>
+            ) : generatedLetter ? (
+              <section className="space-y-6">
+                <div className="editorial-panel rounded-[32px] p-6 md:p-7">
+                  <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+                    <div>
+                      <div className="section-kicker">Personal Briefing</div>
+                      <h3 className="mt-3 text-4xl font-display font-semibold text-slate-950 md:text-5xl">
+                        {generatedLetter.title || 'La tua briefing edition'}
+                      </h3>
+                      <p className="mt-4 max-w-2xl text-base leading-8 text-slate-600">
+                        {generatedLetter.subtitle || 'Sintesi personalizzata di segnali, probabilita e azioni per i prossimi giorni.'}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => setGeneratedLetter(null)}
+                      className="rounded-full border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                    >
+                      Rigenera briefing
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-5">{(generatedLetter.sections || []).map(renderSection)}</div>
+              </section>
+            ) : (
+              <section className="grid gap-5 xl:grid-cols-[0.98fr_1.02fr]">
+                <div className="editorial-panel rounded-[32px] p-6">
+                  <div className="section-kicker">Compose Your Briefing</div>
+                  <h3 className="mt-3 text-3xl font-display font-semibold text-slate-950">Scegli i temi che vuoi far entrare nel briefing.</h3>
+
+                  <div className="mt-6 flex flex-wrap gap-2">
+                    {PREDEFINED_TOPICS.map((topic) => {
+                      const active = selectedTopics.includes(topic.label);
+                      return (
+                        <button
+                          key={topic.id}
+                          onClick={() => toggleTopic(topic.label)}
+                          className={cn(
+                            'rounded-full border px-4 py-2 text-sm font-semibold transition',
+                            active ? 'border-[#1453e8] bg-[#e8eefc] text-[#1453e8]' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-950'
+                          )}
+                        >
+                          {topic.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div className="mt-5 rounded-[24px] border border-slate-200 bg-white p-4">
+                    <div className="section-kicker !text-slate-500">Custom topic</div>
                     <input
                       type="text"
                       value={customTopic}
-                      onChange={(e) => setCustomTopic(e.target.value)}
-                      placeholder="Es. Formula 1, Concerti Rock, Borsa Americana..."
-                      className="w-full px-8 py-6 bg-white/5 border border-white/10 rounded-[32px] focus:outline-none focus:ring-2 focus:ring-sky-500/50 font-semibold text-xl text-white placeholder:text-slate-700 transition-all shadow-inner"
+                      onChange={(event) => setCustomTopic(event.target.value)}
+                      placeholder="Aggiungi un tema specifico..."
+                      className="mt-3 w-full rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-900 outline-none transition focus:border-[#1453e8] focus:bg-white"
                     />
                   </div>
 
-                  <div className="flex items-center justify-between pt-8 border-t border-white/10">
-                    <button 
-                      onClick={() => setIsBuilding(false)}
-                      className="px-8 py-4 text-slate-400 font-bold hover:text-white transition-colors text-lg"
-                    >
-                      Annulla
-                    </button>
-                    <button 
-                      onClick={handleGenerate}
-                      disabled={isGenerating || (selectedTopics.length === 0 && !customTopic.trim())}
-                      className="px-10 py-5 bg-sky-500 text-white rounded-2xl font-bold hover:bg-sky-600 transition-all shadow-2xl shadow-sky-500/20 flex items-center gap-3 text-lg disabled:opacity-50"
-                    >
-                      {isGenerating ? (
-                        <>
-                          <Loader2 className="w-6 h-6 animate-spin" /> Generazione...
-                        </>
-                      ) : (
-                        <>
-                          <Zap className="w-6 h-6" /> Genera Nextletter · {formatCredits(ACTION_CATALOG.nextletter_personal.cost)}
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="bg-[#0a0a0a] rounded-[48px] border border-white/10 shadow-2xl overflow-hidden text-center p-16 relative overflow-hidden">
-                <div className="absolute inset-0 premium-gradient opacity-5 pointer-events-none" />
-                <div className="relative z-10">
-                  <div className="w-28 h-28 bg-sky-500/10 rounded-[40px] flex items-center justify-center mx-auto mb-10 border border-sky-500/20 shadow-xl shadow-sky-500/5">
-                    <Lightbulb className="w-14 h-14 text-sky-400" />
-                  </div>
-                  <h2 className="text-4xl md:text-5xl font-display font-bold text-white mb-6 tracking-tight">Costruisci la tua Nextletter</h2>
-                  <p className="text-xl text-slate-400 font-medium mb-12 max-w-lg mx-auto leading-relaxed">
-                    Scegli gli argomenti che ti interessano di più e l'AI scriverà un'edizione personalizzata piena di consigli pratici e pronostici per i prossimi 30 giorni.
-                  </p>
                   <button
-                    onClick={() => setIsBuilding(true)}
-                    className="px-12 py-6 bg-white text-black rounded-2xl font-bold hover:bg-sky-50 transition-all shadow-2xl inline-flex items-center gap-3 text-xl"
+                    onClick={() => void handleGenerate()}
+                    disabled={isGenerating || allPersonalTopics.length === 0}
+                    className="mt-5 inline-flex items-center gap-2 rounded-full bg-[#1453e8] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#1248c8] disabled:opacity-60"
                   >
-                    <Plus className="w-6 h-6" /> Inizia ora · {formatCredits(ACTION_CATALOG.nextletter_personal.cost)}
+                    {isGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                    Genera · {formatCredits(ACTION_CATALOG.nextletter_personal.cost)}
                   </button>
                 </div>
-              </div>
+
+                <div className="editorial-panel rounded-[32px] p-6">
+                  <div className="section-kicker">What You Will Get</div>
+                  <div className="mt-5 space-y-4">
+                    {[
+                      'Topic -> sintesi -> probability/horizon/impact in ogni sezione.',
+                      'Why it matters e what to do in linguaggio semplice.',
+                      'Oracle layer quando il backend ha gia un SimulationDigest utile da riusare.',
+                    ].map((item) => (
+                      <div key={item} className="flex items-start gap-3 rounded-[22px] border border-slate-200 bg-white p-4 text-sm leading-7 text-slate-600">
+                        <div className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full bg-[#1453e8]" />
+                        <span>{item}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="mt-5 rounded-[24px] border border-slate-200 bg-slate-50 p-4">
+                    <div className="section-kicker !text-slate-500">Current plan</div>
+                    <div className="mt-3 text-lg font-semibold text-slate-950">
+                      {getPlanLabel(entitlements.plan)} · {entitlements.creditsBalance} crediti disponibili
+                    </div>
+                    <p className="mt-3 text-sm leading-7 text-slate-500">
+                      Free ti fa provare il prodotto. Plus e Pro lo rendono davvero continuo e personale.
+                    </p>
+                  </div>
+                </div>
+              </section>
             )}
-          </motion.article>
+          </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Analysis Modal (Shared with GlobalDashboards) */}
       <AnimatePresence>
         {selectedQuote && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-10">
-            <motion.div 
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 md:p-8">
+            <motion.button
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setSelectedQuote(null)}
-              className="absolute inset-0 bg-black/90 backdrop-blur-xl"
+              className="absolute inset-0 bg-[rgba(15,23,42,0.48)] backdrop-blur-lg"
             />
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.9, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.9, y: 20 }}
-              className="relative w-full max-w-4xl bg-[#0a0a0a] rounded-[48px] border border-white/10 shadow-2xl overflow-hidden max-h-[90vh] flex flex-col"
+            <motion.div
+              initial={{ opacity: 0, y: 20, scale: 0.97 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 20, scale: 0.97 }}
+              className="relative w-full max-w-3xl overflow-hidden rounded-[32px] border border-white/60 bg-[rgba(251,249,244,0.98)] shadow-[0_32px_90px_rgba(15,23,42,0.22)]"
             >
-              <div className="p-8 md:p-12 overflow-y-auto no-scrollbar flex-1">
-                <div className="flex justify-between items-start mb-12">
-                  <div className="flex items-center gap-4">
-                    <div className="w-14 h-14 bg-sky-500 rounded-2xl flex items-center justify-center shadow-lg shadow-sky-500/20">
-                      <Database className="w-7 h-7 text-white" />
-                    </div>
-                    <div>
-                      <h2 className="text-sm font-bold text-sky-400 uppercase tracking-[0.3em]">The Deep Analysis</h2>
-                      <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mt-1">Crystal Intelligence Report</p>
-                    </div>
-                  </div>
-                  <button 
-                    onClick={() => setSelectedQuote(null)}
-                    className="p-3 bg-white/5 rounded-2xl text-slate-400 hover:text-white transition-colors border border-white/10"
-                  >
-                    <ChevronRight className="w-6 h-6 rotate-90" />
-                  </button>
+              <div className="border-b border-slate-200/80 px-6 py-5 md:px-8">
+                <div className="section-kicker">Crystal Quote Analysis</div>
+                <h3 className="mt-3 text-3xl font-display font-semibold text-slate-950">&quot;{selectedQuote.text}&quot;</h3>
+                <div className="mt-3 flex items-center gap-3 text-sm font-medium text-slate-500">
+                  <Sparkles className="h-4 w-4 text-[#1453e8]" />
+                  {selectedQuote.author}
                 </div>
+              </div>
 
-                <div className="space-y-12">
-                  <div className="space-y-6">
-                    <div className="p-8 bg-white/5 rounded-[32px] border border-white/10 italic font-serif text-2xl text-slate-300 leading-relaxed">
-                      "{selectedQuote.text}"
-                    </div>
-                    <div className="flex items-center gap-3 px-4">
-                      <Sparkles className="w-5 h-5 text-sky-400" />
-                      <span className="text-sm font-bold text-slate-400 italic">{selectedQuote.author}</span>
+              <div className="grid gap-6 px-6 py-6 md:grid-cols-2 md:px-8 md:py-8">
+                <div className="rounded-[24px] border border-slate-200 bg-white p-5">
+                  <div className="section-kicker !text-slate-500">Full Analysis</div>
+                  <p className="mt-3 text-sm leading-7 text-slate-600">{selectedQuote.analysis.full_text}</p>
+                </div>
+                <div className="space-y-4">
+                  <div className="rounded-[24px] border border-slate-200 bg-white p-5">
+                    <div className="section-kicker !text-slate-500">Drivers</div>
+                    <div className="mt-3 space-y-2">
+                      {selectedQuote.analysis.drivers.map((driver) => (
+                        <div key={driver} className="flex items-start gap-3 text-sm leading-7 text-slate-600">
+                          <div className="mt-2 h-2.5 w-2.5 shrink-0 rounded-full bg-[#1453e8]" />
+                          <span>{driver}</span>
+                        </div>
+                      ))}
                     </div>
                   </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
-                    <div className="space-y-8">
-                      <section>
-                        <h3 className="text-xl font-display font-bold text-white mb-4 flex items-center gap-3">
-                          <Activity className="w-5 h-5 text-sky-400" /> Analisi Predittiva
-                        </h3>
-                        <p className="text-slate-400 leading-relaxed font-medium">
-                          {selectedQuote.analysis.full_text}
-                        </p>
-                      </section>
-
-                      <section>
-                        <h3 className="text-xl font-display font-bold text-white mb-4 flex items-center gap-3">
-                          <TrendingUp className="w-5 h-5 text-emerald-400" /> Impatto Globale
-                        </h3>
-                        <p className="text-slate-400 leading-relaxed font-medium">
-                          {selectedQuote.analysis.impact}
-                        </p>
-                      </section>
-                    </div>
-
-                    <div className="space-y-8">
-                      <section className="bg-white/5 p-8 rounded-[32px] border border-white/10">
-                        <h3 className="text-sm font-bold text-slate-400 uppercase tracking-[0.2em] mb-6 flex items-center gap-2">
-                          <Shield className="w-4 h-4 text-sky-400" /> Driver Analizzati
-                        </h3>
-                        <div className="space-y-4">
-                          {selectedQuote.analysis.drivers.map((driver, idx) => (
-                            <div key={idx} className="flex items-center gap-4 p-4 bg-black/40 rounded-2xl border border-white/5">
-                              <div className="w-2 h-2 bg-sky-500 rounded-full shadow-[0_0_8px_rgba(14,165,233,0.5)]" />
-                              <span className="text-sm font-bold text-slate-300">{driver}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </section>
-
-                      <section className="bg-sky-500/5 p-8 rounded-[32px] border border-sky-500/20">
-                        <h3 className="text-sm font-bold text-sky-400 uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
-                          <Calendar className="w-4 h-4" /> Parallelo Storico (20y)
-                        </h3>
-                        <p className="text-slate-300 text-sm leading-relaxed italic">
-                          {selectedQuote.analysis.historical_parallel}
-                        </p>
-                      </section>
-                    </div>
+                  <div className="rounded-[24px] border border-slate-200 bg-white p-5">
+                    <div className="section-kicker !text-slate-500">Impact & History</div>
+                    <p className="mt-3 text-sm leading-7 text-slate-600">{selectedQuote.analysis.impact}</p>
+                    <p className="mt-3 text-sm leading-7 text-slate-500">{selectedQuote.analysis.historical_parallel}</p>
                   </div>
                 </div>
               </div>
 
-              <div className="p-8 bg-white/5 border-t border-white/10 flex items-center justify-between">
-                <div className="flex items-center gap-4 text-slate-400 text-xs font-bold uppercase tracking-widest">
-                  <Globe2 className="w-4 h-4" /> Crystal Global Intelligence
-                </div>
-                <button 
-                  onClick={() => handleSaveQuote(selectedQuote)}
+              <div className="flex flex-col gap-3 border-t border-slate-200/80 bg-white/70 px-6 py-5 md:flex-row md:items-center md:justify-between md:px-8">
+                <div className="text-sm font-medium text-slate-500">Quote editoriale grounded sui trend della settimana.</div>
+                <button
+                  onClick={() => void handleSaveQuote(selectedQuote)}
                   disabled={isSaving || savedQuotes.includes(selectedQuote.quote_id)}
                   className={cn(
-                    "px-10 py-4 rounded-2xl font-bold text-sm transition-all flex items-center gap-3 shadow-2xl",
-                    savedQuotes.includes(selectedQuote.quote_id)
-                      ? "bg-emerald-500 text-white"
-                      : "bg-white text-black hover:bg-sky-50"
+                    'inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold transition',
+                    savedQuotes.includes(selectedQuote.quote_id) ? 'bg-emerald-500 text-white' : 'bg-slate-950 text-white hover:bg-slate-800'
                   )}
                 >
-                  {isSaving ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : savedQuotes.includes(selectedQuote.quote_id) ? (
-                    <><Check className="w-4 h-4" /> Salvato</>
+                  {savedQuotes.includes(selectedQuote.quote_id) ? (
+                    <>
+                      <Check className="h-4 w-4" />
+                      Salvato
+                    </>
                   ) : (
-                    <><Bookmark className="w-4 h-4" /> Salva Analisi</>
+                    <>
+                      <Bookmark className="h-4 w-4" />
+                      {isGuest ? 'Accedi per salvare' : 'Salva analisi'}
+                    </>
                   )}
                 </button>
               </div>

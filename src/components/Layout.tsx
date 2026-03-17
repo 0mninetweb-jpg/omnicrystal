@@ -1,153 +1,138 @@
 import React from 'react';
-import { LayoutDashboard, Search as SearchIcon, Bookmark, Globe2, Bell, User, Gem, Mail } from 'lucide-react';
+import {
+  Bookmark,
+  Gem,
+  Home,
+  LogOut,
+  Mail,
+  PlayCircle,
+  Sparkles,
+  User,
+  WandSparkles,
+} from 'lucide-react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { cn } from './CrystalCard';
-import { motion, AnimatePresence } from 'framer-motion';
 import { useCrystalPlan } from '../context/CrystalPlanContext';
 import { getPlanLabel } from '../lib/crystalPlans';
 
+type LayoutView = 'home' | 'forecast' | 'nextletter' | 'watchlist' | 'profile';
+
 interface LayoutProps {
   children: React.ReactNode;
-  currentView: string;
-  setCurrentView: (view: any) => void;
+  currentView: LayoutView;
+  setCurrentView: (view: LayoutView) => void;
+  onOpenTutorial: () => void;
   user?: any;
   isGuest?: boolean;
   onLogin?: () => void;
   onLogout?: () => void;
 }
 
-export function Layout({ children, currentView, setCurrentView, user, isGuest, onLogin, onLogout }: LayoutProps) {
-  const { entitlements, openUpgrade } = useCrystalPlan();
-  const navItems = [
-    { id: 'dashboard', label: 'Per Te', icon: LayoutDashboard, description: 'Un feed decisionale con i segnali che meritano attenzione oggi.' },
-    { id: 'search', label: 'Cerca', icon: SearchIcon, description: 'Interroga il motore predittivo con filtri e contesto chiari.' },
-    { id: 'nextletter', label: 'Nextletter', icon: Mail, description: 'Una lettura editoriale che trasforma i segnali in scelte concrete.' },
-    { id: 'watchlist', label: 'Seguiti', icon: Bookmark, description: 'Le entità che vuoi monitorare con alert, soglie e orizzonti.' },
-    { id: 'global', label: 'Global', icon: Globe2, description: 'Dashboard tematiche per osservare i macro-trend più utili.' },
-  ];
-  const activeItem = navItems.find((item) => item.id === currentView) ?? {
+const NAV_ITEMS: Array<{
+  id: LayoutView;
+  label: string;
+  description: string;
+  icon: React.ComponentType<{ className?: string }>;
+}> = [
+  {
+    id: 'home',
+    label: 'Home',
+    icon: Home,
+    description: 'Signal board, watchlist pulse e briefing preview per capire cosa conta oggi.',
+  },
+  {
+    id: 'forecast',
+    label: 'Forecast',
+    icon: Sparkles,
+    description: 'Trasforma una domanda in probabilita, scenari, trust e azioni concrete.',
+  },
+  {
+    id: 'nextletter',
+    label: 'Nextletter',
+    icon: Mail,
+    description: 'Il briefing editoriale che riordina i segnali e li rende leggibili.',
+  },
+  {
+    id: 'watchlist',
+    label: 'Watchlist',
+    icon: Bookmark,
+    description: 'Le entita che vuoi monitorare con status, pulse e limiti chiari.',
+  },
+  {
     id: 'profile',
-    label: 'Profilo',
+    label: 'Profile',
     icon: User,
-    description: isGuest
-      ? 'Completa il profilo per ottenere insight più rilevanti.'
-      : 'Gestisci account, contesto personale e preferenze.',
-  };
+    description: 'Configura il contesto personale che rende Crystal piu utile su di te.',
+  },
+];
+
+export function Layout({
+  children,
+  currentView,
+  setCurrentView,
+  onOpenTutorial,
+  user,
+  isGuest,
+  onLogin,
+  onLogout,
+}: LayoutProps) {
+  const { entitlements, openUpgrade } = useCrystalPlan();
+  const activeItem = NAV_ITEMS.find((item) => item.id === currentView) ?? NAV_ITEMS[0];
 
   return (
-    <div className="min-h-screen bg-[#050505] flex flex-col md:flex-row font-sans text-slate-100 selection:bg-sky-500/20 selection:text-sky-400">
-      {/* Sidebar (Desktop) */}
-      <nav className="hidden md:flex md:w-72 bg-[#050505] border-r border-white/5 flex-shrink-0 flex-col sticky top-0 h-screen z-10">
-        <div className="p-10 flex items-center gap-3">
-          <motion.div 
-            initial={{ rotate: -10, scale: 0.9 }}
-            animate={{ rotate: 0, scale: 1 }}
-            className="w-11 h-11 bg-sky-500 rounded-2xl flex items-center justify-center shadow-lg shadow-sky-500/20 relative overflow-hidden group"
-          >
-            <Gem className="w-6 h-6 text-white group-hover:scale-110 transition-transform" />
-            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -skew-x-12 animate-shimmer" />
-          </motion.div>
-          <span className="font-display font-bold text-2xl tracking-tight text-white">Crystal</span>
-        </div>
-        
-        <div className="flex flex-col gap-1 p-6">
-          {navItems.map((item) => (
-            <button
-              key={item.id}
-              onClick={() => setCurrentView(item.id)}
-              className={cn(
-                "group flex items-center gap-4 px-5 py-3.5 rounded-2xl font-semibold transition-all duration-300 relative overflow-hidden",
-                currentView === item.id 
-                  ? "bg-white/10 text-white shadow-sm" 
-                  : "text-slate-400 hover:bg-white/5 hover:text-white"
-              )}
-            >
-              <item.icon className={cn("w-5 h-5 transition-all duration-300", currentView === item.id ? "text-sky-400 scale-110" : "text-slate-500 group-hover:text-slate-300")} />
-              <span className="text-[15px]">{item.label}</span>
-              {currentView === item.id && (
-                <motion.div 
-                  layoutId="activeNav"
-                  className="absolute left-0 w-1 h-6 bg-sky-500 rounded-full"
-                  transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
-                />
-              )}
-            </button>
-          ))}
-        </div>
-
-        <div className="mt-auto p-6">
-          <button 
-            onClick={() => setCurrentView('profile')}
-            className={cn(
-              "flex items-center gap-3 w-full p-4 rounded-3xl transition-all duration-300 text-left border border-transparent",
-              currentView === 'profile' ? "bg-white/5 border-white/10 shadow-lg" : "hover:bg-white/5"
-            )}
-          >
-            <div className="w-11 h-11 rounded-full bg-slate-800 flex items-center justify-center overflow-hidden flex-shrink-0 border border-white/10 shadow-inner">
-              {user?.photoURL ? (
-                <img src={user.photoURL} alt={user.displayName || 'User'} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-              ) : (
-                <User className="w-6 h-6 text-slate-500" />
-              )}
-            </div>
-            <div className="overflow-hidden">
-              <div className="text-sm font-bold text-white truncate">
-                {isGuest ? 'Ospite' : (user?.displayName || 'Utente')}
+    <div className="min-h-screen bg-transparent text-slate-900">
+      <div className="mx-auto flex min-h-screen w-full max-w-[1600px] flex-col lg:flex-row">
+        <aside className="hidden w-[290px] shrink-0 px-5 py-5 lg:block">
+          <div className="editorial-panel sticky top-5 flex h-[calc(100vh-2.5rem)] flex-col rounded-[32px] px-5 py-5">
+            <div className="flex items-center gap-4 px-2 py-3">
+              <div className="flex h-12 w-12 items-center justify-center rounded-[18px] bg-slate-950 text-white shadow-[0_18px_35px_rgba(15,23,42,0.18)]">
+                <Gem className="h-6 w-6" />
               </div>
-              <div className="text-[10px] text-slate-500 font-bold uppercase tracking-[0.15em]">
-                {isGuest ? 'Accedi' : 'Account'}
+              <div>
+                <div className="font-display text-2xl font-semibold text-slate-950">Crystal</div>
+                <div className="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">Editorial Futurist</div>
               </div>
             </div>
-          </button>
-        </div>
-      </nav>
 
-      {/* Bottom Nav (Mobile) */}
-      <nav className="md:hidden fixed bottom-6 left-6 right-6 bg-[#0a0a0a]/80 backdrop-blur-3xl border border-white/10 z-50 rounded-[32px] px-6 shadow-[0_20px_50px_rgba(0,0,0,0.5)]">
-        <div className="flex justify-between items-center h-20">
-          {navItems.map((item) => (
-            <button
-              key={item.id}
-              onClick={() => setCurrentView(item.id)}
-              className={cn(
-                "flex flex-col items-center justify-center gap-1.5 px-2 py-1 transition-all relative",
-                currentView === item.id 
-                  ? "text-sky-400" 
-                  : "text-slate-500"
-              )}
-            >
-              <item.icon className={cn("w-6 h-6 transition-all duration-300", currentView === item.id ? "scale-110 translate-y-[-2px]" : "opacity-70")} />
-              <span className="text-[9px] font-bold uppercase tracking-[0.2em]">{item.label}</span>
-              {currentView === item.id && (
-                <motion.div 
-                  layoutId="activeNavMobile"
-                  className="absolute -bottom-1 w-1 h-1 bg-sky-400 rounded-full"
-                />
-              )}
-            </button>
-          ))}
-        </div>
-      </nav>
-
-      {/* Main Content */}
-      <main className="flex-1 min-h-screen flex flex-col">
-        <div className="max-w-6xl mx-auto w-full p-4 md:p-10 pb-32 md:pb-10 flex-1">
-          <header className="flex justify-between items-center mb-8 md:mb-12">
-            <div className="flex items-center gap-3 md:hidden">
-              <div className="w-9 h-9 bg-sky-500 rounded-xl flex items-center justify-center shadow-lg shadow-sky-500/20 relative overflow-hidden">
-                <Gem className="w-4 h-4 text-white" />
-                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -skew-x-12 animate-[shimmer_2s_infinite]" />
-              </div>
-              <span className="font-display font-bold text-xl tracking-tight text-white">Crystal</span>
-            </div>
-            
-            <div className="hidden md:block">
-              <h1 className="text-3xl font-display font-bold text-white tracking-tight">
-                {activeItem.label}
-              </h1>
-              <p className="text-slate-400 text-sm mt-1 font-medium">{activeItem.description}</p>
+            <div className="mt-6 space-y-1">
+              {NAV_ITEMS.map((item) => (
+                <button
+                  key={item.id}
+                  onClick={() => setCurrentView(item.id)}
+                  className={cn(
+                    'group relative flex w-full items-center gap-4 rounded-[24px] px-4 py-4 text-left transition',
+                    currentView === item.id ? 'bg-slate-950 text-white shadow-[0_14px_30px_rgba(15,23,42,0.18)]' : 'hover:bg-white/80'
+                  )}
+                >
+                  {currentView === item.id && (
+                    <motion.div
+                      layoutId="activeNavDesktop"
+                      className="absolute inset-0 rounded-[24px] border border-slate-950"
+                      transition={{ type: 'spring', bounce: 0.18, duration: 0.45 }}
+                    />
+                  )}
+                  <div
+                    className={cn(
+                      'relative flex h-11 w-11 shrink-0 items-center justify-center rounded-[16px] border transition',
+                      currentView === item.id
+                        ? 'border-white/10 bg-white/10 text-white'
+                        : 'border-slate-200 bg-white text-slate-500 group-hover:text-slate-900'
+                    )}
+                  >
+                    <item.icon className="h-5 w-5" />
+                  </div>
+                  <div className="relative min-w-0">
+                    <div className="text-sm font-semibold">{item.label}</div>
+                    <div className={cn('mt-1 text-xs leading-5', currentView === item.id ? 'text-slate-300' : 'text-slate-500')}>
+                      {item.description}
+                    </div>
+                  </div>
+                </button>
+              ))}
             </div>
 
-            <div className="flex items-center gap-3">
+            <div className="mt-6 rounded-[28px] border border-slate-200 bg-white/80 p-4">
+              <div className="section-kicker">Plan</div>
               <button
                 onClick={() =>
                   openUpgrade(
@@ -155,72 +140,175 @@ export function Layout({ children, currentView, setCurrentView, user, isGuest, o
                       ? {
                           reason: 'login',
                           title: 'Accedi per attivare Crystal',
-                          description: 'Sblocca crediti mensili, watchlist e previsioni personali con un account gratuito.',
+                          description: 'Sblocca crediti mensili, watchlist e briefing personali con un account gratuito.',
                           recommendedPlan: 'plus',
                         }
                       : {
                           reason: 'feature',
-                          title: 'Piani Crystal',
-                          description: 'Gestisci crediti, confronta Plus e Pro e sblocca la modalita Oracle.',
+                          title: 'Crystal Plans',
+                          description: 'Confronta Free, Plus e Pro e scegli quanto spesso vuoi usare Forecast e Oracle.',
                           recommendedPlan: entitlements.plan === 'pro' ? 'pro' : 'plus',
                         }
                   )
                 }
-                className="hidden min-w-[170px] rounded-2xl border border-white/10 bg-[#0a0a0a] px-4 py-3 text-left shadow-sm transition-all hover:border-sky-500/30 hover:bg-white/5 md:block"
+                className="mt-3 w-full rounded-[22px] border border-slate-200 bg-slate-50 px-4 py-4 text-left transition hover:border-slate-300 hover:bg-white"
               >
-                <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">
-                  <Gem className="h-3.5 w-3.5 text-sky-400" />
-                  {isGuest ? 'Guest Preview' : `${getPlanLabel(entitlements.plan)} Plan`}
+                <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                  {isGuest ? 'Guest preview' : `${getPlanLabel(entitlements.plan)} plan`}
                 </div>
-                <div className="mt-1 text-sm font-bold text-white">
+                <div className="mt-2 text-lg font-semibold text-slate-950">
                   {isGuest ? 'Accedi per attivare i crediti' : `${entitlements.creditsBalance} crediti rimasti`}
                 </div>
               </button>
-              <button className="p-3 bg-[#0a0a0a] border border-white/10 rounded-2xl text-slate-400 hover:bg-white/5 hover:border-white/20 transition-all relative shadow-sm group">
-                <Bell className="w-5 h-5 group-hover:rotate-12 transition-transform" />
-                <span className="absolute top-3 right-3.5 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-[#0a0a0a] animate-pulse" />
-              </button>
-              {isGuest ? (
-                <button 
-                  onClick={onLogin}
-                  className="hidden md:block px-4 py-2 bg-sky-500 text-white rounded-xl font-bold hover:bg-sky-600 transition-all text-sm"
-                >
-                  Accedi
-                </button>
-              ) : user && (
-                <button onClick={onLogout} className="p-1.5 bg-white/5 rounded-full hover:bg-white/10 transition-colors" title="Logout">
-                  <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center overflow-hidden border border-white/10">
-                    {user.photoURL ? (
-                      <img src={user.photoURL} alt={user.displayName || 'User'} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                    ) : (
-                      <User className="w-5 h-5 text-slate-500" />
-                    )}
+            </div>
+
+            <button
+              onClick={onOpenTutorial}
+              className="mt-4 inline-flex items-center justify-between rounded-[24px] border border-slate-200 bg-white/80 px-4 py-4 text-left transition hover:border-slate-300 hover:bg-white"
+            >
+              <div>
+                <div className="section-kicker">Micro Tutorial</div>
+                <div className="mt-2 text-sm font-semibold text-slate-900">How Crystal works</div>
+              </div>
+              <PlayCircle className="h-5 w-5 text-[#1453e8]" />
+            </button>
+
+            <div className="mt-auto rounded-[28px] border border-slate-200 bg-white/80 p-4">
+              <button
+                onClick={() => setCurrentView('profile')}
+                className="flex w-full items-center gap-3 rounded-[20px] px-2 py-1 text-left"
+              >
+                <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-full border border-slate-200 bg-slate-100">
+                  {user?.photoURL ? (
+                    <img
+                      src={user.photoURL}
+                      alt={user.displayName || 'User'}
+                      className="h-full w-full object-cover"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <User className="h-5 w-5 text-slate-500" />
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-semibold text-slate-950">{isGuest ? 'Guest mode' : user?.displayName || 'Profilo'}</div>
+                  <div className="mt-1 text-xs font-medium text-slate-500">
+                    {isGuest ? 'Accedi per personalizzare Crystal' : user?.email || 'Account attivo'}
                   </div>
+                </div>
+              </button>
+
+              {isGuest ? (
+                <button
+                  onClick={onLogin}
+                  className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-full bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800"
+                >
+                  Accedi gratis
+                </button>
+              ) : (
+                <button
+                  onClick={onLogout}
+                  className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                >
+                  <LogOut className="h-4 w-4" />
+                  Esci
                 </button>
               )}
             </div>
-          </header>
-
-          <div className="md:hidden mb-8">
-            <h1 className="text-3xl font-display font-bold text-white tracking-tight">
-              {activeItem.label}
-            </h1>
-            <p className="text-slate-400 text-sm mt-1 font-medium">{activeItem.description}</p>
           </div>
+        </aside>
 
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={currentView}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              transition={{ duration: 0.3, ease: "easeOut" }}
+        <main className="flex-1 px-4 pb-28 pt-4 md:px-6 lg:px-0 lg:pb-8 lg:pr-6 lg:pt-5">
+          <div className="editorial-panel rounded-[32px] px-5 py-5 md:px-7 md:py-6">
+            <header className="flex flex-col gap-5 border-b border-slate-200/80 pb-5 md:flex-row md:items-start md:justify-between">
+              <div className="flex items-start gap-4">
+                <div className="flex h-12 w-12 items-center justify-center rounded-[18px] bg-slate-950 text-white lg:hidden">
+                  <Gem className="h-6 w-6" />
+                </div>
+                <div>
+                  <div className="section-kicker">{activeItem.label}</div>
+                  <h1 className="mt-2 text-3xl font-display font-semibold tracking-tight text-slate-950 md:text-4xl">
+                    {activeItem.label}
+                  </h1>
+                  <p className="mt-2 max-w-2xl text-sm leading-7 text-slate-600 md:text-base">{activeItem.description}</p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  onClick={onOpenTutorial}
+                  className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                >
+                  <PlayCircle className="h-4 w-4 text-[#1453e8]" />
+                  How Crystal works
+                </button>
+                <button
+                  onClick={() =>
+                    openUpgrade(
+                      isGuest
+                        ? {
+                            reason: 'login',
+                            title: 'Accedi per attivare Crystal',
+                            description: 'Sblocca crediti mensili, watchlist e previsioni personali con un account gratuito.',
+                            recommendedPlan: 'plus',
+                          }
+                        : {
+                            reason: 'feature',
+                            title: 'Crystal Plans',
+                            description: 'Piu crediti, piu profondita e Oracle WorldSim per i casi ad alto impatto.',
+                            recommendedPlan: entitlements.plan === 'pro' ? 'pro' : 'plus',
+                          }
+                    )
+                  }
+                  className="inline-flex items-center gap-2 rounded-full bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800"
+                >
+                  <WandSparkles className="h-4 w-4 text-rose-300" />
+                  {isGuest ? 'Attiva i crediti' : `${getPlanLabel(entitlements.plan)} · ${entitlements.creditsBalance} crediti`}
+                </button>
+              </div>
+            </header>
+
+            <div className="pt-6 md:pt-7">
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={currentView}
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -8 }}
+                  transition={{ duration: 0.22, ease: 'easeOut' }}
+                >
+                  {children}
+                </motion.div>
+              </AnimatePresence>
+            </div>
+          </div>
+        </main>
+      </div>
+
+      <nav className="fixed inset-x-4 bottom-4 z-50 rounded-[28px] border border-white/70 bg-[rgba(251,249,244,0.92)] px-3 py-2 shadow-[0_22px_40px_rgba(15,23,42,0.12)] backdrop-blur-xl lg:hidden">
+        <div className="flex items-center justify-between gap-1">
+          {NAV_ITEMS.map((item) => (
+            <button
+              key={item.id}
+              onClick={() => setCurrentView(item.id)}
+              className={cn(
+                'relative flex flex-1 flex-col items-center justify-center gap-1 rounded-[20px] px-2 py-3 text-[10px] font-semibold uppercase tracking-[0.18em] transition',
+                currentView === item.id ? 'text-slate-950' : 'text-slate-500'
+              )}
             >
-              {children}
-            </motion.div>
-          </AnimatePresence>
+              {currentView === item.id && (
+                <motion.div
+                  layoutId="activeNavMobile"
+                  className="absolute inset-0 rounded-[20px] bg-white shadow-[0_10px_24px_rgba(15,23,42,0.1)]"
+                  transition={{ type: 'spring', bounce: 0.18, duration: 0.4 }}
+                />
+              )}
+              <item.icon className="relative h-5 w-5" />
+              <span className="relative">{item.label}</span>
+            </button>
+          ))}
         </div>
-      </main>
+      </nav>
     </div>
   );
 }
