@@ -161,6 +161,10 @@ function sanitizeSegment(value, fallback = "global") {
   return safe || fallback;
 }
 
+function safeText(value, fallback = "") {
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
 function createQueryHash(queryText) {
   return crypto.createHash("sha256").update(queryText.trim().toLowerCase()).digest("hex");
 }
@@ -727,11 +731,14 @@ function normalizeNextletterPayload(payload = {}) {
 function getForecastRuntimeHealth() {
   const metadata = llmRuntime.getRuntimeMetadata();
   return {
-    available: metadata.configured,
-    mode: metadata.configured ? "live" : "preview",
+    available: metadata.available,
+    mode: metadata.mode,
     provider: metadata.provider,
     model: metadata.model,
     models: metadata.models,
+    primaryConfigured: metadata.primaryConfigured,
+    fallbackProvider: metadata.fallbackProvider,
+    fallbackConfigured: metadata.fallbackConfigured,
     structuredOutputs: metadata.structuredOutputs,
     grounding: ["historical-cache", "google-trends", "timegpt", "polymarket"],
     rollbackProvider: "gemini",
@@ -776,8 +783,12 @@ async function withRetry(fn, retries = 2, delayMs = 2000) {
   try {
     return await fn();
   } catch (error) {
+    const code = typeof error?.code === "string" ? error.code : "";
     const message = error instanceof Error ? error.message : String(error);
-    const isQuotaError = message.includes("429") || message.includes("RESOURCE_EXHAUSTED");
+    const isQuotaError =
+      code === "provider-rate-limited" ||
+      message.includes("429") ||
+      message.includes("RESOURCE_EXHAUSTED");
     if (isQuotaError && retries > 0) {
       await new Promise((resolve) => setTimeout(resolve, delayMs));
       return withRetry(fn, retries - 1, delayMs * 2);

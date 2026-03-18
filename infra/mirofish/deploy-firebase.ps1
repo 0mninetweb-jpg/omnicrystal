@@ -8,7 +8,7 @@ param(
   [string]$LlmBaseUrl = "https://openrouter.ai/api/v1",
   [string]$LlmApiKey = "",
   [string]$LlmModelQuery = "openai/gpt-4.1-mini",
-  [string]$LlmModelForecast = "openai/gpt-4.1",
+  [string]$LlmModelForecast = "openai/gpt-4.1-mini",
   [string]$LlmModelChat = "openai/gpt-4.1-mini",
   [string]$LlmModelCopy = "openai/gpt-4.1-mini",
   [switch]$BillingTestMode,

@@ -21,18 +21,57 @@ function looksLikeHtml(text: string) {
   return /<!doctype html>|<html[\s>]/i.test(text);
 }
 
+function getFriendlyServerErrorMessage(
+  status: number,
+  payload: {
+    code?: unknown;
+    error?: unknown;
+    message?: unknown;
+  }
+) {
+  const code = typeof payload?.code === 'string' ? payload.code : '';
+
+  switch (code) {
+    case 'forecast-runtime-not-configured':
+      return 'Forecast temporarily unavailable. The server runtime is not configured correctly.';
+    case 'provider-credits-exhausted':
+      return 'Forecast temporarily unavailable. The primary provider ran out of credits and the backup could not complete the request.';
+    case 'provider-rate-limited':
+      return 'Forecast temporarily unavailable. The provider is rate limited right now. Please retry in a moment.';
+    case 'provider-upstream-error':
+      return 'Unable to generate the forecast right now. Please retry in a moment.';
+    case 'provider-request-rejected':
+      return 'The forecast request could not be completed by the provider.';
+    case 'provider-fallback-failed':
+      return 'Forecast temporarily unavailable. The Gemini backup could not complete the request.';
+    default:
+      if (status >= 500) {
+        return 'Unable to generate the forecast right now.';
+      }
+      if (typeof payload?.error === 'string' && payload.error.trim()) {
+        return payload.error;
+      }
+      if (typeof payload?.message === 'string' && payload.message.trim()) {
+        return payload.message;
+      }
+      return `HTTP ${status}`;
+  }
+}
+
 async function parseServerResponse(response: Response) {
   const contentType = response.headers.get('content-type') || '';
 
   if (contentType.includes('application/json')) {
     const payload = await response.json();
     if (!response.ok) {
-      const error = new Error(payload?.error || payload?.message || `HTTP ${response.status}`) as Error & {
+      const error = new Error(getFriendlyServerErrorMessage(response.status, payload)) as Error & {
         code?: string;
         details?: unknown;
+        status?: number;
       };
       error.code = payload?.code;
       error.details = payload?.details;
+      error.status = response.status;
       throw error;
     }
     return payload;
@@ -40,6 +79,9 @@ async function parseServerResponse(response: Response) {
 
   const text = await response.text();
   if (!response.ok) {
+    if (looksLikeHtml(text)) {
+      throw new BackendUnavailableError('Backend API non disponibile.');
+    }
     throw new Error(text || `HTTP ${response.status}`);
   }
   if (looksLikeHtml(text)) {

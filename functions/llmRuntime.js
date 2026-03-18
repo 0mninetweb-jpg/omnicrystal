@@ -5,7 +5,7 @@ const DEFAULT_PROVIDER = "openrouter";
 
 const OPENROUTER_MODELS = {
   query: "openai/gpt-4.1-mini",
-  forecast: "openai/gpt-4.1",
+  forecast: "openai/gpt-4.1-mini",
   chat: "openai/gpt-4.1-mini",
   copy: "openai/gpt-4.1-mini",
 };
@@ -17,8 +17,33 @@ const GEMINI_MODELS = {
   copy: "gemini-3-flash-preview",
 };
 
+const DEFAULT_MAX_TOKENS = {
+  query: 384,
+  forecast: 1600,
+  chat: 640,
+  copy: 1200,
+  repair: 512,
+};
+
 function safeText(value, fallback = "") {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
+function toPositiveInteger(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return null;
+  return Math.max(1, Math.trunc(parsed));
+}
+
+function createRuntimeError(message, code, status = 503, details = {}, cause) {
+  const error = new Error(message);
+  error.code = code;
+  error.status = status;
+  error.details = details;
+  if (cause) {
+    error.cause = cause;
+  }
+  return error;
 }
 
 function normalizeProvider(value) {
@@ -36,14 +61,25 @@ function getDefaultModels(provider) {
   return provider === "gemini" ? GEMINI_MODELS : OPENROUTER_MODELS;
 }
 
-function resolveModels(provider) {
+function resolveModels(provider, options = {}) {
   const defaults = getDefaultModels(provider);
+  if (options.useEnvOverrides === false) {
+    return { ...defaults };
+  }
+
   return {
     query: safeText(process.env.LLM_MODEL_QUERY, defaults.query),
     forecast: safeText(process.env.LLM_MODEL_FORECAST, defaults.forecast),
     chat: safeText(process.env.LLM_MODEL_CHAT, defaults.chat),
     copy: safeText(process.env.LLM_MODEL_COPY, defaults.copy),
   };
+}
+
+function resolveMaxTokens(modelKind, maxTokens) {
+  const budget = DEFAULT_MAX_TOKENS[modelKind] || DEFAULT_MAX_TOKENS.forecast;
+  const requested = toPositiveInteger(maxTokens);
+  if (!requested) return budget;
+  return Math.max(128, Math.min(requested, budget));
 }
 
 function contentToString(content) {
@@ -92,13 +128,38 @@ function buildMessages({ systemInstruction, prompt, messages }) {
   return built;
 }
 
-function ensureConfigured(config) {
-  if (!config.configured) {
-    if (config.provider === "gemini") {
-      throw new Error("Forecast runtime not configured: GEMINI_API_KEY is missing.");
-    }
-    throw new Error(`Forecast runtime not configured: ${config.provider.toUpperCase()} LLM_API_KEY is missing.`);
+function getSecretValue(getValue) {
+  try {
+    return safeText(getValue?.());
+  } catch (_error) {
+    return "";
   }
+}
+
+function ensureConfigured(config) {
+  if (config.configured) return;
+
+  if (config.provider === "gemini") {
+    throw createRuntimeError(
+      "Forecast temporarily unavailable. The Gemini fallback is not configured.",
+      "forecast-runtime-not-configured",
+      503,
+      {
+        provider: config.provider,
+        configRole: config.role,
+      }
+    );
+  }
+
+  throw createRuntimeError(
+    "Forecast temporarily unavailable. The primary OpenRouter provider is not configured.",
+    "forecast-runtime-not-configured",
+    503,
+    {
+      provider: config.provider,
+      configRole: config.role,
+    }
+  );
 }
 
 function toGeminiContents(messages) {
@@ -110,6 +171,56 @@ function toGeminiContents(messages) {
     }));
 
   return converted.length > 0 ? converted : [{ role: "user", parts: [{ text: "Return an empty JSON object." }] }];
+}
+
+function parseJsonPayload(text) {
+  try {
+    return JSON.parse(text);
+  } catch (_error) {
+    return null;
+  }
+}
+
+function serializeError(error) {
+  return {
+    code: safeText(error?.code, "unknown"),
+    status: Number.isFinite(Number(error?.status)) ? Number(error.status) : 500,
+    message: error instanceof Error ? error.message : String(error),
+    details: error?.details || null,
+  };
+}
+
+function normalizeProviderException(provider, error) {
+  if (error?.code && error?.status) {
+    return error;
+  }
+
+  const message = error instanceof Error ? error.message : String(error);
+  const normalized = message.toLowerCase();
+
+  if (normalized.includes("resource_exhausted") || normalized.includes("quota")) {
+    return createRuntimeError(
+      `Forecast temporarily unavailable. ${provider === "gemini" ? "Gemini" : "The provider"} is rate limited right now.`,
+      "provider-rate-limited",
+      503,
+      {
+        provider,
+        upstreamMessage: message,
+      },
+      error
+    );
+  }
+
+  return createRuntimeError(
+    "Unable to generate the forecast right now. Please retry in a moment.",
+    "provider-upstream-error",
+    503,
+    {
+      provider,
+      upstreamMessage: message,
+    },
+    error
+  );
 }
 
 async function callGemini(config, { model, messages, expectJson = false, temperature, maxTokens }) {
@@ -130,20 +241,67 @@ async function callGemini(config, { model, messages, expectJson = false, tempera
   if (typeof temperature === "number") {
     requestConfig.temperature = temperature;
   }
-  if (Number.isFinite(Number(maxTokens))) {
-    requestConfig.maxOutputTokens = Math.max(128, Math.trunc(Number(maxTokens)));
+  requestConfig.maxOutputTokens = resolveMaxTokens(config.maxTokenKind, maxTokens);
+
+  try {
+    const response = await ai.models.generateContent({
+      model,
+      contents: toGeminiContents(messages),
+      config: requestConfig,
+    });
+
+    return {
+      provider: config.provider,
+      text: safeText(response?.text),
+      raw: response,
+    };
+  } catch (error) {
+    throw normalizeProviderException(config.provider, error);
+  }
+}
+
+function buildOpenRouterError(response, responseText) {
+  const payload = parseJsonPayload(responseText);
+  const upstreamMessage = safeText(payload?.error?.message || payload?.message || responseText || response.statusText);
+  const details = {
+    provider: "openrouter",
+    upstreamStatus: response.status,
+    upstreamMessage,
+  };
+
+  if (response.status === 402) {
+    return createRuntimeError(
+      "Forecast temporarily unavailable. The primary provider is out of credits.",
+      "provider-credits-exhausted",
+      503,
+      details
+    );
   }
 
-  const response = await ai.models.generateContent({
-    model,
-    contents: toGeminiContents(messages),
-    config: requestConfig,
-  });
+  if (response.status === 429) {
+    return createRuntimeError(
+      "Forecast temporarily unavailable. The primary provider is rate limited right now.",
+      "provider-rate-limited",
+      503,
+      details
+    );
+  }
 
-  return {
-    text: safeText(response?.text),
-    raw: response,
-  };
+  if (response.status >= 500) {
+    return createRuntimeError(
+      "Unable to generate the forecast right now. Please retry in a moment.",
+      "provider-upstream-error",
+      503,
+      details
+    );
+  }
+
+  return createRuntimeError(
+    "The forecast request was rejected by the primary provider.",
+    "provider-request-rejected",
+    502,
+    details
+  );
 }
 
 async function callOpenRouter(config, { model, messages, expectJson = false, temperature, maxTokens }) {
@@ -163,6 +321,7 @@ async function callOpenRouter(config, { model, messages, expectJson = false, tem
       role: message.role === "assistant" ? "assistant" : message.role === "system" ? "system" : "user",
       content: message.content,
     })),
+    max_tokens: resolveMaxTokens(config.maxTokenKind, maxTokens),
   };
 
   if (expectJson) {
@@ -171,19 +330,21 @@ async function callOpenRouter(config, { model, messages, expectJson = false, tem
   if (typeof temperature === "number") {
     payload.temperature = temperature;
   }
-  if (Number.isFinite(Number(maxTokens))) {
-    payload.max_tokens = Math.max(128, Math.trunc(Number(maxTokens)));
-  }
 
-  const response = await fetch(`${config.baseUrl}/chat/completions`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(payload),
-  });
+  let response;
+  try {
+    response = await fetch(`${config.baseUrl}/chat/completions`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+    });
+  } catch (error) {
+    throw normalizeProviderException(config.provider, error);
+  }
 
   if (!response.ok) {
     const message = await response.text();
-    throw new Error(`HTTP ${response.status} ${response.statusText}: ${message}`);
+    throw buildOpenRouterError(response, message);
   }
 
   const data = await response.json();
@@ -194,6 +355,7 @@ async function callOpenRouter(config, { model, messages, expectJson = false, tem
     .trim();
 
   return {
+    provider: config.provider,
     text: safeText(text),
     raw: data,
   };
@@ -249,35 +411,141 @@ function messagesToPlainText(messages, limit = 12000) {
   return plain.length > limit ? plain.slice(0, limit) : plain;
 }
 
-function createLlmRuntime({ getGeminiApiKey } = {}) {
-  function getConfig() {
-    const provider = normalizeProvider(process.env.LLM_PROVIDER);
-    if (provider === "gemini") {
-      const apiKey = safeText(process.env.LLM_API_KEY) || safeText(getGeminiApiKey?.());
-      return {
-        provider,
-        configured: Boolean(apiKey),
-        apiKey,
-        baseUrl: "",
-        models: resolveModels(provider),
-      };
-    }
+function shouldAttemptFallback(primaryConfig, fallbackConfig, error) {
+  if (primaryConfig.provider !== "openrouter") return false;
+  if (!fallbackConfig.configured) return false;
 
-    const apiKey = safeText(process.env.LLM_API_KEY);
+  if (error?.code === "forecast-runtime-not-configured") {
+    return safeText(error?.details?.provider) === "openrouter";
+  }
+
+  if (error?.code === "provider-credits-exhausted" || error?.code === "provider-rate-limited") {
+    return true;
+  }
+
+  if (error?.code === "provider-upstream-error") {
+    const upstreamStatus = Number(error?.details?.upstreamStatus);
+    return !Number.isFinite(upstreamStatus) || upstreamStatus >= 500;
+  }
+
+  return false;
+}
+
+function buildFallbackFailureError(primaryConfig, fallbackConfig, primaryError, fallbackError = null) {
+  const message =
+    primaryError?.code === "provider-credits-exhausted"
+      ? "Forecast temporarily unavailable. The primary provider is out of credits and the Gemini backup could not complete the request."
+      : "Forecast temporarily unavailable. The primary provider failed and the Gemini backup could not complete the request.";
+
+  return createRuntimeError(
+    message,
+    "provider-fallback-failed",
+    503,
+    {
+      primaryProvider: primaryConfig.provider,
+      fallbackProvider: fallbackConfig.provider,
+      primaryError: serializeError(primaryError),
+      fallbackError: fallbackError ? serializeError(fallbackError) : null,
+      fallbackConfigured: fallbackConfig.configured,
+    }
+  );
+}
+
+function buildPrimaryConfig(getGeminiApiKey) {
+  const provider = normalizeProvider(process.env.LLM_PROVIDER);
+  if (provider === "gemini") {
+    const apiKey = safeText(process.env.LLM_API_KEY) || getSecretValue(getGeminiApiKey);
     return {
       provider,
+      role: "primary",
       configured: Boolean(apiKey),
       apiKey,
-      baseUrl: stripTrailingSlash(process.env.LLM_BASE_URL || DEFAULT_OPENROUTER_BASE_URL) || DEFAULT_OPENROUTER_BASE_URL,
+      baseUrl: "",
       models: resolveModels(provider),
+      maxTokenKind: "forecast",
     };
   }
 
-  async function callProvider(config, params) {
-    if (config.provider === "gemini") {
-      return callGemini(config, params);
+  const apiKey = safeText(process.env.LLM_API_KEY);
+  return {
+    provider,
+    role: "primary",
+    configured: Boolean(apiKey),
+    apiKey,
+    baseUrl: stripTrailingSlash(process.env.LLM_BASE_URL || DEFAULT_OPENROUTER_BASE_URL) || DEFAULT_OPENROUTER_BASE_URL,
+    models: resolveModels(provider),
+    maxTokenKind: "forecast",
+  };
+}
+
+function buildGeminiFallbackConfig(getGeminiApiKey) {
+  const apiKey = getSecretValue(getGeminiApiKey);
+  return {
+    provider: "gemini",
+    role: "fallback",
+    configured: Boolean(apiKey),
+    apiKey,
+    baseUrl: "",
+    models: resolveModels("gemini", { useEnvOverrides: false }),
+    maxTokenKind: "forecast",
+  };
+}
+
+function createLlmRuntime({ getGeminiApiKey } = {}) {
+  function getPrimaryConfig() {
+    return buildPrimaryConfig(getGeminiApiKey);
+  }
+
+  function getFallbackConfig(primaryConfig) {
+    if (primaryConfig.provider !== "openrouter") {
+      return {
+        provider: "gemini",
+        role: "fallback",
+        configured: false,
+        apiKey: "",
+        baseUrl: "",
+        models: resolveModels("gemini", { useEnvOverrides: false }),
+        maxTokenKind: "forecast",
+      };
     }
-    return callOpenRouter(config, params);
+
+    return buildGeminiFallbackConfig(getGeminiApiKey);
+  }
+
+  async function callProvider(config, params) {
+    const configWithBudget = {
+      ...config,
+      maxTokenKind: params.maxTokenKind || config.maxTokenKind || "forecast",
+    };
+
+    if (config.provider === "gemini") {
+      return callGemini(configWithBudget, params);
+    }
+    return callOpenRouter(configWithBudget, params);
+  }
+
+  async function callProviderWithFallback(primaryConfig, params) {
+    const fallbackConfig = getFallbackConfig(primaryConfig);
+
+    try {
+      return await callProvider(primaryConfig, params);
+    } catch (error) {
+      const primaryError = normalizeProviderException(primaryConfig.provider, error);
+      if (!shouldAttemptFallback(primaryConfig, fallbackConfig, primaryError)) {
+        throw primaryError;
+      }
+
+      try {
+        const fallbackModelKind = params.modelKind || params.maxTokenKind || "forecast";
+        return await callProvider(fallbackConfig, {
+          ...params,
+          model: fallbackConfig.models[fallbackModelKind] || fallbackConfig.models.forecast,
+        });
+      } catch (fallbackError) {
+        const normalizedFallbackError = normalizeProviderException(fallbackConfig.provider, fallbackError);
+        throw buildFallbackFailureError(primaryConfig, fallbackConfig, primaryError, normalizedFallbackError);
+      }
+    }
   }
 
   async function generateText({
@@ -288,15 +556,17 @@ function createLlmRuntime({ getGeminiApiKey } = {}) {
     temperature,
     maxTokens,
   }) {
-    const config = getConfig();
-    const model = config.models[modelKind] || config.models.forecast;
+    const primaryConfig = getPrimaryConfig();
+    const model = primaryConfig.models[modelKind] || primaryConfig.models.forecast;
     const builtMessages = buildMessages({ systemInstruction, prompt, messages });
-    const result = await callProvider(config, {
+    const result = await callProviderWithFallback(primaryConfig, {
       model,
       messages: builtMessages,
       expectJson: false,
       temperature,
       maxTokens,
+      modelKind,
+      maxTokenKind: modelKind,
     });
     return result.text;
   }
@@ -316,12 +586,16 @@ function createLlmRuntime({ getGeminiApiKey } = {}) {
         )}\n\nMalformed response:\n${responseText}`,
       },
     ];
-    const repaired = await callProvider(config, {
+    const repairParams = {
       model,
       messages: repairMessages,
       expectJson: true,
       temperature: 0,
-    });
+      modelKind,
+      maxTokenKind: "repair",
+    };
+    const repaired =
+      config.role === "primary" ? await callProviderWithFallback(config, repairParams) : await callProvider(config, repairParams);
     return repaired.text;
   }
 
@@ -333,21 +607,33 @@ function createLlmRuntime({ getGeminiApiKey } = {}) {
     temperature,
     maxTokens,
   }) {
-    const config = getConfig();
-    const model = config.models[modelKind] || config.models.forecast;
+    const primaryConfig = getPrimaryConfig();
     const builtMessages = buildMessages({ systemInstruction, prompt, messages });
-    const response = await callProvider(config, {
-      model,
+    const primaryModel = primaryConfig.models[modelKind] || primaryConfig.models.forecast;
+    const response = await callProviderWithFallback(primaryConfig, {
+      model: primaryModel,
       messages: builtMessages,
       expectJson: true,
       temperature,
       maxTokens,
+      modelKind,
+      maxTokenKind: modelKind,
     });
 
     try {
       return extractJsonCandidate(response.text);
     } catch (error) {
-      const repairedText = await repairJsonResponse(config, {
+      const effectiveConfig =
+        response.provider === primaryConfig.provider
+          ? {
+              ...primaryConfig,
+              maxTokenKind: modelKind,
+            }
+          : {
+              ...getFallbackConfig(primaryConfig),
+              maxTokenKind: modelKind,
+            };
+      const repairedText = await repairJsonResponse(effectiveConfig, {
         modelKind,
         originalMessages: builtMessages,
         responseText: response.text,
@@ -356,25 +642,42 @@ function createLlmRuntime({ getGeminiApiKey } = {}) {
       try {
         return extractJsonCandidate(repairedText);
       } catch (_repairError) {
-        throw new Error(
-          `Model returned malformed JSON and repair failed. ${
-            error instanceof Error ? error.message : String(error)
-          }`
+        throw createRuntimeError(
+          "Unable to generate the forecast right now. The model returned invalid JSON twice.",
+          "provider-upstream-error",
+          503,
+          {
+            provider: effectiveConfig.provider,
+            stage: "json-repair",
+            reason: error instanceof Error ? error.message : String(error),
+          }
         );
       }
     }
   }
 
   function getRuntimeMetadata() {
-    const config = getConfig();
+    const primaryConfig = getPrimaryConfig();
+    const fallbackConfig = getFallbackConfig(primaryConfig);
+    const available = primaryConfig.configured || fallbackConfig.configured;
+
     return {
-      provider: config.provider,
-      configured: config.configured,
-      model: config.models.forecast,
-      models: { ...config.models },
-      baseUrl: config.provider === "openrouter" ? config.baseUrl : undefined,
+      provider: primaryConfig.provider,
+      configured: available,
+      available,
+      primaryConfigured: primaryConfig.configured,
+      fallbackProvider: fallbackConfig.provider,
+      fallbackConfigured: fallbackConfig.configured,
+      mode: primaryConfig.configured ? "live" : fallbackConfig.configured ? "limited" : "preview",
+      model: primaryConfig.models.forecast,
+      models: { ...primaryConfig.models },
+      baseUrl: primaryConfig.provider === "openrouter" ? primaryConfig.baseUrl : undefined,
       structuredOutputs:
-        config.provider === "gemini" ? "gemini-json+repair" : "openrouter-json_object+repair",
+        primaryConfig.provider === "gemini"
+          ? "gemini-json+repair"
+          : fallbackConfig.configured
+            ? "openrouter-json_object+repair+gemini-fallback"
+            : "openrouter-json_object+repair",
     };
   }
 

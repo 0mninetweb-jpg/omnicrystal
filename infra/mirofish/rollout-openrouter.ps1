@@ -287,7 +287,7 @@ try {
       -LlmBaseUrl "https://openrouter.ai/api/v1" `
       -LlmApiKey $OpenRouterApiKey `
       -LlmModelQuery $GraphModel `
-      -LlmModelForecast $ReportModel `
+      -LlmModelForecast $GraphModel `
       -LlmModelChat $GraphModel `
       -LlmModelCopy $GraphModel
     if ($LASTEXITCODE -ne 0) {
