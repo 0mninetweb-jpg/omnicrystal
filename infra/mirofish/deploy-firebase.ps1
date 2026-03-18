@@ -4,6 +4,7 @@ param(
   [string]$AdapterBaseUrl,
   [Parameter(Mandatory = $true)]
   [string]$WorldSimApiKey,
+  [switch]$BillingTestMode,
   [switch]$SkipFunctions,
   [switch]$SkipFirestore,
   [switch]$SkipHosting
@@ -61,7 +62,7 @@ if ($missingSecrets.Count -gt 0) {
   throw "Missing Firebase Function secrets: $($missingSecrets -join ', '). Set them before deploying functions."
 }
 
-$repoRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+$repoRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path))
 $functionsEnvPath = Join-Path $repoRoot "functions\.env.$ProjectId"
 $adapterUrl = $AdapterBaseUrl.TrimEnd("/")
 
@@ -72,6 +73,8 @@ $envContent = @(
   ""
   "WORLDSIM_BASE_URL=$adapterUrl"
   "WORLDSIM_API_KEY=$WorldSimApiKey"
+  ""
+  "BILLING_TEST_MODE=$($BillingTestMode.IsPresent.ToString().ToLower())"
 )
 
 Set-Content -Path $functionsEnvPath -Value $envContent -Encoding UTF8
@@ -79,7 +82,7 @@ Write-Host "Functions env file updated: $functionsEnvPath"
 
 if (-not $SkipFunctions) {
   Write-Host "Deploying Firebase Functions..."
-  Invoke-FirebaseCli deploy --only functions:api --project $ProjectId
+  Invoke-FirebaseCli deploy --only functions:api --project $ProjectId --force
 }
 
 if (-not $SkipFirestore) {

@@ -112,6 +112,11 @@ export function WorldSimScene({ open, mode, data, job, onClose }: WorldSimSceneP
   const [activeBranchId, setActiveBranchId] = useState<string | null>(null);
   const [isRunningBranch, setIsRunningBranch] = useState(false);
   const [branchError, setBranchError] = useState<string | null>(null);
+  const worldSimStageLabel = capabilities.worldSimAvailable
+    ? 'Live'
+    : capabilities.worldSimBetaAvailable
+      ? 'Beta'
+      : 'Preview';
 
   useEffect(() => {
     if (!open) return;
@@ -214,6 +219,16 @@ export function WorldSimScene({ open, mode, data, job, onClose }: WorldSimSceneP
       branchLimit: worldSimTier.matrixBranchLimit,
     });
   }, [activeBranchId, allowedInterventions, branches, data, job, jobDetail, jobDigest, mode, viewMode, worldSimTier.matrixBranchLimit]);
+  const truthLayerNote =
+    viewMode === 'observe'
+      ? capabilities.worldSimAvailable
+        ? WORLD_SIM_BRAND.liveNote
+        : capabilities.worldSimBetaAvailable
+          ? capabilities.worldSimStatusDetail
+          : activeData.truthNote
+      : capabilities.worldSimBetaAvailable
+        ? `${WORLD_SIM_BRAND.matrixPreviewNote} ${capabilities.worldSimStatusDetail}`
+        : WORLD_SIM_BRAND.matrixPreviewNote;
 
   const displayNodes = useMemo(() => {
     if (isPhone) return activeData.nodes.slice(0, 4);
@@ -327,7 +342,7 @@ export function WorldSimScene({ open, mode, data, job, onClose }: WorldSimSceneP
     setBranchError(null);
     setIsRunningBranch(true);
     try {
-      if (!capabilities.worldSimAvailable) {
+      if (!capabilities.worldSimBetaAvailable) {
         const previewResult = createMatrixSimulationPreviewResult({
           scene: activeData,
           payload: draftPayload,
@@ -445,16 +460,24 @@ export function WorldSimScene({ open, mode, data, job, onClose }: WorldSimSceneP
             <div className="relative flex items-center justify-between border-b border-white/10 px-5 py-4 md:px-7">
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="section-kicker !text-slate-400">{activeData.kicker}</span>
+                  <span className="section-kicker !text-slate-400">
+                    {capabilities.worldSimAvailable
+                      ? WORLD_SIM_BRAND.name
+                      : capabilities.worldSimBetaAvailable
+                        ? WORLD_SIM_BRAND.betaName
+                        : activeData.kicker}
+                  </span>
                   <span
                     className={cn(
                       'rounded-full border px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em]',
-                      activeData.mode === 'live'
+                      capabilities.worldSimAvailable
                         ? 'border-emerald-300/25 bg-emerald-300/10 text-emerald-100'
-                        : 'border-amber-300/20 bg-amber-300/10 text-amber-100'
+                        : capabilities.worldSimBetaAvailable
+                          ? 'border-sky-300/25 bg-sky-300/10 text-sky-100'
+                          : 'border-amber-300/20 bg-amber-300/10 text-amber-100'
                     )}
                   >
-                    {activeData.mode === 'live' ? 'Live' : 'Preview'}
+                    {worldSimStageLabel}
                   </span>
                   <div className="inline-flex rounded-full border border-white/10 bg-white/5 p-1">
                     {([
@@ -507,7 +530,7 @@ export function WorldSimScene({ open, mode, data, job, onClose }: WorldSimSceneP
                   </div>
                   <div className="glass-panel rounded-[20px] px-4 py-3 text-xs leading-6 text-slate-300">
                     <div className="font-semibold text-white">Truth layer</div>
-                    <div className="mt-1">{viewMode === 'observe' ? activeData.truthNote : WORLD_SIM_BRAND.matrixPreviewNote}</div>
+                    <div className="mt-1">{truthLayerNote}</div>
                   </div>
                 </div>
 

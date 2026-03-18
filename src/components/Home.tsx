@@ -103,7 +103,13 @@ export function Home({
   const [isSavingQuote, setIsSavingQuote] = useState(false);
   const [watchlistItems, setWatchlistItems] = useState<WatchlistPulseItem[]>(GUEST_WATCHLIST);
   const [todayCards, setTodayCards] = useState<CardData[]>(mockCards.slice(0, 3));
-  const worldSimMode = capabilities.worldSimAvailable ? 'live' : 'preview';
+  const worldSimEnabled = capabilities.worldSimBetaAvailable;
+  const worldSimMode = worldSimEnabled ? 'live' : 'preview';
+  const worldSimLabel = capabilities.worldSimAvailable
+    ? WORLD_SIM_BRAND.name
+    : worldSimEnabled
+      ? WORLD_SIM_BRAND.betaName
+      : WORLD_SIM_BRAND.previewName;
 
   useEffect(() => {
     return scheduleIdleTask(() => {
@@ -228,8 +234,6 @@ export function Home({
     }
   };
 
-  const worldSimLabel = capabilities.worldSimAvailable ? WORLD_SIM_BRAND.name : WORLD_SIM_BRAND.previewName;
-
   return (
     <div className="space-y-8 md:space-y-10">
       <section className="hero-surface overflow-hidden rounded-[40px] px-6 py-8 md:px-8 md:py-10">
@@ -319,14 +323,16 @@ export function Home({
             <div className="flex items-center justify-between gap-3">
               <div className="section-kicker !text-rose-200">{worldSimLabel}</div>
               <span className="glass-panel rounded-full px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-200">
-                {capabilities.worldSimAvailable ? 'Simulation live' : 'Guided preview'}
+                {capabilities.worldSimAvailable ? 'Simulation live' : worldSimEnabled ? 'Beta runtime' : 'Guided preview'}
               </span>
             </div>
             <h3 className="mt-3 max-w-md text-2xl font-display font-semibold text-white md:text-[2rem] md:leading-tight">{WORLD_SIM_BRAND.teaserTitle}</h3>
               <p className="mt-3 text-sm leading-7 text-slate-300">
                 {capabilities.worldSimAvailable
                   ? WORLD_SIM_BRAND.teaserBody
-                  : RUNTIME_COPY.worldSimPreview}
+                  : worldSimEnabled
+                    ? capabilities.worldSimStatusDetail
+                    : RUNTIME_COPY.worldSimPreview}
             </p>
             <div className="mt-6 grid gap-3 sm:grid-cols-3">
               {[
@@ -496,7 +502,7 @@ export function Home({
               >
                 <div className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-rose-500">
                   <Sparkles className="h-4 w-4" />
-                  {capabilities.worldSimAvailable ? WORLD_SIM_BRAND.name : WORLD_SIM_BRAND.previewName}
+                  {worldSimLabel}
                 </div>
                 <h4 className="mt-3 text-lg font-display font-semibold text-slate-950">{preview.title}</h4>
                 <p className="mt-2 text-sm leading-7 text-slate-600">{preview.subtitle}</p>
@@ -512,7 +518,7 @@ export function Home({
                 </div>
               </button>
             ))}
-            {!capabilities.worldSimAvailable && (
+            {!worldSimEnabled && (
               <div className="rounded-[24px] border border-amber-200 bg-amber-50 p-4 text-sm leading-7 text-amber-800">
                 {RUNTIME_COPY.worldSimPreview}
               </div>

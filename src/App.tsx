@@ -3,71 +3,55 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { lazy, Suspense, useEffect, useState } from 'react';
-import { Layout } from './components/Layout';
+import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import { Loader2 } from 'lucide-react';
 import { auth, db, loginWithGoogle, logout } from './firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
-import { Loader2 } from 'lucide-react';
 import { CrystalPlanProvider } from './context/CrystalPlanContext';
 import { AppRuntimeProvider } from './context/AppRuntimeContext';
 import { AppShellProvider } from './context/AppShellContext';
 import { createDefaultEntitlementFields } from './lib/crystalPlans';
-import { scheduleIdleTask } from './lib/scheduleIdle';
-import { OnboardingModal } from './components/OnboardingModal';
-import { getDefaultWorldSimPreviewDataset } from './lib/worldSimScene';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import {
   defaultOnboardingState,
   ONBOARDING_STORAGE_KEY,
   OnboardingChecklistKey,
   OnboardingState,
 } from './types/onboarding';
+import { getDefaultWorldSimPreviewDataset } from './lib/worldSimScene';
 import type { WorldSimSceneData } from './types/worldSim';
 import type { WorldSimJobRef } from './types/worldSimJob';
 
-const Home = lazy(async () => ({ default: (await import('./components/Home')).Home }));
+const MarketingLanding = lazy(async () => ({ default: (await import('./components/MarketingLanding')).MarketingLanding }));
+const AppShell = lazy(async () => ({ default: (await import('./components/AppShell')).AppShell }));
+const AppHome = lazy(async () => ({ default: (await import('./components/AppHome')).AppHome }));
 const Search = lazy(async () => ({ default: (await import('./components/Search')).Search }));
 const Watchlist = lazy(async () => ({ default: (await import('./components/Watchlist')).Watchlist }));
 const Profile = lazy(async () => ({ default: (await import('./components/Profile')).Profile }));
 const Nextletter = lazy(async () => ({ default: (await import('./components/Nextletter')).Nextletter }));
 const WorldSimScene = lazy(async () => ({ default: (await import('./components/WorldSimScene')).WorldSimScene }));
 
-type AppView = 'home' | 'forecast' | 'watchlist' | 'profile' | 'nextletter';
+type AppRoute = '/app' | '/app/forecast' | '/app/nextletter' | '/app/watchlist' | '/app/profile';
 
-function getUserSyncPayload(
-  data: Record<string, any> | undefined,
-  currentUser: User,
-  defaults: ReturnType<typeof createDefaultEntitlementFields>
-) {
-  const payload: Record<string, any> = {};
-
-  const nextEmail = currentUser.email || 'no-email@example.com';
-  const nextDisplayName = currentUser.displayName || 'User';
-  const nextPhotoURL = currentUser.photoURL || '';
-
-  if (data?.email !== nextEmail) payload.email = nextEmail;
-  if (data?.displayName !== nextDisplayName) payload.displayName = nextDisplayName;
-  if (data?.photoURL !== nextPhotoURL) payload.photoURL = nextPhotoURL;
-  if (typeof data?.plan !== 'string') payload.plan = defaults.plan;
-  if (typeof data?.planStatus !== 'string') payload.planStatus = defaults.planStatus;
-  if (typeof data?.creditsBalance !== 'number') payload.creditsBalance = defaults.creditsBalance;
-  if (typeof data?.creditsCycleAmount !== 'number') payload.creditsCycleAmount = defaults.creditsCycleAmount;
-  if (!data?.creditsResetAt) payload.creditsResetAt = defaults.creditsResetAt;
-  if (typeof data?.profileAiFreeMessagesRemaining !== 'number') {
-    payload.profileAiFreeMessagesRemaining = defaults.profileAiFreeMessagesRemaining;
-  }
-  if (typeof data?.watchlistLimit !== 'number') payload.watchlistLimit = defaults.watchlistLimit;
-
-  return Object.keys(payload).length > 0 ? payload : null;
-}
+const PENDING_APP_PATH_KEY = 'crystal-pending-app-path-v1';
 
 function ViewLoader() {
   return (
-    <div className="flex min-h-[45vh] items-center justify-center">
-      <div className="inline-flex items-center gap-3 rounded-full border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 shadow-[0_16px_35px_rgba(15,23,42,0.08)]">
+    <div className="flex min-h-[42vh] items-center justify-center">
+      <div className="inline-flex items-center gap-3 rounded-full border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 shadow-[0_12px_28px_rgba(15,23,42,0.06)]">
         <Loader2 className="h-4 w-4 animate-spin text-[#1453e8]" />
-        Loading view...
+        Loading…
       </div>
+    </div>
+  );
+}
+
+function AuthLoader() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-transparent">
+      <Loader2 className="h-8 w-8 animate-spin text-[#1453e8]" />
     </div>
   );
 }
@@ -96,14 +80,71 @@ function persistOnboardingState(state: OnboardingState) {
   window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify(state));
 }
 
-export default function App() {
-  const [currentView, setCurrentView] = useState<AppView>('home');
+function sanitizeAppPath(path?: string | null): AppRoute | `${AppRoute}?${string}` {
+  if (!path) return '/app';
+  let normalized = path;
+
+  try {
+    normalized = decodeURIComponent(path);
+  } catch {
+    normalized = path;
+  }
+
+  if (!normalized.startsWith('/app')) {
+    return '/app';
+  }
+
+  return normalized as AppRoute | `${AppRoute}?${string}`;
+}
+
+function readPendingAppPath() {
+  if (typeof window === 'undefined') return null;
+  return window.sessionStorage.getItem(PENDING_APP_PATH_KEY);
+}
+
+function writePendingAppPath(path: string) {
+  if (typeof window === 'undefined') return;
+  window.sessionStorage.setItem(PENDING_APP_PATH_KEY, sanitizeAppPath(path));
+}
+
+function clearPendingAppPath() {
+  if (typeof window === 'undefined') return;
+  window.sessionStorage.removeItem(PENDING_APP_PATH_KEY);
+}
+
+function getUserSyncPayload(
+  data: Record<string, any> | undefined,
+  currentUser: User,
+  defaults: ReturnType<typeof createDefaultEntitlementFields>
+) {
+  const payload: Record<string, any> = {};
+
+  const nextEmail = currentUser.email || 'no-email@example.com';
+  const nextDisplayName = currentUser.displayName || 'User';
+  const nextPhotoURL = currentUser.photoURL || '';
+
+  if (data?.email !== nextEmail) payload.email = nextEmail;
+  if (data?.displayName !== nextDisplayName) payload.displayName = nextDisplayName;
+  if (data?.photoURL !== nextPhotoURL) payload.photoURL = nextPhotoURL;
+  if (typeof data?.plan !== 'string') payload.plan = defaults.plan;
+  if (typeof data?.planStatus !== 'string') payload.planStatus = defaults.planStatus;
+  if (typeof data?.creditsBalance !== 'number') payload.creditsBalance = defaults.creditsBalance;
+  if (typeof data?.creditsCycleAmount !== 'number') payload.creditsCycleAmount = defaults.creditsCycleAmount;
+  if (!data?.creditsResetAt) payload.creditsResetAt = defaults.creditsResetAt;
+  if (typeof data?.profileAiFreeMessagesRemaining !== 'number') {
+    payload.profileAiFreeMessagesRemaining = defaults.profileAiFreeMessagesRemaining;
+  }
+  if (typeof data?.watchlistLimit !== 'number') payload.watchlistLimit = defaults.watchlistLimit;
+
+  return Object.keys(payload).length > 0 ? payload : null;
+}
+
+function AppRouter() {
+  const location = useLocation();
+  const navigate = useNavigate();
   const [user, setUser] = useState<User | null>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
-  const [isGuest, setIsGuest] = useState(false);
-  const [forecastSeed, setForecastSeed] = useState('');
   const [onboardingState, setOnboardingState] = useState<OnboardingState>(defaultOnboardingState);
-  const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
   const [worldSimSceneOpen, setWorldSimSceneOpen] = useState(false);
   const [worldSimSceneMode, setWorldSimSceneMode] = useState<'preview' | 'live'>('preview');
   const [worldSimPreviewDataset, setWorldSimPreviewDataset] = useState<WorldSimSceneData>(() =>
@@ -123,7 +164,6 @@ export default function App() {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (currentUser) {
         setUser(currentUser);
-        setIsGuest(false);
 
         try {
           const userDoc = await getDoc(doc(db, 'users', currentUser.uid));
@@ -152,8 +192,6 @@ export default function App() {
         }
       } else {
         setUser(null);
-        setIsGuest(true);
-        setCurrentView('home');
       }
       setIsAuthReady(true);
     });
@@ -162,19 +200,17 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (isAuthReady && !user && !isGuest) {
-      setIsGuest(true);
+    if (!isAuthReady || !user || location.pathname !== '/') return;
+    const params = new URLSearchParams(location.search);
+    const next = params.get('next') || readPendingAppPath();
+    if (next) {
+      clearPendingAppPath();
+      void navigate(sanitizeAppPath(next), { replace: true });
     }
-  }, [isAuthReady, isGuest, user]);
+  }, [isAuthReady, location.pathname, location.search, navigate, user]);
 
   useEffect(() => {
-    if (isAuthReady && !onboardingState.hasSeenIntro) {
-      setIsOnboardingOpen(true);
-    }
-  }, [isAuthReady, onboardingState.hasSeenIntro]);
-
-  useEffect(() => {
-    if (currentView === 'nextletter') {
+    if (location.pathname === '/app/nextletter') {
       setOnboardingState((current) => {
         if (current.completedChecklist.openedBriefing) return current;
         return {
@@ -186,21 +222,31 @@ export default function App() {
         };
       });
     }
-  }, [currentView]);
+  }, [location.pathname]);
 
-  useEffect(() => {
-    const isDesktopViewport = typeof window !== 'undefined' && window.innerWidth >= 1280;
-    if (!isAuthReady || !isDesktopViewport) return;
+  const isGuest = !user;
 
-    return scheduleIdleTask(() => {
-      void import('./components/Search');
-    }, 1200);
-  }, [isAuthReady]);
+  const handleLogin = async (targetPath?: string) => {
+    const next = sanitizeAppPath(targetPath || new URLSearchParams(location.search).get('next') || readPendingAppPath() || '/app');
+    writePendingAppPath(next);
+
+    if (user) {
+      clearPendingAppPath();
+      await navigate(next, { replace: true });
+      return;
+    }
+
+    const signedInUser = await loginWithGoogle();
+    if (signedInUser) {
+      clearPendingAppPath();
+      await navigate(next, { replace: true });
+    }
+  };
 
   const handleLogout = async () => {
     await logout();
-    setCurrentView('home');
-    setIsGuest(true);
+    clearPendingAppPath();
+    await navigate('/', { replace: true });
   };
 
   const markChecklist = (key: OnboardingChecklistKey) => {
@@ -216,18 +262,17 @@ export default function App() {
     });
   };
 
-  const completeTutorial = () => {
+  const completeInlineIntro = () => {
     setOnboardingState((current) => ({
       ...current,
       hasSeenIntro: true,
       dismissedAt: new Date().toISOString(),
     }));
-    setIsOnboardingOpen(false);
   };
 
   const openForecast = (query = '') => {
-    setForecastSeed(query);
-    setCurrentView('forecast');
+    const target = query ? `/app/forecast?q=${encodeURIComponent(query)}` : '/app/forecast';
+    void navigate(target);
   };
 
   const openWorldSimScene = (dataset?: WorldSimSceneData, job?: WorldSimJobRef | null) => {
@@ -238,93 +283,145 @@ export default function App() {
     setWorldSimSceneOpen(true);
   };
 
-  if (!isAuthReady) {
+  const renderAppRoute = (children: React.ReactNode) => {
+    if (!isAuthReady) {
+      return <AuthLoader />;
+    }
+
+    if (!user) {
+      const target = sanitizeAppPath(`${location.pathname}${location.search}${location.hash}`);
+      writePendingAppPath(target);
+      return <Navigate to={`/?next=${encodeURIComponent(target)}`} replace />;
+    }
+
     return (
-      <div className="flex min-h-screen items-center justify-center bg-transparent">
-        <Loader2 className="h-8 w-8 animate-spin text-[#1453e8]" />
-      </div>
+      <Suspense fallback={<ViewLoader />}>
+        <AppShell user={user} onLogout={handleLogout} onOpenWorldSimScene={() => openWorldSimScene()}>
+          {children}
+        </AppShell>
+      </Suspense>
     );
-  }
+  };
+
+  const forecastSeed = useMemo(() => new URLSearchParams(location.search).get('q') || '', [location.search]);
 
   return (
-    <AppShellProvider>
-      <AppRuntimeProvider>
-        <CrystalPlanProvider user={user} isGuest={isGuest} onLogin={loginWithGoogle}>
-          <Layout
-            currentView={currentView}
-            setCurrentView={setCurrentView}
-            onOpenTutorial={() => setIsOnboardingOpen(true)}
-            onOpenWorldSimScene={() => openWorldSimScene()}
-            user={user}
-            isGuest={isGuest}
-            onLogin={loginWithGoogle}
-            onLogout={handleLogout}
-          >
-            <Suspense fallback={<ViewLoader />}>
-              {currentView === 'home' && (
-                <Home
-                  user={user}
-                  isGuest={isGuest}
-                  onLogin={loginWithGoogle}
-                  onNavigate={setCurrentView}
-                  onForecastIntent={openForecast}
-                  onOpenTutorial={() => setIsOnboardingOpen(true)}
-                  onOpenWorldSimScene={openWorldSimScene}
-                  onboardingState={onboardingState}
-                />
-              )}
-              {currentView === 'forecast' && (
-                <Search
-                  user={user}
-                  isGuest={isGuest}
-                  onLogin={loginWithGoogle}
-                  initialQuery={forecastSeed}
-                  onForecastComplete={() => markChecklist('firstForecast')}
-                  onOpenWorldSimScene={openWorldSimScene}
-                />
-              )}
-              {currentView === 'nextletter' && (
-                <Nextletter
-                  user={user}
-                  isGuest={isGuest}
-                  onLogin={loginWithGoogle}
-                  onGenerateCard={(query) => openForecast(query)}
-                  onOpenWorldSimScene={openWorldSimScene}
-                />
-              )}
-              {currentView === 'watchlist' && (
-                <Watchlist
-                  user={user}
-                  isGuest={isGuest}
-                  onLogin={loginWithGoogle}
-                  onChecklistComplete={() => markChecklist('firstWatchlist')}
-                />
-              )}
-              {currentView === 'profile' && <Profile user={user} isGuest={isGuest} onLogin={loginWithGoogle} />}
+    <CrystalPlanProvider user={user} isGuest={isGuest} onLogin={() => handleLogin('/app')}>
+      <Routes>
+        <Route
+          path="/"
+          element={
+            <Suspense fallback={<AuthLoader />}>
+              <MarketingLanding
+                isAuthenticated={Boolean(user)}
+                onPrimaryAction={() => {
+                  if (user) {
+                    void navigate('/app');
+                    return;
+                  }
+                  void handleLogin('/app');
+                }}
+                onOpenWorldSimPreview={() => openWorldSimScene(getDefaultWorldSimPreviewDataset())}
+              />
             </Suspense>
-          </Layout>
-
-          <OnboardingModal
-            open={isOnboardingOpen}
-            onClose={completeTutorial}
-            onStartForecast={() => {
-              completeTutorial();
-              openForecast('How likely is an energy cost spike in Italy over the next 30 days?');
-            }}
-          />
-          {worldSimSceneOpen && (
-            <Suspense fallback={null}>
-              <WorldSimScene
-                open={worldSimSceneOpen}
-                mode={worldSimSceneMode}
-                data={worldSimPreviewDataset}
-                job={worldSimJobRef}
-                onClose={() => setWorldSimSceneOpen(false)}
+          }
+        />
+        <Route
+          path="/app"
+          element={renderAppRoute(
+            <Suspense fallback={<ViewLoader />}>
+              <AppHome
+                user={user}
+                onboardingState={onboardingState}
+                onCompleteIntro={completeInlineIntro}
+                onNavigate={(path) => void navigate(path)}
+                onForecastIntent={openForecast}
+                onOpenWorldSimScene={openWorldSimScene}
               />
             </Suspense>
           )}
-        </CrystalPlanProvider>
-      </AppRuntimeProvider>
-    </AppShellProvider>
+        />
+        <Route
+          path="/app/forecast"
+          element={renderAppRoute(
+            <Suspense fallback={<ViewLoader />}>
+              <Search
+                user={user}
+                isGuest={false}
+                onLogin={() => handleLogin('/app')}
+                initialQuery={forecastSeed}
+                onForecastComplete={() => markChecklist('firstForecast')}
+                onOpenWorldSimScene={openWorldSimScene}
+              />
+            </Suspense>
+          )}
+        />
+        <Route
+          path="/app/nextletter"
+          element={renderAppRoute(
+            <Suspense fallback={<ViewLoader />}>
+              <Nextletter
+                user={user}
+                isGuest={false}
+                onLogin={() => handleLogin('/app')}
+                onGenerateCard={(query) => openForecast(query)}
+                onOpenWorldSimScene={openWorldSimScene}
+              />
+            </Suspense>
+          )}
+        />
+        <Route
+          path="/app/watchlist"
+          element={renderAppRoute(
+            <Suspense fallback={<ViewLoader />}>
+              <Watchlist
+                user={user}
+                isGuest={false}
+                onLogin={() => handleLogin('/app')}
+                onChecklistComplete={() => markChecklist('firstWatchlist')}
+              />
+            </Suspense>
+          )}
+        />
+        <Route
+          path="/app/profile"
+          element={renderAppRoute(
+            <Suspense fallback={<ViewLoader />}>
+              <Profile user={user} isGuest={false} onLogin={() => handleLogin('/app')} />
+            </Suspense>
+          )}
+        />
+        <Route path="*" element={<Navigate to={user ? '/app' : '/'} replace />} />
+      </Routes>
+
+      {worldSimSceneOpen && (
+        <Suspense fallback={null}>
+          <WorldSimScene
+            open={worldSimSceneOpen}
+            mode={worldSimSceneMode}
+            data={worldSimPreviewDataset}
+            job={worldSimJobRef}
+            onClose={() => {
+              setWorldSimSceneOpen(false);
+              setWorldSimJobRef(null);
+            }}
+          />
+        </Suspense>
+      )}
+    </CrystalPlanProvider>
+  );
+}
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <ErrorBoundary>
+        <AppShellProvider>
+          <AppRuntimeProvider>
+            <AppRouter />
+          </AppRuntimeProvider>
+        </AppShellProvider>
+      </ErrorBoundary>
+    </BrowserRouter>
   );
 }

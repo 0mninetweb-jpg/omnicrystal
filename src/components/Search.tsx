@@ -124,20 +124,24 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
   const useFilterSheet = isPhone;
   const shouldAnimatePanels = motionMode !== 'minimal';
   const isWorldSimMode = predictActionSpec.action === 'search_oracle';
+  const canUseWorldSim = capabilities.worldSimBetaAvailable;
+  const worldSimLabel = capabilities.worldSimAvailable
+    ? WORLD_SIM_BRAND.name
+    : canUseWorldSim
+      ? WORLD_SIM_BRAND.betaName
+      : WORLD_SIM_BRAND.previewName;
   const runtimeModeLabel = isWorldSimMode
-    ? capabilities.worldSimAvailable
-      ? WORLD_SIM_BRAND.name
-      : WORLD_SIM_BRAND.previewName
+    ? worldSimLabel
     : 'Standard forecast';
-  const isSubmitBlocked = !capabilities.forecastAvailable || (isWorldSimMode && !capabilities.worldSimAvailable);
+  const isSubmitBlocked = !capabilities.forecastAvailable || (isWorldSimMode && !canUseWorldSim);
   const worldSimPreviewScene = useMemo(
     () =>
       createWorldSimSceneData({
         title: 'WorldSim: see the system behind the number',
         question: query.trim() || HERO_EXAMPLES[1],
-        mode: capabilities.worldSimAvailable ? 'live' : 'preview',
+        mode: canUseWorldSim ? 'live' : 'preview',
       }),
-    [capabilities.worldSimAvailable, query]
+    [canUseWorldSim, query]
   );
   const worldSimResultScene = useMemo(
     () =>
@@ -147,8 +151,7 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
         question: query.trim() || HERO_EXAMPLES[0],
         digest: generatedCard?.world_sim,
         mode:
-          capabilities.worldSimAvailable &&
-          (generatedCard?.world_sim_job?.status === 'completed' || Boolean(generatedCard?.world_sim?.enabled))
+          canUseWorldSim && (generatedCard?.world_sim_job?.status === 'completed' || Boolean(generatedCard?.world_sim?.enabled))
             ? 'live'
             : 'preview',
         sourceLabel:
@@ -159,7 +162,7 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
               : 'Preview dataset',
         job: generatedCard?.world_sim_job || null,
       }),
-    [capabilities.worldSimAvailable, generatedCard, query]
+    [canUseWorldSim, generatedCard, query]
   );
 
   useEffect(() => {
@@ -359,8 +362,8 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
       setError(RUNTIME_COPY.forecastPreview);
       return;
     }
-    if (requiresWorldSim && !capabilities.worldSimAvailable) {
-      setError(`${RUNTIME_COPY.worldSimPreview} For now you can keep using the standard forecast.`);
+    if (requiresWorldSim && !canUseWorldSim) {
+      setError(`${capabilities.worldSimStatusDetail} For now you can keep using the standard forecast.`);
       return;
     }
 
@@ -597,7 +600,7 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
                 <div className="mt-2 text-sm leading-6 text-slate-600">Read the reasoning, context, and the next signals worth watching.</div>
               </div>
               <div className="metric-card rounded-[24px] px-4 py-4">
-                <div className="section-kicker !text-slate-500">{worldSimResultScene.mode === 'live' ? WORLD_SIM_BRAND.name : WORLD_SIM_BRAND.previewName}</div>
+                <div className="section-kicker !text-slate-500">{worldSimResultScene.mode === 'live' ? worldSimLabel : WORLD_SIM_BRAND.previewName}</div>
                 <div className="mt-2 text-xl font-display font-semibold text-slate-950">Open only when needed</div>
                 <div className="mt-2 text-sm leading-6 text-slate-600">Use the deeper layer when actors, pressure, or chain reactions change the read.</div>
               </div>

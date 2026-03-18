@@ -7,7 +7,7 @@ param(
   [string]$InstanceName = "mirofish-runtime",
   [string]$MachineType = "e2-standard-8",
   [int]$DiskSizeGb = 150,
-  [string]$ConnectorName = "crystal-worldsim-connector",
+  [string]$ConnectorName = "crystal-wsim-vpc",
   [string]$ConnectorRange = "10.8.0.0/28",
   [string]$RuntimeTag = "mirofish-runtime",
   [int]$RuntimePort = 5001
@@ -34,6 +34,70 @@ function Get-GcloudExecutable {
   throw "gcloud non trovato. Installa Google Cloud SDK prima di eseguire questo script."
 }
 
+function Invoke-GcloudChecked {
+  param(
+    [Parameter(ValueFromRemainingArguments = $true)]
+    [string[]]$Args
+  )
+
+  $tmpPrefix = Join-Path $env:TEMP ("gcloud-provision-" + [Guid]::NewGuid().ToString("N"))
+  $stdout = "$tmpPrefix.out"
+  $stderr = "$tmpPrefix.err"
+
+  try {
+    $proc = Start-Process `
+      -FilePath $gcloud `
+      -ArgumentList $Args `
+      -NoNewWindow `
+      -RedirectStandardOutput $stdout `
+      -RedirectStandardError $stderr `
+      -Wait `
+      -PassThru
+
+    $output = @()
+    if (Test-Path $stdout) {
+      $output += Get-Content -Path $stdout
+    }
+    if (Test-Path $stderr) {
+      $output += Get-Content -Path $stderr
+    }
+
+    if ($proc.ExitCode -ne 0) {
+      throw (($output | Out-String).Trim())
+    }
+
+    return $output
+  } finally {
+    Remove-Item $stdout, $stderr -Force -ErrorAction SilentlyContinue
+  }
+}
+
+function Test-GcloudResource {
+  param(
+    [Parameter(ValueFromRemainingArguments = $true)]
+    [string[]]$Args
+  )
+
+  $tmpPrefix = Join-Path $env:TEMP ("gcloud-provision-test-" + [Guid]::NewGuid().ToString("N"))
+  $stdout = "$tmpPrefix.out"
+  $stderr = "$tmpPrefix.err"
+
+  try {
+    $proc = Start-Process `
+      -FilePath $gcloud `
+      -ArgumentList $Args `
+      -NoNewWindow `
+      -RedirectStandardOutput $stdout `
+      -RedirectStandardError $stderr `
+      -Wait `
+      -PassThru
+
+    return $proc.ExitCode -eq 0
+  } finally {
+    Remove-Item $stdout, $stderr -Force -ErrorAction SilentlyContinue
+  }
+}
+
 $gcloud = Get-GcloudExecutable
 $activeAccount = (& $gcloud auth list "--filter=status:ACTIVE" "--format=value(account)" 2>$null | Select-Object -First 1)
 if (-not $activeAccount) {
@@ -44,14 +108,9 @@ Write-Host "Imposto il progetto gcloud su $ProjectId..."
 & $gcloud config set project $ProjectId | Out-Null
 
 Write-Host "Abilito le API necessarie..."
-& $gcloud services enable compute.googleapis.com vpcaccess.googleapis.com run.googleapis.com | Out-Null
+Invoke-GcloudChecked services enable compute.googleapis.com vpcaccess.googleapis.com run.googleapis.com --project $ProjectId --quiet | Out-Null
 
-$connectorExists = $true
-try {
-  & $gcloud compute networks vpc-access connectors describe $ConnectorName --region $Region | Out-Null
-} catch {
-  $connectorExists = $false
-}
+$connectorExists = Test-GcloudResource compute networks vpc-access connectors describe $ConnectorName --region $Region --project $ProjectId
 
 if (-not $connectorExists) {
   Write-Host "Creo il Serverless VPC Access connector $ConnectorName..."
@@ -64,38 +123,29 @@ if (-not $connectorExists) {
   if (-not [string]::IsNullOrWhiteSpace($Subnetwork)) {
     $connectorArgs += @("--subnet", $Subnetwork)
   }
-  & $gcloud @connectorArgs | Out-Null
+  Invoke-GcloudChecked @connectorArgs | Out-Null
 } else {
   Write-Host "VPC connector $ConnectorName gia presente."
 }
 
 $firewallRuleName = "allow-mirofish-from-$($ConnectorName.ToLower())"
-$firewallExists = $true
-try {
-  & $gcloud compute firewall-rules describe $firewallRuleName | Out-Null
-} catch {
-  $firewallExists = $false
-}
+$firewallExists = Test-GcloudResource compute firewall-rules describe $firewallRuleName --project $ProjectId
 
 if (-not $firewallExists) {
   Write-Host "Creo la firewall rule $firewallRuleName per la porta $RuntimePort..."
-  & $gcloud compute firewall-rules create $firewallRuleName `
+  Invoke-GcloudChecked compute firewall-rules create $firewallRuleName `
     --network $Network `
     --direction INGRESS `
     --action ALLOW `
     --rules "tcp:$RuntimePort" `
     --source-ranges $ConnectorRange `
-    --target-tags $RuntimeTag | Out-Null
+    --target-tags $RuntimeTag `
+    --project $ProjectId | Out-Null
 } else {
   Write-Host "Firewall rule $firewallRuleName gia presente."
 }
 
-$instanceExists = $true
-try {
-  & $gcloud compute instances describe $InstanceName --zone $Zone | Out-Null
-} catch {
-  $instanceExists = $false
-}
+$instanceExists = Test-GcloudResource compute instances describe $InstanceName --zone $Zone --project $ProjectId
 
 if (-not $instanceExists) {
   Write-Host "Creo la VM $InstanceName..."
@@ -116,13 +166,14 @@ if (-not $instanceExists) {
   } else {
     $instanceArgs += @("--network", $Network)
   }
-  & $gcloud @instanceArgs | Out-Null
+  $instanceArgs += @("--project", $ProjectId)
+  Invoke-GcloudChecked @instanceArgs | Out-Null
 } else {
   Write-Host "VM $InstanceName gia presente."
 }
 
-$internalIp = & $gcloud compute instances describe $InstanceName --zone $Zone --format "value(networkInterfaces[0].networkIP)"
-$externalIp = & $gcloud compute instances describe $InstanceName --zone $Zone --format "value(networkInterfaces[0].accessConfigs[0].natIP)"
+$internalIp = (Invoke-GcloudChecked compute instances describe $InstanceName --zone $Zone --project $ProjectId --format "value(networkInterfaces[0].networkIP)" | Select-Object -First 1).Trim()
+$externalIp = (Invoke-GcloudChecked compute instances describe $InstanceName --zone $Zone --project $ProjectId --format "value(networkInterfaces[0].accessConfigs[0].natIP)" | Select-Object -First 1).Trim()
 
 Write-Host ""
 Write-Host "Provisioning completato."

@@ -24,6 +24,14 @@ export interface WorldSimJobRef {
   statusMessage?: string;
   phase?: string;
   runtime?: string;
+  adapterMode?: string;
+  provider?: string;
+  models?: {
+    default?: string;
+    graph?: string;
+    simulation?: string;
+    report?: string;
+  };
   branchId?: string | null;
   branchParentId?: string | null;
 }

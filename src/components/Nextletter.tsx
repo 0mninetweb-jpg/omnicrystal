@@ -125,6 +125,7 @@ function getSectionIcon(topic?: string) {
 export function Nextletter({ user, isGuest, onLogin, onGenerateCard, onOpenWorldSimScene }: NextletterProps) {
   const { entitlements, runMeteredAction } = useCrystalPlan();
   const capabilities = useAppRuntime();
+  const worldSimEnabled = capabilities.worldSimBetaAvailable;
   const [activeEdition, setActiveEdition] = useState<'global' | 'personal'>('global');
   const [selectedTopics, setSelectedTopics] = useState<string[]>([]);
   const [customTopic, setCustomTopic] = useState('');
@@ -143,10 +144,10 @@ export function Nextletter({ user, isGuest, onLogin, onGenerateCard, onOpenWorld
         title: 'WorldSim inside Nextletter',
         subtitle: 'Use the same simulation chamber to read actors, pressure, and turning points inside the briefing too.',
         question: 'Which dynamic deserves a deeper read this week?',
-        mode: capabilities.worldSimAvailable ? 'live' : 'preview',
+        mode: worldSimEnabled ? 'live' : 'preview',
         sourceLabel: 'Nextletter layer',
       }),
-    [capabilities.worldSimAvailable]
+    [worldSimEnabled]
   );
 
   useEffect(() => {
@@ -331,8 +332,7 @@ export function Nextletter({ user, isGuest, onLogin, onGenerateCard, onOpenWorld
       subtitle: section.content,
       question: section.query_suggestion || `What could materially change the picture for ${section.title || section.topic || 'this section'}?`,
       mode:
-        capabilities.worldSimAvailable &&
-        (section.world_sim_job?.status === 'completed' || Boolean(section.world_sim?.narrative_arc))
+        worldSimEnabled && (section.world_sim_job?.status === 'completed' || Boolean(section.world_sim?.narrative_arc))
           ? 'live'
           : 'preview',
       sourceLabel:
@@ -436,7 +436,9 @@ export function Nextletter({ user, isGuest, onLogin, onGenerateCard, onOpenWorld
                     ? `${WORLD_SIM_BRAND.name} in progress`
                     : capabilities.worldSimAvailable
                       ? WORLD_SIM_BRAND.name
-                      : WORLD_SIM_BRAND.previewName}
+                      : worldSimEnabled
+                        ? WORLD_SIM_BRAND.betaName
+                        : WORLD_SIM_BRAND.previewName}
                 </div>
                 {section.world_sim_job && (
                   <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -712,7 +714,9 @@ export function Nextletter({ user, isGuest, onLogin, onGenerateCard, onOpenWorld
                       'Why it matters and what to do in plain language.',
                       capabilities.worldSimAvailable
                         ? `${WORLD_SIM_BRAND.name} appears when there is already a deeper layer worth reusing.`
-                        : RUNTIME_COPY.worldSimPreview,
+                        : worldSimEnabled
+                          ? capabilities.worldSimStatusDetail
+                          : RUNTIME_COPY.worldSimPreview,
                     ].map((item) => (
                       <div key={item} className="flex items-start gap-3 rounded-[22px] border border-slate-200 bg-white p-4 text-sm leading-7 text-slate-600">
                         <div className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full bg-[#1453e8]" />

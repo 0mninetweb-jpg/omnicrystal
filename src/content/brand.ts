@@ -14,6 +14,7 @@ export const PRODUCT_BRAND = {
 
 export const WORLD_SIM_BRAND = {
   name: 'WorldSim',
+  betaName: 'WorldSim Beta',
   previewName: 'WorldSim Preview',
   matrixName: 'Matrix Simulation',
   observeLabel: 'Observe',
@@ -22,9 +23,11 @@ export const WORLD_SIM_BRAND = {
   honestNote:
     'Every plan uses the same engine. Depth, queue priority, and agent budget change by tier. WorldSim enriches the forecast; it does not replace it.',
   previewNote: 'Preview mode: the observatory is designed and ready, but the live backend is not connected yet.',
+  betaNote:
+    'Beta mode: the observatory is connected and usable through the adapter while Crystal validates the original runtime path.',
   liveNote: 'Live mode: this chamber is reading the current simulation digest.',
   matrixPreviewNote:
-    'Matrix Simulation runs structured interventions and compares a baseline world with an alternate branch. Until the full runtime is connected, some runs stay in guided preview.',
+    'Matrix Simulation runs structured interventions and compares a baseline world with an alternate branch. In beta, some runs may still validate the original runtime before the chamber is fully live.',
   enterLabel: 'Open the observatory',
   teaserTitle: 'A simulation observatory for questions that need more than a single number.',
   teaserBody:
@@ -119,6 +122,7 @@ export const PLAN_COPY = {
   loginTitle: `Sign in to unlock ${PRODUCT_BRAND.name}`,
   loginDescription: 'Create a free account to save themes, use monthly credits, and activate personal surfaces.',
   checkoutError: 'Unable to open checkout.',
+  billingDisabled: 'Billing is temporarily unavailable during the current test rollout.',
   currentPlanLabel: 'Current plan',
   monthlyLabel: 'Monthly',
   yearlyLabel: 'Yearly',
@@ -132,14 +136,15 @@ export const RUNTIME_COPY = {
   forecastPreview:
     'The full live forecast needs the backend to be active. For now you can still explore the product and see how the answers are structured.',
   forecastLimited:
-    'Forecast is available in a lighter mode. The live simulation backend is still in preview, so deeper layers stay guided for now.',
+    'Forecast is available and WorldSim can run in beta while the original runtime completes live validation.',
   worldSimPreview: WORLD_SIM_BRAND.previewNote,
+  worldSimBeta: WORLD_SIM_BRAND.betaNote,
   worldSimLive: WORLD_SIM_BRAND.liveNote,
   runtimeLiveTitle: 'Live runtime',
   runtimeLiveDetail: 'Forecast and WorldSim are connected to the live backend.',
   runtimeLimitedTitle: 'Limited runtime',
   runtimeLimitedDetail:
-    'Forecast is available, but the deeper simulation backend is still in preview. You can read the product normally and open guided WorldSim layers.',
+    'Forecast is available, and WorldSim is usable in beta while the original runtime is still validating live completion.',
   runtimePreviewTitle: 'Preview runtime',
   runtimePreviewDetail:
     'The live backend is not connected yet. You can still explore the product structure and preview the premium layers.',

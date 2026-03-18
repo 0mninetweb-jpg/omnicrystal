@@ -1,6 +1,7 @@
 import React from 'react';
 import { ArrowRight, Eye, Sparkles } from 'lucide-react';
 import { WORLD_SIM_BRAND } from '../content/brand';
+import { useAppRuntime } from '../context/AppRuntimeContext';
 import type { WorldSimSceneData } from '../types/worldSim';
 import type { WorldSimJobDetail, WorldSimJobRef } from '../types/worldSimJob';
 import { cn } from './CrystalCard';
@@ -22,23 +23,39 @@ export function WorldSimInlineCard({
   compact = false,
   ctaLabel = WORLD_SIM_BRAND.enterLabel,
 }: WorldSimInlineCardProps) {
+  const capabilities = useAppRuntime();
+  const stageLabel = capabilities.worldSimAvailable ? 'Live' : capabilities.worldSimBetaAvailable ? 'Beta' : 'Preview';
+  const truthNote = capabilities.worldSimAvailable
+    ? WORLD_SIM_BRAND.liveNote
+    : capabilities.worldSimBetaAvailable
+      ? capabilities.worldSimStatusDetail
+      : data.truthNote;
+
   return (
     <section className={cn('oracle-panel overflow-hidden rounded-[36px] p-5 md:p-6', className)}>
       <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
         <div className="max-w-2xl">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="section-kicker !text-rose-200">{data.kicker}</span>
+            <span className="section-kicker !text-rose-200">
+              {capabilities.worldSimAvailable
+                ? WORLD_SIM_BRAND.name
+                : capabilities.worldSimBetaAvailable
+                  ? WORLD_SIM_BRAND.betaName
+                  : data.kicker}
+            </span>
             <span
               className={cn(
                 'rounded-full border px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em]',
                 job && job.status !== 'completed'
                   ? 'border-sky-300/30 bg-sky-300/10 text-sky-100'
-                  : data.mode === 'live'
+                  : capabilities.worldSimAvailable
                     ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-200'
+                    : capabilities.worldSimBetaAvailable
+                      ? 'border-sky-300/30 bg-sky-300/10 text-sky-100'
                     : 'border-amber-300/25 bg-amber-300/10 text-amber-100'
               )}
             >
-              {job && job.status !== 'completed' ? job.status : data.mode === 'live' ? 'Live' : 'Preview'}
+              {job && job.status !== 'completed' ? job.status : stageLabel}
             </span>
             {job && (
               <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-200">
@@ -68,7 +85,7 @@ export function WorldSimInlineCard({
         <div className="rounded-[24px] border border-white/10 bg-white/5 p-4">
           <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">Question</div>
           <p className="mt-3 text-sm leading-7 text-slate-200">{data.question}</p>
-          <p className="mt-4 text-xs leading-6 text-slate-400">{data.truthNote}</p>
+          <p className="mt-4 text-xs leading-6 text-slate-400">{truthNote}</p>
         </div>
 
         <div className="grid gap-3 md:grid-cols-2">

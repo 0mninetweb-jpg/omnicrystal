@@ -185,7 +185,9 @@ export function Layout({
                         <div className="mt-3 text-sm leading-6 text-slate-500">
                           {capabilities.worldSimAvailable
                             ? 'Premium simulation is ready for the deeper questions.'
-                            : 'WorldSim stays in preview until the live backend is connected.'}
+                            : capabilities.worldSimBetaAvailable
+                              ? capabilities.worldSimStatusDetail
+                              : 'WorldSim stays in preview until the live backend is connected.'}
                         </div>
                       </button>
                     </div>
@@ -208,7 +210,11 @@ export function Layout({
                       >
                         <div>
                           <div className="section-kicker !text-rose-500">
-                            {capabilities.worldSimAvailable ? WORLD_SIM_BRAND.name : WORLD_SIM_BRAND.previewName}
+                            {capabilities.worldSimAvailable
+                              ? WORLD_SIM_BRAND.name
+                              : capabilities.worldSimBetaAvailable
+                                ? WORLD_SIM_BRAND.betaName
+                                : WORLD_SIM_BRAND.previewName}
                           </div>
                           <div className="mt-2 text-sm font-semibold text-slate-900">{WORLD_SIM_BRAND.enterLabel}</div>
                         </div>

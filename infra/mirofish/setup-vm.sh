@@ -39,11 +39,32 @@ mkdir -p "${MIROFISH_HOME}"
 chown -R "${MIROFISH_USER}:${MIROFISH_GROUP}" "${MIROFISH_HOME}"
 
 if [[ ! -d "${MIROFISH_HOME}/.git" ]]; then
+  TEMP_ENV_PATH=""
+  if [[ -f "${MIROFISH_HOME}/.env" ]]; then
+    TEMP_ENV_PATH="$(mktemp)"
+    cp "${MIROFISH_HOME}/.env" "${TEMP_ENV_PATH}"
+    rm -f "${MIROFISH_HOME}/.env"
+  fi
+
+  if find "${MIROFISH_HOME}" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
+    echo "${MIROFISH_HOME} contains unexpected files and is not safe to clone into."
+    exit 1
+  fi
+
   runuser -u "${MIROFISH_USER}" -- git clone --branch "${MIROFISH_BRANCH}" "${MIROFISH_REPO_URL}" "${MIROFISH_HOME}"
+
+  if [[ -n "${TEMP_ENV_PATH}" ]]; then
+    mv "${TEMP_ENV_PATH}" "${MIROFISH_HOME}/.env"
+    chown "${MIROFISH_USER}:${MIROFISH_GROUP}" "${MIROFISH_HOME}/.env"
+  fi
 else
   runuser -u "${MIROFISH_USER}" -- git -C "${MIROFISH_HOME}" fetch origin
   runuser -u "${MIROFISH_USER}" -- git -C "${MIROFISH_HOME}" checkout "${MIROFISH_BRANCH}"
   runuser -u "${MIROFISH_USER}" -- git -C "${MIROFISH_HOME}" pull --ff-only origin "${MIROFISH_BRANCH}"
+fi
+
+if [[ -f "${SCRIPT_DIR}/configure-openrouter-runtime.py" ]]; then
+  "${PYTHON_BIN}" "${SCRIPT_DIR}/configure-openrouter-runtime.py" --repo-root "${MIROFISH_HOME}"
 fi
 
 "${PYTHON_BIN}" -m venv "${MIROFISH_HOME}/backend/.venv"

@@ -110,6 +110,11 @@ Main settings:
 
 - `WORLDSIM_API_KEY`: auth from Crystal to this adapter
 - `MIROFISH_BACKEND_URL`: URL of the original MiroFish Flask backend on the VM
+- `MIROFISH_PROVIDER`: runtime label reported by `/health` for the original VM, default `openrouter`
+- `MIROFISH_DEFAULT_MODEL`: fallback model for stage reporting
+- `MIROFISH_GRAPH_MODEL`: ontology / graph model label surfaced to Crystal
+- `MIROFISH_SIM_MODEL`: OASIS preparation / simulation model label surfaced to Crystal
+- `MIROFISH_REPORT_MODEL`: report model label surfaced to Crystal
 - `MIROFISH_BACKEND_API_KEY`: optional outbound header for the original backend
 - `MIROFISH_BEARER_TOKEN`: optional bearer token for the original backend
 - `MIROFISH_POLL_INTERVAL_SEC`: polling cadence for long jobs
@@ -129,6 +134,18 @@ For each async WorldSim job, the adapter:
 7. maps the result back into Crystal's `WorldSimDigest`
 
 This lets Crystal stay the product and orchestrator, while the original MiroFish runtime remains the simulation engine.
+
+## OpenRouter-first runtime note
+
+The current VM-first rollout assumes:
+
+- `LLM_BASE_URL=https://openrouter.ai/api/v1` on the original MiroFish VM
+- stage-specific models on the VM such as:
+  - `MIROFISH_GRAPH_MODEL=openai/gpt-4.1-mini`
+  - `MIROFISH_SIM_MODEL=openai/gpt-4.1-mini`
+  - `MIROFISH_REPORT_MODEL=openai/gpt-4.1`
+
+The adapter does not need the OpenRouter secret itself. It only mirrors provider and stage-model metadata so Crystal can report that Forecast stays Gemini-backed while WorldSim runs through the MiroFish/OpenRouter VM.
 
 ## Deployment helpers
 

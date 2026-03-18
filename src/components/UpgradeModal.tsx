@@ -13,6 +13,8 @@ export function UpgradeModal({
   isGuest,
   isLoading,
   checkoutError,
+  billingEnabled,
+  billingMessage,
   onClose,
   onChangeInterval,
   onCheckout,
@@ -24,6 +26,8 @@ export function UpgradeModal({
   isGuest: boolean;
   isLoading: boolean;
   checkoutError: string | null;
+  billingEnabled: boolean;
+  billingMessage: string;
   onClose: () => void;
   onChangeInterval: (interval: BillingInterval) => void;
   onCheckout: (plan: Exclude<PlanId, 'free'>, interval: BillingInterval) => Promise<void>;
@@ -181,12 +185,14 @@ export function UpgradeModal({
                     ) : (
                       <button
                         type="button"
-                        disabled={isLoading || isCurrent}
+                        disabled={isLoading || isCurrent || !billingEnabled}
                         onClick={() => onCheckout(plan, interval)}
                         className={cn(
                           'w-full rounded-2xl px-6 py-4 text-sm font-bold transition-all',
                           isCurrent
                             ? 'cursor-default border border-white/10 bg-white/5 text-slate-500'
+                            : !billingEnabled
+                              ? 'cursor-not-allowed border border-white/10 bg-white/5 text-slate-500'
                             : isRecommended
                               ? 'bg-white text-black hover:bg-slate-100'
                               : 'border border-white/10 bg-white/5 text-white hover:bg-white/10'
@@ -205,6 +211,7 @@ export function UpgradeModal({
                 <span>
                   Premium actions use credits only when the generation succeeds. Examples: standard Forecast {formatCredits(1)}, Personal Edition {formatCredits(3)}.
                 </span>
+                {!billingEnabled && <span className="font-bold text-amber-300">{billingMessage}</span>}
                 {checkoutError && <span className="font-bold text-rose-300">{checkoutError}</span>}
               </div>
             </div>

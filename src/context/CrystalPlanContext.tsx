@@ -13,6 +13,7 @@ import {
 import { createCheckoutSession } from '../services/billingService';
 import { withServerRequestContext } from '../services/geminiService';
 import { PLAN_COPY, PRODUCT_BRAND, WORLD_SIM_BRAND } from '../content/brand';
+import { useAppRuntime } from './AppRuntimeContext';
 import type {
   BillingInterval,
   CrystalFeature,
@@ -71,6 +72,7 @@ export function CrystalPlanProvider({
   isGuest: boolean;
   onLogin?: () => void;
 }) {
+  const runtime = useAppRuntime();
   const [entitlements, setEntitlements] = useState<EntitlementSnapshot>(defaultEntitlements);
   const [isEntitlementsReady, setIsEntitlementsReady] = useState(false);
   const [upgradeIntent, setUpgradeIntent] = useState<UpgradeIntent | null>(null);
@@ -121,6 +123,11 @@ export function CrystalPlanProvider({
         return;
       }
 
+      if (!runtime.billingEnabled) {
+        setCheckoutError(runtime.billingMessage || PLAN_COPY.billingDisabled);
+        return;
+      }
+
       setCheckoutError(null);
       setIsCheckingOut(true);
       try {
@@ -132,7 +139,7 @@ export function CrystalPlanProvider({
         setIsCheckingOut(false);
       }
     },
-    [checkoutInterval, closeUpgrade, onLogin, user]
+    [checkoutInterval, closeUpgrade, onLogin, runtime.billingEnabled, runtime.billingMessage, user]
   );
 
   const canUseFeature = useCallback(
@@ -254,6 +261,8 @@ export function CrystalPlanProvider({
         isGuest={isGuest}
         isLoading={isCheckingOut}
         checkoutError={checkoutError}
+        billingEnabled={runtime.billingEnabled}
+        billingMessage={runtime.billingMessage || PLAN_COPY.billingDisabled}
         onClose={closeUpgrade}
         onChangeInterval={setCheckoutInterval}
         onCheckout={startCheckout}

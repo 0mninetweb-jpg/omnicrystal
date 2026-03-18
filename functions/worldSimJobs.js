@@ -463,6 +463,17 @@ function createWorldSimJobRef(data = {}) {
     statusMessage: safeText(data.statusMessage),
     phase: safeText(data.phase, "created"),
     runtime: safeText(data.runtime, "mirofish-original"),
+    adapterMode: safeText(data.adapterMode, data.transport === "remote-adapter" ? "original-runtime" : "fallback"),
+    provider: safeText(data.provider, data.transport === "remote-adapter" ? "openrouter" : "local-fallback"),
+    models:
+      data.models && typeof data.models === "object"
+        ? {
+            default: safeText(data.models.default),
+            graph: safeText(data.models.graph),
+            simulation: safeText(data.models.simulation),
+            report: safeText(data.models.report),
+          }
+        : undefined,
     depth: safeText(data.depth, "lite"),
     queue: safeText(data.queue, "shared"),
     branchId: safeText(data.branchId) || null,
@@ -531,6 +542,28 @@ function applyWorldSimToSection(section = {}, digest) {
   return next;
 }
 
+function getConfiguredRuntimeMetadata() {
+  if (!process.env.MIROFISH_BASE_URL) {
+    return {
+      adapterMode: "fallback",
+      provider: "local-fallback",
+      models: undefined,
+    };
+  }
+
+  const defaultModel = safeText(process.env.MIROFISH_DEFAULT_MODEL, "openai/gpt-4.1-mini");
+  return {
+    adapterMode: "original-runtime",
+    provider: safeText(process.env.MIROFISH_PROVIDER, "openrouter"),
+    models: {
+      default: defaultModel,
+      graph: safeText(process.env.MIROFISH_GRAPH_MODEL, defaultModel),
+      simulation: safeText(process.env.MIROFISH_SIM_MODEL, defaultModel),
+      report: safeText(process.env.MIROFISH_REPORT_MODEL, "openai/gpt-4.1"),
+    },
+  };
+}
+
 function createJobDocument({
   jobId,
   uid,
@@ -545,6 +578,7 @@ function createJobDocument({
 }) {
   const now = new Date().toISOString();
   const planConfig = getWorldSimPlanConfig(plan);
+  const runtimeMetadata = getConfiguredRuntimeMetadata();
   return {
     version: WORLD_SIM_JOB_VERSION,
     jobId,
@@ -562,7 +596,10 @@ function createJobDocument({
     source,
     sourceRef: sourceRef || null,
     template,
-    runtime: "mirofish-original",
+    runtime: process.env.MIROFISH_BASE_URL ? "mirofish-original" : "mirofish-fallback",
+    adapterMode: runtimeMetadata.adapterMode,
+    provider: runtimeMetadata.provider,
+    models: runtimeMetadata.models,
     transport: process.env.MIROFISH_BASE_URL ? "remote-adapter" : "fallback",
     previewSummary: createPreviewSummary(template, queryText),
     queryText,
@@ -601,6 +638,7 @@ function createMatrixJobDocument({
 }) {
   const now = new Date().toISOString();
   const planConfig = getWorldSimPlanConfig(plan);
+  const runtimeMetadata = getConfiguredRuntimeMetadata();
   return {
     version: WORLD_SIM_JOB_VERSION,
     jobId,
@@ -618,7 +656,10 @@ function createMatrixJobDocument({
     source,
     sourceRef: sourceRef || null,
     template,
-    runtime: "mirofish-original",
+    runtime: process.env.MIROFISH_BASE_URL ? "mirofish-original" : "mirofish-fallback",
+    adapterMode: runtimeMetadata.adapterMode,
+    provider: runtimeMetadata.provider,
+    models: runtimeMetadata.models,
     transport: process.env.MIROFISH_BASE_URL ? "remote-adapter" : "fallback",
     previewSummary: createMatrixPreviewSummary(interventionPayload, queryText),
     queryText,
@@ -909,6 +950,17 @@ async function refreshExternalJob(context, job) {
         created?.statusMessage || created?.message,
         "Remote MiroFish runtime accepted the job."
       ),
+      adapterMode: safeText(created?.adapterMode, "original-runtime"),
+      provider: safeText(created?.provider, "openrouter"),
+      models:
+        created?.models && typeof created.models === "object"
+          ? {
+              default: safeText(created.models.default),
+              graph: safeText(created.models.graph),
+              simulation: safeText(created.models.simulation),
+              report: safeText(created.models.report),
+            }
+          : job.models || undefined,
       lastUpdatedAt: new Date().toISOString(),
     };
     await writeJobPatch(context.db, job.jobId, patch);
@@ -937,6 +989,17 @@ async function refreshExternalJob(context, job) {
         : job.progress,
     phase: safeText(statusPayload?.phase, job.phase || "running"),
     statusMessage: safeText(statusPayload?.statusMessage || statusPayload?.message, job.statusMessage),
+    adapterMode: safeText(statusPayload?.adapterMode, safeText(job.adapterMode, "original-runtime")),
+    provider: safeText(statusPayload?.provider, safeText(job.provider, "openrouter")),
+    models:
+      statusPayload?.models && typeof statusPayload.models === "object"
+        ? {
+            default: safeText(statusPayload.models.default),
+            graph: safeText(statusPayload.models.graph),
+            simulation: safeText(statusPayload.models.simulation),
+            report: safeText(statusPayload.models.report),
+          }
+        : job.models || undefined,
     lastUpdatedAt: new Date().toISOString(),
   };
 
@@ -1358,16 +1421,97 @@ async function cancelMatrixSimulationJob(context, uid, jobId) {
   return cancelWorldSimJob(context, uid, jobId);
 }
 
-function getWorldSimRuntimeHealth() {
-  return {
+function normalizeRuntimeMode(value, fallback = "preview") {
+  return ["live", "limited", "preview"].includes(value) ? value : fallback;
+}
+
+async function getWorldSimRuntimeHealth(context = {}) {
+  const baseUrl = safeText(process.env.MIROFISH_BASE_URL).replace(/\/$/, "");
+  const fallbackHealth = {
     asyncJobs: true,
-    runtime: "mirofish-original",
-    adapterConfigured: Boolean(process.env.MIROFISH_BASE_URL),
+    runtime: "mirofish-fallback",
+    mode: "preview",
+    betaAvailable: false,
+    provider: "local-fallback",
+    adapterMode: baseUrl ? "fallback" : "unconfigured",
+    adapterConfigured: Boolean(baseUrl),
+    adapterReachable: false,
     fallbackConfigured: true,
+    allowFallback: true,
     agentCount: WORLD_SIM_DEFAULT_AGENT_COUNT,
     matrixSimulation: true,
+    models: {},
     plans: WORLD_SIM_PLAN_CONFIG,
   };
+
+  if (!baseUrl) {
+    return fallbackHealth;
+  }
+
+  const fetchJson =
+    context.fetchJson ||
+    (async (url, options = {}) => {
+      const response = await fetch(url, options);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status} ${response.statusText}`);
+      }
+      return response.json();
+    });
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 3000);
+
+  try {
+    const adapterHealth = await fetchJson(`${baseUrl}/health`, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      signal: controller.signal,
+    });
+
+    const adapterMode = safeText(adapterHealth?.adapter_mode, "fallback");
+    const configured = Boolean(adapterHealth?.mirofish?.configured);
+    const reportedMode = normalizeRuntimeMode(
+      safeText(adapterHealth?.mode),
+      adapterMode === "original-runtime" && configured ? "limited" : "preview"
+    );
+    const models =
+      adapterHealth?.models && typeof adapterHealth.models === "object"
+        ? {
+            default: safeText(adapterHealth.models.default),
+            graph: safeText(adapterHealth.models.graph),
+            simulation: safeText(adapterHealth.models.simulation),
+            report: safeText(adapterHealth.models.report),
+          }
+        : {};
+
+    return {
+      ...fallbackHealth,
+      runtime: safeText(adapterHealth?.runtime, adapterMode === "original-runtime" ? "mirofish-original" : "mirofish-fallback"),
+      mode: reportedMode,
+      betaAvailable: configured && reportedMode !== "preview",
+      provider: safeText(
+        adapterHealth?.provider,
+        adapterMode === "original-runtime" ? "openrouter" : "local-fallback"
+      ),
+      adapterMode,
+      adapterReachable: true,
+      fallbackConfigured: Boolean(adapterHealth?.mirofish?.allowFallback),
+      allowFallback: Boolean(adapterHealth?.mirofish?.allowFallback),
+      models,
+      validation: adapterHealth?.validation || null,
+      activeJobThreads: Number.isFinite(Number(adapterHealth?.activeJobThreads))
+        ? Number(adapterHealth.activeJobThreads)
+        : 0,
+    };
+  } catch (error) {
+    return {
+      ...fallbackHealth,
+      adapterMode: "degraded",
+      adapterError: safeText(error?.message || String(error)),
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 module.exports = {

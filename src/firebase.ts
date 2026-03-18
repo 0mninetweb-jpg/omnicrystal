@@ -52,15 +52,15 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
 function getGoogleLoginErrorMessage(error: any) {
   switch (error?.code) {
     case 'auth/unauthorized-domain':
-      return "Errore di Autenticazione: il dominio attuale non e autorizzato in Firebase. Aggiungi questo URL ai domini autorizzati nella console di Firebase (Authentication -> Settings -> Authorized domains).";
+      return 'Authentication error: the current domain is not authorized in Firebase. Add this URL under Firebase Authentication > Settings > Authorized domains.';
     case 'auth/operation-not-allowed':
-      return "Errore di Autenticazione: il login con Google non e attivo nel progetto Firebase. Vai in Firebase Console -> Authentication -> Sign-in method -> Google, abilitalo e salva.";
+      return 'Authentication error: Google sign-in is not enabled for this Firebase project. Enable it in Firebase Console > Authentication > Sign-in method.';
     case 'auth/configuration-not-found':
-      return "Errore di Autenticazione: Firebase Authentication non e ancora configurato correttamente per questo progetto. Inizializza Authentication nella console Firebase e riprova.";
+      return 'Authentication error: Firebase Authentication is not configured correctly for this project yet. Finish the setup in the Firebase console and try again.';
     case 'auth/popup-blocked':
-      return "Il popup di login e stato bloccato dal browser. Consenti i popup per questo sito e riprova.";
+      return 'The sign-in popup was blocked by the browser. Allow popups for this site and try again.';
     default:
-      return "Errore durante il login: " + (error?.message || 'Errore sconosciuto');
+      return 'Login failed: ' + (error?.message || 'Unknown error');
   }
 }
 

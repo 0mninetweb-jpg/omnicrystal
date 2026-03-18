@@ -19,6 +19,7 @@ TERMINAL_JOB_STATUSES = {"completed", "failed", "canceled"}
 JOB_THREADS: dict[str, threading.Thread] = {}
 JOB_LOCK = threading.RLock()
 DEFAULT_RUNTIME_DIR = Path(__file__).resolve().parent / ".runtime" / "jobs"
+FALLBACK_DIGEST_NOTE = "Fallback WorldSim digest generated inside the Crystal adapter."
 
 
 class JobCanceledError(RuntimeError):
@@ -57,6 +58,10 @@ def safe_float(value: Any, fallback: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError):
         return fallback
+
+
+def error_excerpt(error: Exception | str, limit: int = 220) -> str:
+    return safe_text(str(error))[:limit]
 
 
 def clamp01(value: Any, fallback: float = 0.5) -> float:
@@ -131,6 +136,20 @@ def read_job(job_id: str) -> dict[str, Any] | None:
         return json.loads(path.read_text(encoding="utf-8"))
 
 
+def iter_jobs() -> list[dict[str, Any]]:
+    runtime_dir = ensure_runtime_dir()
+    jobs: list[dict[str, Any]] = []
+
+    with JOB_LOCK:
+        for path in runtime_dir.glob("*.json"):
+            try:
+                jobs.append(json.loads(path.read_text(encoding="utf-8")))
+            except (OSError, json.JSONDecodeError):
+                continue
+
+    return jobs
+
+
 def write_job(job: dict[str, Any]) -> dict[str, Any]:
     job_id = safe_text(job.get("jobId"))
     if not job_id:
@@ -156,7 +175,61 @@ def patch_job(job_id: str, **patch: Any) -> dict[str, Any]:
     return write_job(next_job)
 
 
+def digest_uses_fallback(digest: Any) -> bool:
+    if not isinstance(digest, dict):
+        return False
+
+    notes = digest.get("notes")
+    if not isinstance(notes, list):
+        return False
+
+    return any(FALLBACK_DIGEST_NOTE in str(note) for note in notes)
+
+
+def report_stage_failed(report_payload: Any) -> bool:
+    return not isinstance(report_payload, dict) or not bool(report_payload)
+
+
+def collect_runtime_validation() -> dict[str, Any]:
+    validation: dict[str, Any] = {
+        "originalRuntimeHealthy": False,
+        "mode": "preview",
+        "lastSuccessfulOriginalRunAt": None,
+        "lastFallbackAt": None,
+        "lastFailureAt": None,
+    }
+
+    if not adapter_is_configured():
+        return validation
+
+    validation["mode"] = "limited"
+
+    for job in iter_jobs():
+        adapter_mode = safe_text(job.get("adapterMode"))
+        status = safe_text(job.get("status"))
+        last_updated = safe_text(job.get("lastUpdatedAt") or job.get("completedAt"))
+
+        if adapter_mode == "original-runtime" and status == "completed" and not digest_uses_fallback(job.get("digest")):
+            validation["originalRuntimeHealthy"] = True
+            if not validation["lastSuccessfulOriginalRunAt"] or last_updated > validation["lastSuccessfulOriginalRunAt"]:
+                validation["lastSuccessfulOriginalRunAt"] = last_updated
+
+        if status == "completed" and digest_uses_fallback(job.get("digest")):
+            if not validation["lastFallbackAt"] or last_updated > validation["lastFallbackAt"]:
+                validation["lastFallbackAt"] = last_updated
+
+        if status == "failed":
+            if not validation["lastFailureAt"] or last_updated > validation["lastFailureAt"]:
+                validation["lastFailureAt"] = last_updated
+
+    if validation["originalRuntimeHealthy"]:
+        validation["mode"] = "live"
+
+    return validation
+
+
 def job_public_view(job: dict[str, Any]) -> dict[str, Any]:
+    metadata = runtime_metadata(safe_text(job.get("adapterMode"), "fallback"))
     return {
         "jobId": safe_text(job.get("jobId")),
         "kind": safe_text(job.get("jobType"), "observe"),
@@ -169,8 +242,10 @@ def job_public_view(job: dict[str, Any]) -> dict[str, Any]:
         "source": safe_text(job.get("source"), "manual"),
         "sourceRef": safe_text(job.get("sourceRef")),
         "template": safe_text(job.get("template"), "public-discourse"),
-        "runtime": safe_text(job.get("runtime"), "mirofish-original"),
-        "adapterMode": safe_text(job.get("adapterMode"), "fallback"),
+        "runtime": safe_text(job.get("runtime"), safe_text(metadata.get("runtime"), "mirofish-original")),
+        "adapterMode": safe_text(job.get("adapterMode"), safe_text(metadata.get("adapterMode"), "fallback")),
+        "provider": safe_text(job.get("provider"), safe_text(metadata.get("provider"), "local-fallback")),
+        "models": job.get("models") or metadata.get("models") or {},
         "agentCount": safe_int(job.get("agentCount"), 120),
         "depth": safe_text(job.get("depth"), "lite"),
         "queue": safe_text(job.get("queue"), "shared"),
@@ -220,6 +295,40 @@ def outbound_headers() -> dict[str, str]:
         headers["Authorization"] = f"Bearer {bearer}"
 
     return headers
+
+
+def default_stage_models() -> dict[str, str]:
+    default_model = safe_text(os.environ.get("MIROFISH_DEFAULT_MODEL"), "openai/gpt-4.1-mini")
+    return {
+        "default": default_model,
+        "graph": safe_text(os.environ.get("MIROFISH_GRAPH_MODEL"), default_model),
+        "simulation": safe_text(os.environ.get("MIROFISH_SIM_MODEL"), default_model),
+        "report": safe_text(os.environ.get("MIROFISH_REPORT_MODEL"), "openai/gpt-4.1"),
+    }
+
+
+def runtime_provider(adapter_mode: str | None = None) -> str:
+    mode = adapter_mode or ("original-runtime" if adapter_is_configured() else "fallback")
+    if mode != "original-runtime":
+        return "local-fallback"
+    return safe_text(os.environ.get("MIROFISH_PROVIDER"), "openrouter").lower()
+
+
+def runtime_stage_models(adapter_mode: str | None = None) -> dict[str, str]:
+    mode = adapter_mode or ("original-runtime" if adapter_is_configured() else "fallback")
+    if mode != "original-runtime":
+        return {}
+    return default_stage_models()
+
+
+def runtime_metadata(adapter_mode: str | None = None) -> dict[str, Any]:
+    mode = adapter_mode or ("original-runtime" if adapter_is_configured() else "fallback")
+    return {
+        "runtime": "mirofish-original" if mode == "original-runtime" else "mirofish-fallback",
+        "adapterMode": mode,
+        "provider": runtime_provider(mode),
+        "models": runtime_stage_models(mode),
+    }
 
 
 def mirofish_request(
@@ -388,7 +497,7 @@ def run_simulation(query: str, query_plan: dict[str, Any], graph_pack: dict[str,
         "cache_status": "computed",
         "generated_at": utc_now_iso(),
         "notes": [
-            "Fallback WorldSim digest generated inside the Crystal adapter.",
+            FALLBACK_DIGEST_NOTE,
         ],
     }
 
@@ -570,6 +679,7 @@ def build_job(job_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     template = safe_text(payload.get("template"), "public-discourse")
     job_type = safe_text(payload.get("jobType"), "observe")
     adapter_mode = "original-runtime" if adapter_is_configured() else "fallback"
+    metadata = runtime_metadata(adapter_mode)
 
     return {
         "jobId": job_id,
@@ -589,9 +699,11 @@ def build_job(job_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         "source": safe_text(payload.get("source"), "manual"),
         "sourceRef": safe_text(payload.get("sourceRef")),
         "template": template,
-        "runtime": safe_text(payload.get("runtime"), "mirofish-original"),
+        "runtime": safe_text(payload.get("runtime"), safe_text(metadata.get("runtime"), "mirofish-original")),
         "mode": safe_text(payload.get("mode"), "async"),
         "adapterMode": adapter_mode,
+        "provider": safe_text(payload.get("provider"), safe_text(metadata.get("provider"), "local-fallback")),
+        "models": payload.get("models") or metadata.get("models") or {},
         "agentCount": safe_int(payload.get("agentCount"), 120),
         "depth": safe_text(payload.get("depth"), "lite"),
         "queue": safe_text(payload.get("queue"), "shared"),
@@ -1082,6 +1194,7 @@ def build_digest_from_original_runtime(
     report_summary = extract_report_summary(report_payload) or base_digest.get("narrative_arc", "")
     sections = extract_section_snippets(report_payload)
     pivotal_actors = derive_pivotal_actors(detail_payload, graph_pack)
+    report_missing = report_stage_failed(report_payload)
 
     base_digest.update(
         {
@@ -1102,6 +1215,11 @@ def build_digest_from_original_runtime(
                 f"Original MiroFish runtime completed with {safe_int(job.get('agentCount'), 120)} target agents.",
                 f"Template: {safe_text(job.get('template'))}. Depth: {safe_text(job.get('depth'))}. Queue: {safe_text(job.get('queue'))}.",
                 f"Project: {safe_text(job.get('projectId'))}, graph: {safe_text(job.get('graphId'))}, simulation: {safe_text(job.get('simulationId'))}.",
+                *(
+                    ["The final report stage degraded, so Crystal synthesized the final summary locally from the completed runtime output."]
+                    if report_missing
+                    else []
+                ),
             ],
             "mirofish": {
                 "project_id": safe_text(job.get("projectId")),
@@ -1111,6 +1229,8 @@ def build_digest_from_original_runtime(
                 "run_status": safe_text(run_payload.get("runner_status")),
                 "actions_count": safe_int(run_payload.get("total_actions_count")),
                 "adapter_mode": safe_text(job.get("adapterMode"), "original-runtime"),
+                "provider": safe_text(job.get("provider"), runtime_provider("original-runtime")),
+                "models": job.get("models") or runtime_stage_models("original-runtime"),
             },
         }
     )
@@ -1118,7 +1238,7 @@ def build_digest_from_original_runtime(
     report = {
         "title": safe_text((report_payload.get("outline") or {}).get("title"), f"WorldSim report: {query[:80]}"),
         "summary": report_summary or f"Original MiroFish runtime completed for {query[:80]}",
-        "reportId": safe_text(report_payload.get("report_id")),
+        "reportId": safe_text(report_payload.get("report_id")) or None,
     }
     return base_digest, report
 
@@ -1252,22 +1372,42 @@ def run_original_mirofish_job(job: dict[str, Any]) -> None:
 
     run_payload, detail_payload = wait_for_run(job_id, simulation_id)
 
-    report_payload = mirofish_request(
-        "POST",
-        "/api/report/generate",
-        json_body={
-            "simulation_id": simulation_id,
-            "force_regenerate": False,
-        },
-        timeout_sec=max(180, safe_int(os.environ.get("MIROFISH_HTTP_TIMEOUT_SEC"), 180)),
-    )
-    report_task_id = safe_text(report_payload.get("task_id"))
-    report_id = safe_text(report_payload.get("report_id"))
-    patch_job(job_id, reportTaskId=report_task_id or None, reportId=report_id or None)
-    report_by_simulation = wait_for_report(job_id, simulation_id, report_task_id or None)
-    if not report_id:
-        report_id = safe_text(report_by_simulation.get("report_id"))
-        patch_job(job_id, reportId=report_id or None)
+    report_payload: dict[str, Any] = {}
+    report_by_simulation: dict[str, Any] = {}
+    report_task_id = ""
+    report_id = ""
+    report_error = ""
+
+    try:
+        report_payload = mirofish_request(
+            "POST",
+            "/api/report/generate",
+            json_body={
+                "simulation_id": simulation_id,
+                "force_regenerate": False,
+            },
+            timeout_sec=max(180, safe_int(os.environ.get("MIROFISH_HTTP_TIMEOUT_SEC"), 180)),
+        )
+        report_task_id = safe_text(report_payload.get("task_id"))
+        report_id = safe_text(report_payload.get("report_id"))
+        patch_job(job_id, reportTaskId=report_task_id or None, reportId=report_id or None)
+        report_by_simulation = wait_for_report(job_id, simulation_id, report_task_id or None)
+        if not report_id:
+            report_id = safe_text(report_by_simulation.get("report_id"))
+            patch_job(job_id, reportId=report_id or None)
+    except Exception as error:
+        report_error = error_excerpt(error)
+        patch_job(
+            job_id,
+            phase="report_generate",
+            statusMessage=(
+                "The original runtime completed the world simulation, but the final report stage degraded. "
+                "Crystal is synthesizing the closing summary locally."
+            ),
+            reportError=report_error,
+        )
+        report_payload = {}
+        report_by_simulation = {}
 
     digest, report = build_digest_from_original_runtime(
         job=read_job(job_id) or job,
@@ -1276,6 +1416,11 @@ def run_original_mirofish_job(job: dict[str, Any]) -> None:
         detail_payload=detail_payload,
         report_payload=report_by_simulation,
     )
+    if report_error:
+        digest["notes"] = [*digest.get("notes", []), f"Original runtime report fallback reason: {report_error}"]
+        report["summary"] = (
+            f"{report.get('summary', '')} Final report text was synthesized locally because the original report stage was unavailable."
+        ).strip()
     if safe_text((read_job(job_id) or job).get("jobType")) == "matrix_intervention":
         matrix = build_matrix_result(read_job(job_id) or job, digest)
         finish_job(job_id, digest=matrix.get("interventionDigest") or digest, report=report, matrix=matrix)
@@ -1287,6 +1432,13 @@ def run_original_mirofish_job(job: dict[str, Any]) -> None:
 def health() -> Any:
     with JOB_LOCK:
         active_threads = sum(1 for thread in JOB_THREADS.values() if thread.is_alive())
+    metadata = runtime_metadata()
+    validation = collect_runtime_validation()
+    adapter_mode = safe_text(metadata.get("adapterMode"), "fallback")
+    if adapter_mode == "original-runtime":
+        mode = safe_text(validation.get("mode"), "limited")
+    else:
+        mode = "preview"
 
     return (
         jsonify(
@@ -1295,11 +1447,19 @@ def health() -> Any:
                 "service": "crystal-world-sim-adapter",
                 "timestamp": utc_now_iso(),
                 "async_jobs": True,
-                "adapter_mode": "original-runtime" if adapter_is_configured() else "fallback",
+                "mode": mode,
+                "adapter_mode": adapter_mode,
+                "runtime": safe_text(metadata.get("runtime"), "mirofish-fallback"),
+                "provider": safe_text(metadata.get("provider"), "local-fallback"),
+                "models": metadata.get("models") or {},
+                "validation": validation,
                 "mirofish": {
                     "configured": adapter_is_configured(),
                     "allowFallback": adapter_allows_fallback(),
                     "pollIntervalSec": poll_interval_sec(),
+                    "provider": safe_text(metadata.get("provider"), "local-fallback"),
+                    "models": metadata.get("models") or {},
+                    "validatedOriginalRuntime": bool(validation.get("originalRuntimeHealthy")),
                 },
                 "activeJobThreads": active_threads,
             }

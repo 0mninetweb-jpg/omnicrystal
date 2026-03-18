@@ -55,3 +55,12 @@ Current blocker from this machine:
 
 - the project is on `Blaze`, but `gcloud` still needs an authenticated account before VM / Cloud Run deploy
 - the real runtime secrets (`LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL_NAME`, `ZEP_API_KEY`) still need to be filled before the original MiroFish VM can go fully live
+
+## Hybrid runtime direction
+
+Crystal currently keeps a hybrid backend plan:
+
+- `Forecast` stays Gemini-backed inside Firebase Functions for Google-grounded flows
+- `WorldSim` and `Matrix Simulation` are prepared to run through the original MiroFish VM with `OpenRouter` as the OpenAI-compatible provider
+
+The VM deploy kit under [infra/mirofish](C:/Users/Fiorenza/OneDrive/Desktop/Codex/crystal-review-0316/infra/mirofish/README.md) now includes OpenRouter-first defaults and stage-specific model wiring for graph, simulation, and report phases.

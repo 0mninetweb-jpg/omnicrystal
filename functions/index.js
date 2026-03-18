@@ -1,10 +1,11 @@
 const crypto = require("node:crypto");
 const admin = require("firebase-admin");
-const { GoogleGenAI, Type } = require("@google/genai");
+const { GoogleGenAI } = require("@google/genai");
 const { onRequest } = require("firebase-functions/v2/https");
 const { defineSecret } = require("firebase-functions/params");
 const googleTrends = require("google-trends-api");
 const Stripe = require("stripe");
+const { createLlmRuntime } = require("./llmRuntime");
 const {
   createManualWorldSimJob,
   createMatrixSimulationJob,
@@ -74,6 +75,9 @@ if (!admin.apps.length) {
 }
 
 const db = admin.firestore();
+const llmRuntime = createLlmRuntime({
+  getGeminiApiKey: () => GEMINI_API_KEY.value(),
+});
 
 const PLAN_OFFERS = {
   free: { creditsPerCycle: 15, watchlistLimit: 5 },
@@ -89,7 +93,37 @@ const STRIPE_PRICING = {
 const DEFAULT_PROFILE_AI_FREE_MESSAGES = 10;
 const PLAN_ORDER = ["free", "plus", "pro"];
 
+function isBillingTestMode() {
+  return ["1", "true", "yes", "on"].includes(String(process.env.BILLING_TEST_MODE || "").trim().toLowerCase());
+}
+
+function getBillingRuntimeHealth() {
+  const disabled = isBillingTestMode();
+  return {
+    enabled: !disabled,
+    mode: disabled ? "disabled" : "live",
+    provider: "stripe",
+    message: disabled
+      ? "Billing is temporarily unavailable during the current test rollout."
+      : "Billing is active.",
+  };
+}
+
+function createBillingDisabledError() {
+  return createApiError(
+    "billing-disabled",
+    "Billing is temporarily unavailable during the current test rollout.",
+    503,
+    {
+      billingTestMode: true,
+    }
+  );
+}
+
 function getStripe() {
+  if (isBillingTestMode()) {
+    throw createBillingDisabledError();
+  }
   const apiKey = STRIPE_SECRET_KEY.value();
   if (!apiKey) {
     throw new Error("STRIPE_SECRET_KEY non configurata per Firebase Functions.");
@@ -638,6 +672,72 @@ function normalizeQuotePayload(payload) {
   };
 }
 
+function normalizeQueryPlanPayload(payload = {}) {
+  const domainId = safeText(payload?.domain_id || payload?.domain, SUPPORTED_DOMAINS[0]);
+  const normalizedDomain = SUPPORTED_DOMAINS.includes(domainId) ? domainId : SUPPORTED_DOMAINS[0];
+  const horizons = Array.isArray(payload?.horizons) && payload.horizons.length > 0 ? payload.horizons : [{ horizon_id: "30d" }];
+  const cardTypes =
+    Array.isArray(payload?.card_types) && payload.card_types.length > 0
+      ? payload.card_types
+      : [{ card_type_id: "prediction_summary" }];
+
+  return {
+    plan_version: safeText(payload?.plan_version, "crystal-b2c-v1"),
+    domain_id: normalizedDomain,
+    mode: {
+      type: payload?.mode?.type === "predict_action" ? "predict_action" : "predict_only",
+    },
+    entities: Array.isArray(payload?.entities)
+      ? payload.entities.map((entity, index) => ({
+          entity_id: safeText(entity?.entity_id, `entity_${index + 1}`),
+          entity_type: safeText(entity?.entity_type, "entity"),
+          label: safeText(entity?.label, safeText(entity?.entity_id, `Entity ${index + 1}`)),
+        }))
+      : [],
+    horizons: horizons.map((item, index) => ({
+      horizon_id: safeText(item?.horizon_id, index === 0 ? "30d" : `horizon_${index + 1}`),
+    })),
+    card_types: cardTypes.map((item, index) => ({
+      card_type_id: safeText(item?.card_type_id, index === 0 ? "prediction_summary" : `card_type_${index + 1}`),
+    })),
+  };
+}
+
+function normalizeNextletterPayload(payload = {}) {
+  return {
+    title: safeText(payload?.title, "Crystal Times"),
+    subtitle: safeText(payload?.subtitle, "A predictive briefing shaped around your current themes."),
+    sections: Array.isArray(payload?.sections)
+      ? payload.sections.map((section, index) => ({
+          topic: safeText(section?.topic, `Topic ${index + 1}`),
+          icon: safeText(section?.icon, "sparkles"),
+          title: safeText(section?.title, `Section ${index + 1}`),
+          content: safeText(section?.content, "No briefing content available."),
+          historical_context: safeText(section?.historical_context, "Historical context is limited for this section."),
+          probability: Number.isFinite(Number(section?.probability)) ? Number(section.probability) : 50,
+          horizon: safeText(section?.horizon, "30d"),
+          impact: safeText(section?.impact, "Medium"),
+          so_what: safeText(section?.so_what, "Keep monitoring the next signals."),
+          query_suggestion: safeText(section?.query_suggestion, safeText(section?.title, `Section ${index + 1}`)),
+        }))
+      : [],
+  };
+}
+
+function getForecastRuntimeHealth() {
+  const metadata = llmRuntime.getRuntimeMetadata();
+  return {
+    available: metadata.configured,
+    mode: metadata.configured ? "live" : "preview",
+    provider: metadata.provider,
+    model: metadata.model,
+    models: metadata.models,
+    structuredOutputs: metadata.structuredOutputs,
+    grounding: ["historical-cache", "google-trends", "timegpt", "polymarket"],
+    rollbackProvider: "gemini",
+  };
+}
+
 function getGemini() {
   const apiKey = GEMINI_API_KEY.value();
   if (!apiKey) {
@@ -721,7 +821,7 @@ async function saveCachedCard(card, queryText, queryPlan, domain, city, engine =
   );
 }
 
-async function get20YearHistoricalContext(domain, city, ai) {
+async function get20YearHistoricalContext(domain, city) {
   const docId = sanitizeSegment(`${domain}_${city || "global"}`, "global");
   const docRef = db.collection("historical_20y_summaries").doc(docId);
   const snapshot = await docRef.get();
@@ -739,12 +839,12 @@ Includi:
 4. Benchmark storici rilevanti.
 Sii conciso, usa elenchi puntati, massimo 250 parole.`;
 
-  const response = await ai.models.generateContent({
-    model: "gemini-3.1-pro-preview",
-    contents: prompt,
+  const summary = await llmRuntime.generateText({
+    modelKind: "copy",
+    systemInstruction:
+      "Sei un research analyst di Crystal. Rispondi in italiano con un riassunto storico fattuale, conciso e leggibile.",
+    prompt,
   });
-
-  const summary = response.text || "Nessun dato storico disponibile.";
   await docRef.set({
     domain,
     city: city || "global",
@@ -836,77 +936,32 @@ async function fetchTimeGptForecast(domain, city, fh) {
 }
 
 async function compileQuery(queryText) {
-  const ai = getGemini();
-  return withRetry(async () => {
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: `Convert the following user query into a Crystal B2C QueryPlan JSON object.
+  const payload = await withRetry(() =>
+    llmRuntime.generateJson({
+      modelKind: "query",
+      temperature: 0,
+      systemInstruction:
+        "You convert a user question into a Crystal B2C QueryPlan JSON object. Return JSON only. Choose domain_id only from the supported list. Keep entities concise and horizons realistic.",
+      prompt: `Convert the following user query into a Crystal B2C QueryPlan JSON object.
 
 Query: "${queryText}"
 
 Extract the intent, domain, entities, horizons, and required card types based on the Crystal B2C Blueprint.
 
 CRITICAL: The domain_id MUST be chosen from the following list of supported domains:
-${SUPPORTED_DOMAINS.join(", ")}`,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            plan_version: { type: Type.STRING },
-            domain_id: { type: Type.STRING },
-            mode: {
-              type: Type.OBJECT,
-              properties: {
-                type: { type: Type.STRING, enum: ["predict_only", "predict_action"] },
-              },
-            },
-            entities: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  entity_id: { type: Type.STRING },
-                  entity_type: { type: Type.STRING },
-                  label: { type: Type.STRING },
-                },
-              },
-            },
-            horizons: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  horizon_id: { type: Type.STRING },
-                },
-              },
-            },
-            card_types: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  card_type_id: {
-                    type: Type.STRING,
-                    enum: [
-                      "prediction_summary",
-                      "scenario_set",
-                      "ranked_list",
-                      "tradeoff_plan",
-                      "drivers_breakdown",
-                      "risk_band",
-                    ],
-                  },
-                },
-              },
-            },
-          },
-          required: ["plan_version", "domain_id", "mode", "entities", "horizons", "card_types"],
-        },
-      },
-    });
-    return JSON.parse(response.text || "{}");
-  });
+${SUPPORTED_DOMAINS.join(", ")}
+
+Return an object with:
+- plan_version
+- domain_id
+- mode.type ("predict_only" or "predict_action")
+- entities[]
+- horizons[]
+- card_types[]`,
+    })
+  );
+
+  return normalizeQueryPlanPayload(payload);
 }
 
 async function predict(queryText, queryPlan, userContext, options = {}) {
@@ -944,7 +999,6 @@ async function predict(queryText, queryPlan, userContext, options = {}) {
     }
   }
 
-  const ai = getGemini();
   let contextString = "";
   if (userContext) {
     contextString = `
@@ -957,7 +1011,7 @@ CONTESTO UTENTE:
 
   let historicalContext = "";
   if (domain) {
-    const summary = await get20YearHistoricalContext(domain, city, ai);
+    const summary = await get20YearHistoricalContext(domain, city);
     if (summary) {
       historicalContext = `
 BASELINE STORICA 20 ANNI:
@@ -990,10 +1044,17 @@ Usa questi numeri come base quantitativa della previsione.
     }
   }
 
-  const response = await withRetry(async () =>
-    ai.models.generateContent({
-      model: "gemini-3.1-pro-preview",
-      contents: `Sei il motore predittivo di Crystal B2C.
+  const payload = await withRetry(() =>
+    llmRuntime.generateJson({
+      modelKind: "forecast",
+      temperature: 0.2,
+      systemInstruction: `Sei il motore predittivo di Crystal B2C.
+Restituisci solo JSON valido.
+Non inventare dati o fonti.
+Usa il contesto fornito dal sistema come grounding primario.
+Se il contesto e parziale, abbassa la confidence e dichiaralo nel trust layer.
+Scrivi campi testuali chiari, sintetici e leggibili.`,
+      prompt: `Sei il motore predittivo di Crystal B2C.
 L'utente ha chiesto: "${queryText}"
 Il Query Plan generato dal sistema e: ${JSON.stringify(queryPlan)}
 ${contextString}
@@ -1003,109 +1064,32 @@ ${timeGptContext}
 Il tuo compito e generare un oggetto JSON CrystalCard finale.
 
 REGOLE FONDAMENTALI:
-1. Prima di ogni analisi usa Google Search per verificare i fatti che cambiano rapidamente.
-2. Non inventare dati. Se i dati non bastano, segnalalo nel trust layer.
-3. Usa il contesto storico solo per calibrare pattern, mai per sovrascrivere i fatti di oggi.
+1. Non inventare dati. Se i dati non bastano, segnalalo nel trust layer.
+2. Usa il contesto storico solo per calibrare pattern, mai per sovrascrivere i fatti di oggi.
+3. Se sono presenti dati quantitativi, usali per calibrare scenario_set e trust_layer.
 4. Fornisci un verdetto diretto e azioni pratiche.
-5. Mantieni il testo leggibile e ben formattato.`,
-      config: {
-        tools: [{ googleSearch: {} }],
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            card_id: { type: Type.STRING },
-            card_type: { type: Type.STRING },
-            domain: { type: Type.STRING },
-            stakes_level: { type: Type.STRING, enum: ["low", "medium", "high", "imminent"] },
-            risk_band: { type: Type.STRING, enum: ["low", "medium", "high", "extreme"] },
-            title: { type: Type.STRING },
-            summary: { type: Type.STRING },
-            verdict: { type: Type.STRING },
-            personal_output: { type: Type.STRING },
-            scenario_set: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  scenario_id: { type: Type.STRING },
-                  label: { type: Type.STRING },
-                  probability: { type: Type.NUMBER },
-                },
-                required: ["scenario_id", "label", "probability"],
-              },
-            },
-            so_what: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  option_id: { type: Type.STRING },
-                  label: { type: Type.STRING },
-                  tradeoff_note: { type: Type.STRING },
-                },
-                required: ["option_id", "label", "tradeoff_note"],
-              },
-            },
-            ranked_list: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  item_id: { type: Type.STRING },
-                  label: { type: Type.STRING },
-                  score: { type: Type.NUMBER },
-                  rank: { type: Type.INTEGER },
-                  note: { type: Type.STRING },
-                },
-                required: ["item_id", "label", "score", "rank"],
-              },
-            },
-            drivers: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  feature_key: { type: Type.STRING },
-                  direction: { type: Type.STRING, enum: ["up", "down", "flat"] },
-                  contribution: { type: Type.NUMBER },
-                },
-                required: ["feature_key", "direction", "contribution"],
-              },
-            },
-            trust_layer: {
-              type: Type.OBJECT,
-              properties: {
-                confidence_score: { type: Type.NUMBER },
-                confidence_tier: { type: Type.STRING, enum: ["low", "medium", "high"] },
-                data_sufficiency_flag: { type: Type.STRING, enum: ["insufficient", "partial", "sufficient"] },
-                freshness: {
-                  type: Type.OBJECT,
-                  properties: {
-                    staleness_bucket: { type: Type.STRING, enum: ["fresh", "stale", "unknown"] },
-                    as_of_utc: { type: Type.STRING },
-                  },
-                },
-                provenance_summary: {
-                  type: Type.OBJECT,
-                  properties: {
-                    verification_level: { type: Type.STRING, enum: ["unverified", "partially_verified", "verified", "official"] },
-                    license_summary: {
-                      type: Type.ARRAY,
-                      items: { type: Type.STRING },
-                    },
-                  },
-                },
-              },
-            },
-          },
-          required: ["card_id", "card_type", "domain", "stakes_level", "title", "summary", "trust_layer"],
-        },
-      },
+5. Mantieni il testo leggibile e ben formattato.
+
+Restituisci un oggetto con almeno questi campi:
+- card_id
+- card_type
+- domain
+- stakes_level
+- risk_band
+- title
+- summary
+- verdict
+- personal_output
+- scenario_set
+- so_what
+- ranked_list
+- drivers
+- trust_layer
+- prediction_market_frame`,
     })
   );
 
-  const baseCard = normalizeCard(JSON.parse(response.text || "{}"), queryPlan);
+  const baseCard = normalizeCard(payload, queryPlan);
   if (domain) {
     await saveCachedCard(baseCard, queryText, queryPlan, domain, city, engine);
   }
@@ -1130,34 +1114,28 @@ REGOLE FONDAMENTALI:
 }
 
 async function chatWithProfileBot(messages) {
-  const ai = getGemini();
-  const formattedMessages = Array.isArray(messages)
-    ? messages.map((message) => ({
-        role: message.role === "user" ? "user" : "model",
-        parts: [{ text: message.content || "" }],
-      }))
-    : [];
-
-  return withRetry(async () => {
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: formattedMessages,
-      config: {
-        systemInstruction: `Sei un assistente AI di Crystal.
+  return withRetry(() =>
+    llmRuntime.generateText({
+      modelKind: "chat",
+      temperature: 0.4,
+      messages: Array.isArray(messages)
+        ? messages.map((message) => ({
+            role: message?.role === "user" ? "user" : "assistant",
+            content: message?.content || "",
+          }))
+        : [],
+      systemInstruction: `Sei un assistente AI di Crystal.
 Il tuo obiettivo e raccogliere con naturalezza tre informazioni:
 1. Posizione geografica
 2. Professione o settore
 3. Interessi o asset
 
 Fai una domanda alla volta. Quando hai tutto, restituisci anche un riepilogo JSON in un blocco markdown.`,
-      },
-    });
-    return response.text || "";
-  });
+    })
+  );
 }
 
 async function generateNextletter(interests, userContext, options = {}) {
-  const ai = getGemini();
   const topics = Array.isArray(interests) ? interests.filter(Boolean) : [];
   let contextString = "";
   if (userContext) {
@@ -1174,7 +1152,7 @@ Sei "The Crystal Times", il quotidiano d'inchiesta predittiva piu autorevole del
 Scrivi una Nextletter per un utente del presente.
 
 REGOLE:
-1. Usa dati reali attuali con Google Search.
+1. Usa il contesto disponibile del sistema e resta conservativo se la copertura e parziale.
 2. Cita un parallelo storico.
 3. Chiudi ogni sezione con un'azione concreta.
 
@@ -1201,17 +1179,17 @@ OUTPUT JSON:
   ]
 }`;
 
-  const response = await withRetry(async () =>
-    ai.models.generateContent({
-      model: "gemini-3.1-pro-preview",
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        tools: [{ googleSearch: {} }],
-      },
-    })
+  const baseLetter = normalizeNextletterPayload(
+    await withRetry(() =>
+      llmRuntime.generateJson({
+        modelKind: "copy",
+        temperature: 0.3,
+        systemInstruction:
+          'Sei "The Crystal Times", un briefing layer predittivo. Restituisci solo JSON valido e mantieni il tono chiaro, concreto e leggibile.',
+        prompt,
+      })
+    )
   );
-  const baseLetter = JSON.parse(response.text || "{}");
   return attachPolymarketToNextletter({
     db,
     admin,
@@ -1229,10 +1207,9 @@ async function generateCrystalQuotes() {
     return snapshot.data();
   }
 
-  const ai = getGemini();
   const prompt = `
 Genera 5 Crystal Quotes per la settimana corrente.
-Basati solo su trend reali e attuali usando Google Search.
+Basati sul contesto disponibile del sistema e resta conservativo se la copertura e parziale.
 
 OUTPUT JSON:
 {
@@ -1254,18 +1231,17 @@ OUTPUT JSON:
   ]
 }`;
 
-  const response = await withRetry(async () =>
-    ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        tools: [{ googleSearch: {} }],
-      },
-    })
+  const payload = normalizeQuotePayload(
+    await withRetry(() =>
+      llmRuntime.generateJson({
+        modelKind: "copy",
+        temperature: 0.35,
+        systemInstruction:
+          "You generate Crystal Quotes in valid JSON only. Keep them sharp, plausible, and anchored to current signal patterns without inventing certainty.",
+        prompt,
+      })
+    )
   );
-
-  const payload = normalizeQuotePayload(JSON.parse(response.text || "{}"));
   await cacheRef.set(
     {
       ...payload,
@@ -1277,26 +1253,24 @@ OUTPUT JSON:
 }
 
 async function getLocalInsights(queryText, entities) {
-  const ai = getGemini();
   const locationEntity = Array.isArray(entities)
     ? entities.find((entity) => ["city", "location", "country"].includes(entity?.entity_type))
     : null;
   const locationContext = locationEntity ? `nella zona di ${locationEntity.label}` : "";
 
-  const response = await withRetry(async () =>
-    ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: `Fornisci un breve approfondimento locale relativo a questa query: "${queryText}" ${locationContext}. Menziona luoghi o attivita se rilevanti. Massimo 3-4 frasi.`,
-      config: {
-        tools: [{ googleMaps: {} }],
-      },
+  const text = await withRetry(() =>
+    llmRuntime.generateText({
+      modelKind: "chat",
+      temperature: 0.35,
+      systemInstruction:
+        "Sei un assistente locale di Crystal. Rispondi in italiano con un breve approfondimento locale, prudente e concreto, senza inventare dettagli.",
+      prompt: `Fornisci un breve approfondimento locale relativo a questa query: "${queryText}" ${locationContext}. Menziona luoghi o attivita solo se sono coerenti con il contesto disponibile. Massimo 3-4 frasi.`,
     })
   );
 
-  const chunks = response?.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
   return {
-    text: response.text || "",
-    chunks,
+    text,
+    chunks: [],
   };
 }
 
@@ -1321,6 +1295,15 @@ exports.api = onRequest(
 
     try {
       if (req.method === "POST" && route === "/billing/stripe-webhook") {
+        if (isBillingTestMode()) {
+          respondJson(res, 200, {
+            received: false,
+            disabled: true,
+            message: "Billing is temporarily unavailable during the current test rollout.",
+          });
+          return;
+        }
+
         const stripe = getStripe();
         const signature = req.headers["stripe-signature"];
         const webhookSecret = STRIPE_WEBHOOK_SECRET.value();
@@ -1385,11 +1368,15 @@ exports.api = onRequest(
       }
 
       if (req.method === "GET" && route === "/health") {
+        const forecastHealth = getForecastRuntimeHealth();
+        const worldSimHealth = await getWorldSimRuntimeHealth({ fetchJson });
         respondJson(res, 200, {
           ok: true,
           timestamp: new Date().toISOString(),
-          worldSim: getWorldSimRuntimeHealth(),
+          forecast: forecastHealth,
+          worldSim: worldSimHealth,
           polymarket: getPolymarketRuntimeHealth(),
+          billing: getBillingRuntimeHealth(),
         });
         return;
       }
@@ -1506,6 +1493,10 @@ exports.api = onRequest(
       }
 
       if (req.method === "POST" && route === "/billing/create-checkout-session") {
+        if (isBillingTestMode()) {
+          throw createBillingDisabledError();
+        }
+
         const plan = isPlan(body.plan) && body.plan !== "free" ? body.plan : null;
         const interval = body.interval === "year" ? "year" : "month";
         if (!plan) {
