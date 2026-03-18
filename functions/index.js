@@ -75,6 +75,7 @@ if (!admin.apps.length) {
 }
 
 const db = admin.firestore();
+db.settings({ ignoreUndefinedProperties: true });
 const llmRuntime = createLlmRuntime({
   getGeminiApiKey: () => GEMINI_API_KEY.value(),
 });
@@ -194,6 +195,38 @@ function clamp01(value, fallback = 0.5) {
 
 function sanitizeList(list) {
   return Array.isArray(list) ? list.filter((item) => typeof item === "string" && item.trim()) : [];
+}
+
+function sanitizeFirestoreValue(value) {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => sanitizeFirestoreValue(item))
+      .filter((item) => item !== undefined);
+  }
+
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+
+  if (value instanceof Date || typeof value.toDate === "function") {
+    return value;
+  }
+
+  const ctorName = value.constructor?.name;
+  if (ctorName && ctorName !== "Object") {
+    return value;
+  }
+
+  const sanitizedEntries = Object.entries(value).flatMap(([key, nestedValue]) => {
+    const sanitizedValue = sanitizeFirestoreValue(nestedValue);
+    return sanitizedValue === undefined ? [] : [[key, sanitizedValue]];
+  });
+
+  return Object.fromEntries(sanitizedEntries);
 }
 
 function isPlan(value) {
@@ -599,7 +632,7 @@ function normalizeCard(card, queryPlan) {
                 year: Number(point.year),
                 value: Number(point.value),
               }))
-          : undefined,
+          : [],
       }))
     : [];
 
@@ -824,7 +857,7 @@ async function saveCachedCard(card, queryText, queryPlan, domain, city, engine =
       query: queryText,
       query_hash: queryHash,
       engine,
-      card_data: card,
+      card_data: sanitizeFirestoreValue(card),
       generated_at: admin.firestore.FieldValue.serverTimestamp(),
       ttl: admin.firestore.Timestamp.fromDate(ttl),
     },
