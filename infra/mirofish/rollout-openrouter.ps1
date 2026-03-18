@@ -279,7 +279,17 @@ try {
 
     Write-Step "Deploying Firebase Functions, Firestore rules, and Hosting"
     $deployFirebaseScript = Join-Path $scriptDir "deploy-firebase.ps1"
-    & $deployFirebaseScript -ProjectId $ProjectId -AdapterBaseUrl $adapterUrl -WorldSimApiKey $WorldSimApiKey
+    & $deployFirebaseScript `
+      -ProjectId $ProjectId `
+      -AdapterBaseUrl $adapterUrl `
+      -WorldSimApiKey $WorldSimApiKey `
+      -LlmProvider "openrouter" `
+      -LlmBaseUrl "https://openrouter.ai/api/v1" `
+      -LlmApiKey $OpenRouterApiKey `
+      -LlmModelQuery $GraphModel `
+      -LlmModelForecast $ReportModel `
+      -LlmModelChat $GraphModel `
+      -LlmModelCopy $GraphModel
     if ($LASTEXITCODE -ne 0) {
       throw "Firebase deploy failed."
     }
