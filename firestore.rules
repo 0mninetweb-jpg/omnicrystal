@@ -140,6 +140,14 @@ service cloud.firestore {
         allow update: if isOwner(userId) && isValidCard(request.resource.data) &&
           request.resource.data.createdAt == resource.data.createdAt;
         allow delete: if isOwner(userId);
+
+        match /versions/{versionId} {
+          allow read: if isOwner(userId);
+          allow create: if isOwner(userId) && isValidCard(request.resource.data);
+          allow update: if isOwner(userId) && isValidCard(request.resource.data) &&
+            request.resource.data.createdAt == resource.data.createdAt;
+          allow delete: if isOwner(userId);
+        }
       }
 
       match /watchlist/{itemId} {

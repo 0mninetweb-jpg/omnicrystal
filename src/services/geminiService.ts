@@ -158,11 +158,15 @@ function canFallbackToClient(error: unknown, options?: { metered?: boolean }) {
     return false;
   }
 
+  if (import.meta.env.VITE_ALLOW_CLIENT_AI_FALLBACK !== 'true') {
+    return false;
+  }
+
   if (options?.metered) {
     return import.meta.env.DEV || import.meta.env.VITE_ALLOW_CLIENT_AI_FALLBACK === 'true';
   }
 
-  return true;
+  return import.meta.env.DEV || import.meta.env.VITE_ALLOW_CLIENT_AI_FALLBACK === 'true';
 }
 
 async function loadClientFallbackModule() {
@@ -185,6 +189,18 @@ export async function compileQuery(query: string) {
   }
 }
 
+export async function compileQueryPublic(query: string) {
+  try {
+    return await requestServer<any>('public/compile-query', { body: { query }, requireAuth: false });
+  } catch (error) {
+    if (canFallbackToClient(error)) {
+      const { compileQueryClient } = await loadClientFallbackModule();
+      return compileQueryClient(query);
+    }
+    throw error;
+  }
+}
+
 export async function predict(query: string, queryPlan: any, userContext?: any) {
   try {
     return await requestServer<any>('predict', { body: { query, queryPlan, userContext } });
@@ -192,6 +208,21 @@ export async function predict(query: string, queryPlan: any, userContext?: any) 
     if (canFallbackToClient(error, { metered: true })) {
       const { predictClient } = await loadClientFallbackModule();
       return predictClient(query, queryPlan, userContext);
+    }
+    throw error;
+  }
+}
+
+export async function predictPublic(query: string, queryPlan: any) {
+  try {
+    return await requestServer<any>('public/predict', {
+      body: { query, queryPlan },
+      requireAuth: false,
+    });
+  } catch (error) {
+    if (canFallbackToClient(error)) {
+      const { predictClient } = await loadClientFallbackModule();
+      return predictClient(query, queryPlan, null);
     }
     throw error;
   }
@@ -252,6 +283,34 @@ export async function getPolymarketPulse(query: string, queryPlan: any) {
       query,
       queryPlan,
     },
+  });
+}
+
+export async function getCatalogRegistry() {
+  return requestServer<any>('registry/catalog', {
+    method: 'GET',
+    requireAuth: false,
+  });
+}
+
+export async function getSourceRegistry() {
+  return requestServer<any>('registry/sources', {
+    method: 'GET',
+    requireAuth: false,
+  });
+}
+
+export async function getCoverageSnapshot() {
+  return requestServer<any>('coverage/snapshot', {
+    method: 'GET',
+    requireAuth: false,
+  });
+}
+
+export async function getCoverageLedger() {
+  return requestServer<any>('coverage/ledger', {
+    method: 'GET',
+    requireAuth: false,
   });
 }
 

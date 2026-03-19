@@ -25,50 +25,37 @@ const {
   getPolymarketPulse,
   getPolymarketRuntimeHealth,
 } = require("./polymarket");
+const {
+  GENERAL_FORECAST_DOMAIN,
+  SPORTS_MATCH_OUTCOMES_DOMAIN,
+  SPORTS_FIXTURE_CARD_TYPE,
+  buildSportsForecastContext,
+  getSportsRuntimeHealth,
+  isSportsDomain,
+  looksLikeSportsMatchQuery,
+} = require("./sportsData");
+const {
+  CATALOG_DOMAIN_IDS,
+  CATALOG_VERSION_ID,
+  buildCoverageLedger,
+  getCatalogRegistryPayload,
+  getCoverageSnapshot,
+  getDomain,
+  getDomainCardTypes,
+  getHealthSummary: getCatalogHealthSummary,
+  getSourceHealthSummary,
+  getSourceRegistryPayload,
+  isSupportedDomain,
+  resolveCardTypeId,
+  resolveDomainId,
+} = require("./catalogRegistry");
 
 const GEMINI_API_KEY = defineSecret("GEMINI_API_KEY");
 const NIXTLA_API_KEY = defineSecret("NIXTLA_API_KEY");
 const STRIPE_SECRET_KEY = defineSecret("STRIPE_SECRET_KEY");
 const STRIPE_WEBHOOK_SECRET = defineSecret("STRIPE_WEBHOOK_SECRET");
 
-const SUPPORTED_DOMAINS = [
-  "A.1.macro.gdp_growth",
-  "A.1.macro.interest_rates",
-  "A.1.macro.unemployment_rate",
-  "A.2.markets.equity_indices",
-  "A.2.markets.crypto_volatility",
-  "A.2.markets.commodity_prices",
-  "A.3.real_estate.residential_prices",
-  "A.3.real_estate.commercial_rents",
-  "A.3.real_estate.mortgage_rates",
-  "A.4.climate.extreme_weather_risk",
-  "A.4.climate.temperature_anomalies",
-  "A.4.climate.precipitation_forecast",
-  "A.5.energy.gas_prices",
-  "A.5.energy.electricity_costs",
-  "A.5.energy.renewable_transition",
-  "A.6.tech.ai_adoption_rate",
-  "A.6.tech.cybersecurity_threats",
-  "A.6.tech.semiconductor_supply",
-  "A.7.city_pulse.micro_area_change",
-  "A.7.city_pulse.gentrification_index",
-  "A.7.city_pulse.crime_rate_trends",
-  "A.8.health.pandemic_risk",
-  "A.8.health.healthcare_capacity",
-  "A.8.health.drug_shortages",
-  "A.9.travel.disruption_risk",
-  "A.9.travel.tourism_intensity",
-  "A.9.travel.flight_cancellations",
-  "A.10.consumer.retail_spending",
-  "A.10.consumer.ecommerce_growth",
-  "A.10.consumer.consumer_confidence",
-  "A.11.geopolitics.trade_tensions",
-  "A.11.geopolitics.supply_chain_disruption",
-  "A.11.geopolitics.election_volatility",
-  "A.12.cost_of_living.inflation_pressure",
-  "A.12.cost_of_living.grocery_basket_cost",
-  "A.12.cost_of_living.housing_affordability",
-];
+const SUPPORTED_DOMAINS = Array.from(new Set([GENERAL_FORECAST_DOMAIN, ...CATALOG_DOMAIN_IDS]));
 
 if (!admin.apps.length) {
   admin.initializeApp();
@@ -195,6 +182,154 @@ function clamp01(value, fallback = 0.5) {
 
 function sanitizeList(list) {
   return Array.isArray(list) ? list.filter((item) => typeof item === "string" && item.trim()) : [];
+}
+
+function isPlaceholderText(value) {
+  const normalized = safeText(value).toLowerCase();
+  if (!normalized) return true;
+  return (
+    /^(scenario|elemento|item|driver|entity|azione|option|fixture|match)\s*[_-]?\d+$/.test(normalized) ||
+    /^world sim entity\s*\d+$/.test(normalized) ||
+    /^mossa oracle\s*\d+$/.test(normalized) ||
+    normalized === "narrative only" ||
+    normalized === "analisi non disponibile"
+  );
+}
+
+function isMeaningfulText(value) {
+  return Boolean(safeText(value) && !isPlaceholderText(value));
+}
+
+function normalizeEvidenceList(list) {
+  return sanitizeList(list).map((item) => safeText(item)).filter(isMeaningfulText).slice(0, 4);
+}
+
+function normalizeFixtureReads(fixtureReads = []) {
+  if (!Array.isArray(fixtureReads)) return [];
+
+  return fixtureReads
+    .map((fixture, index) => ({
+      fixture_id: safeText(fixture?.fixture_id || fixture?.fixtureId, `fixture_${index + 1}`),
+      label: safeText(fixture?.label || fixture?.fixture_label || fixture?.fixtureLabel),
+      primary_call: safeText(
+        fixture?.primary_call || fixture?.primaryCall || fixture?.pick || fixture?.recommended_outcome || fixture?.outcome
+      ),
+      confidence: clamp01(fixture?.confidence, 0),
+      rationale: safeText(fixture?.rationale || fixture?.note || fixture?.summary),
+      evidence: normalizeEvidenceList(fixture?.evidence),
+      caution: safeText(fixture?.caution || fixture?.watchout || fixture?.risk_note),
+    }))
+    .filter((fixture) => isMeaningfulText(fixture.label) && isMeaningfulText(fixture.primary_call))
+    .sort((left, right) => right.confidence - left.confidence);
+}
+
+function buildSportsRankedList(fixtureReads = []) {
+  return fixtureReads.slice(0, 7).map((fixture, index) => ({
+    item_id: fixture.fixture_id || `item_${index + 1}`,
+    label: fixture.label,
+    score: clamp01(fixture.confidence, 0.5),
+    rank: index + 1,
+    note: [`Esito più probabile: ${fixture.primary_call}.`, fixture.rationale || fixture.caution || ""]
+      .filter(Boolean)
+      .join(" "),
+  }));
+}
+
+function mapCoverageStateToTrustFlag(state) {
+  if (state === "published") return "sufficient";
+  if (state === "limited") return "partial";
+  return "insufficient";
+}
+
+function mapCoverageStateToFreshness(state) {
+  if (state === "published") return "fresh";
+  if (state === "limited") return "unknown";
+  return "stale";
+}
+
+function createEvidenceDrawer(card, domainConfig, nowIso) {
+  const trustLayer = card?.trust_layer || {};
+  const provenanceSummary = trustLayer?.provenance_summary || {};
+  const freshness = trustLayer?.freshness || {};
+  return {
+    metrics_provenance: sanitizeList(provenanceSummary.license_summary).length > 0 ? provenanceSummary.license_summary : domainConfig.source_allowlist,
+    freshness_summary: {
+      as_of_utc: safeText(freshness.as_of_utc, nowIso),
+      cadence: safeText(domainConfig.refresh_cadence, "weekly"),
+      staleness_bucket: safeText(freshness.staleness_bucket, "unknown"),
+    },
+    coverage_notes: [safeText(domainConfig.status_reason)].filter(Boolean),
+    gating_reason:
+      domainConfig.current_state === "published"
+        ? "published"
+        : domainConfig.current_state === "limited"
+          ? "limited_by_coverage"
+          : "blocked_by_coverage",
+  };
+}
+
+function buildCoverageGapCard(queryText, queryPlan, domainConfig) {
+  const nowIso = new Date().toISOString();
+  const title = `${domainConfig.title}: coverage still building`;
+  return {
+    card_id: crypto.randomUUID(),
+    card_type: "coverage_gap",
+    canonical_card_type: "coverage_gap",
+    card_state: "blocked",
+    version_id: `catalog_${CATALOG_VERSION_ID}`,
+    domain: domainConfig.domain_id,
+    title,
+    summary:
+      "Crystal knows this blueprint domain, but the public evidence fabric for this coverage unit is not ready enough to publish a trustworthy read.",
+    verdict: `Coverage gap for ${domainConfig.short_label}. Crystal will not guess where the current registry says coverage is blocked.`,
+    personal_output: "",
+    stakes_level: "medium",
+    risk_band: "medium",
+    scenario_set: [],
+    so_what: [],
+    ranked_list: [],
+    fixture_reads: [],
+    drivers: [],
+    what_to_watch: [
+      `Watch for the domain to move from blocked to limited or published in the coverage explorer.`,
+      `Narrow the geography, entity, or horizon to reduce the evidence gap.`,
+    ],
+    how_to_raise_confidence: [
+      `Broaden the scope or use a shorter horizon for ${domainConfig.short_label}.`,
+      `Return once the source registry for this domain is operational.`,
+    ],
+    evidence_drawer: {
+      metrics_provenance: domainConfig.source_allowlist,
+      freshness_summary: {
+        as_of_utc: nowIso,
+        cadence: domainConfig.refresh_cadence,
+        staleness_bucket: "stale",
+      },
+      coverage_notes: [domainConfig.status_reason],
+      gating_reason: "blocked_by_coverage",
+    },
+    trust_layer: {
+      confidence_score: 0.22,
+      confidence_tier: "low",
+      data_sufficiency_flag: "insufficient",
+      freshness: {
+        staleness_bucket: "stale",
+        as_of_utc: nowIso,
+      },
+      provenance_summary: {
+        verification_level: "unverified",
+        license_summary: domainConfig.source_allowlist,
+      },
+    },
+    prediction_market_frame: null,
+  };
+}
+
+function hasMeaningfulProbabilities(items = []) {
+  const probabilities = items.map((item) => Number(item?.probability)).filter((value) => Number.isFinite(value));
+  if (probabilities.length < 2) return true;
+  const rounded = probabilities.map((value) => Number(value.toFixed(2)));
+  return new Set(rounded).size > 1;
 }
 
 function sanitizeFirestoreValue(value) {
@@ -605,71 +740,133 @@ async function applyStripeSubscriptionState(uid, subscription, options = {}) {
 
 function normalizeCard(card, queryPlan) {
   const nowIso = new Date().toISOString();
-  const domain = typeof card?.domain === "string" && card.domain ? card.domain : queryPlan?.domain_id || "general";
+  const domain = resolveDomainId(typeof card?.domain === "string" && card.domain ? card.domain : queryPlan?.domain_id || "general");
+  const domainConfig = getDomain(domain);
+  const sportsCard = isSportsDomain(domain) || safeText(card?.card_type) === SPORTS_FIXTURE_CARD_TYPE;
   const scenarioSet = Array.isArray(card?.scenario_set)
-    ? card.scenario_set.map((scenario, index) => ({
-        scenario_id: scenario?.scenario_id || `scenario_${index + 1}`,
-        label: scenario?.label || `Scenario ${index + 1}`,
-        probability: clamp01(scenario?.probability, 0.33),
-      }))
+    ? card.scenario_set
+        .map((scenario, index) => ({
+          scenario_id: safeText(scenario?.scenario_id, `scenario_${index + 1}`),
+          label: safeText(scenario?.label),
+          probability: clamp01(scenario?.probability, 0.33),
+        }))
+        .filter((scenario) => isMeaningfulText(scenario.label))
     : [];
+  const normalizedScenarioSet = hasMeaningfulProbabilities(scenarioSet) ? scenarioSet : [];
   const soWhat = Array.isArray(card?.so_what)
-    ? card.so_what.map((option, index) => ({
-        option_id: option?.option_id || `option_${index + 1}`,
-        label: option?.label || `Azione ${index + 1}`,
-        tradeoff_note: option?.tradeoff_note || "Valuta pro e contro in base al tuo contesto.",
-      }))
+    ? card.so_what
+        .map((option, index) => ({
+          option_id: safeText(option?.option_id, `option_${index + 1}`),
+          label: safeText(option?.label),
+          tradeoff_note: safeText(option?.tradeoff_note || option?.note),
+        }))
+        .filter((option) => isMeaningfulText(option.label) && Boolean(option.tradeoff_note))
     : [];
   const drivers = Array.isArray(card?.drivers)
-    ? card.drivers.map((driver, index) => ({
-        feature_key: driver?.feature_key || `driver_${index + 1}`,
-        direction: ["up", "down", "flat"].includes(driver?.direction) ? driver.direction : "flat",
-        contribution: Number.isFinite(Number(driver?.contribution)) ? Number(driver.contribution) : 0.33,
-        historical_trend: Array.isArray(driver?.historical_trend)
-          ? driver.historical_trend
-              .filter((point) => Number.isFinite(Number(point?.year)) && Number.isFinite(Number(point?.value)))
-              .map((point) => ({
-                year: Number(point.year),
-                value: Number(point.value),
-              }))
-          : [],
-      }))
+    ? card.drivers
+        .map((driver, index) => ({
+          feature_key: safeText(driver?.feature_key),
+          direction: ["up", "down", "flat"].includes(driver?.direction) ? driver.direction : "flat",
+          contribution: Number.isFinite(Number(driver?.contribution)) ? Number(driver.contribution) : 0.33,
+          historical_trend: Array.isArray(driver?.historical_trend)
+            ? driver.historical_trend
+                .filter((point) => Number.isFinite(Number(point?.year)) && Number.isFinite(Number(point?.value)))
+                .map((point) => ({
+                  year: Number(point.year),
+                  value: Number(point.value),
+                }))
+            : [],
+        }))
+        .filter((driver, index) => isMeaningfulText(driver.feature_key || `driver_${index + 1}`))
+        .map((driver, index) => ({
+          ...driver,
+          feature_key: driver.feature_key || `driver_${index + 1}`,
+        }))
     : [];
+  const fixtureReads = normalizeFixtureReads(card?.fixture_reads || card?.fixtureReads);
+  const normalizedRankedList = Array.isArray(card?.ranked_list)
+    ? card.ranked_list
+        .map((item, index) => ({
+          item_id: safeText(item?.item_id, `item_${index + 1}`),
+          label: safeText(item?.label),
+          score: clamp01(item?.score, 0.5),
+          rank: Number.isFinite(Number(item?.rank)) ? Number(item.rank) : index + 1,
+          note: safeText(item?.note),
+        }))
+        .filter((item) => isMeaningfulText(item.label))
+    : [];
+  const rankedList = normalizedRankedList.length > 0 ? normalizedRankedList : sportsCard ? buildSportsRankedList(fixtureReads) : [];
+  const cardState =
+    card?.card_state === "published" || card?.card_state === "limited" || card?.card_state === "blocked"
+      ? card.card_state
+      : domainConfig.current_state;
+  const whatToWatch = sanitizeList(card?.what_to_watch || card?.whatToWatch).slice(0, 3);
+  const howToRaiseConfidence = sanitizeList(card?.how_to_raise_confidence || card?.howToRaiseConfidence).slice(0, 3);
+  const evidenceDrawer =
+    card?.evidence_drawer && typeof card.evidence_drawer === "object"
+      ? {
+          metrics_provenance: sanitizeList(card.evidence_drawer.metrics_provenance),
+          freshness_summary: {
+            as_of_utc: safeText(card.evidence_drawer?.freshness_summary?.as_of_utc, nowIso),
+            cadence: safeText(card.evidence_drawer?.freshness_summary?.cadence, domainConfig.refresh_cadence),
+            staleness_bucket: safeText(
+              card.evidence_drawer?.freshness_summary?.staleness_bucket,
+              mapCoverageStateToFreshness(cardState)
+            ),
+          },
+          coverage_notes: sanitizeList(card.evidence_drawer.coverage_notes),
+          gating_reason: safeText(card.evidence_drawer.gating_reason, cardState),
+        }
+      : createEvidenceDrawer(card, domainConfig, nowIso);
+  const canonicalCardType = resolveCardTypeId(
+    card?.canonical_card_type || card?.card_type,
+    sportsCard ? "rank_compare" : getDomainCardTypes(domain)[0]
+  );
 
   return {
     card_id: card?.card_id || crypto.randomUUID(),
-    card_type: card?.card_type || "prediction_summary",
+    card_type: safeText(card?.card_type, sportsCard ? SPORTS_FIXTURE_CARD_TYPE : canonicalCardType),
+    canonical_card_type: canonicalCardType,
+    card_state: cardState,
+    version_id: safeText(card?.version_id, `catalog_${CATALOG_VERSION_ID}`),
     domain,
     stakes_level: ["low", "medium", "high", "imminent"].includes(card?.stakes_level) ? card.stakes_level : "medium",
     risk_band: ["low", "medium", "high", "extreme"].includes(card?.risk_band) ? card.risk_band : "medium",
-    title: card?.title || "Crystal Forecast",
-    summary: card?.summary || "Crystal ha generato una previsione basata sui segnali disponibili.",
-    verdict: card?.verdict || card?.summary || "Scenario in evoluzione.",
+    title: card?.title || (sportsCard ? "Verdetto Crystal sulle partite selezionate" : "Crystal Forecast"),
+    summary:
+      card?.summary ||
+      (sportsCard
+        ? "Crystal ha costruito una lettura partita per partita usando i segnali disponibili e ha evitato di riempire i vuoti."
+        : "Crystal ha generato una previsione basata sui segnali disponibili."),
+    verdict:
+      card?.verdict ||
+      card?.summary ||
+      (sportsCard ? "Il segnale resta selettivo: meglio poche partite con edge chiaro che una lista generica." : "Scenario in evoluzione."),
     personal_output: typeof card?.personal_output === "string" ? card.personal_output : "",
-    scenario_set: scenarioSet,
+    scenario_set: normalizedScenarioSet,
     so_what: soWhat,
-    ranked_list: Array.isArray(card?.ranked_list)
-      ? card.ranked_list.map((item, index) => ({
-          item_id: item?.item_id || `item_${index + 1}`,
-          label: item?.label || `Elemento ${index + 1}`,
-          score: clamp01(item?.score, 0.5),
-          rank: Number.isFinite(Number(item?.rank)) ? Number(item.rank) : index + 1,
-          note: typeof item?.note === "string" ? item.note : "",
-        }))
-      : [],
+    ranked_list: rankedList,
+    fixture_reads: fixtureReads,
     drivers,
+    what_to_watch: whatToWatch,
+    how_to_raise_confidence: howToRaiseConfidence,
+    evidence_drawer: evidenceDrawer,
     trust_layer: {
       confidence_score: clamp01(card?.trust_layer?.confidence_score, 0.62),
       confidence_tier: ["low", "medium", "high"].includes(card?.trust_layer?.confidence_tier)
         ? card.trust_layer.confidence_tier
-        : "medium",
+        : cardState === "published"
+          ? "high"
+          : cardState === "limited"
+            ? "medium"
+            : "low",
       data_sufficiency_flag: ["insufficient", "partial", "sufficient"].includes(card?.trust_layer?.data_sufficiency_flag)
         ? card.trust_layer.data_sufficiency_flag
-        : "partial",
+        : mapCoverageStateToTrustFlag(cardState),
       freshness: {
         staleness_bucket: ["fresh", "stale", "unknown"].includes(card?.trust_layer?.freshness?.staleness_bucket)
           ? card.trust_layer.freshness.staleness_bucket
-          : "fresh",
+          : mapCoverageStateToFreshness(cardState),
         as_of_utc: typeof card?.trust_layer?.freshness?.as_of_utc === "string" ? card.trust_layer.freshness.as_of_utc : nowIso,
       },
       provenance_summary: {
@@ -677,8 +874,15 @@ function normalizeCard(card, queryPlan) {
           card?.trust_layer?.provenance_summary?.verification_level
         )
           ? card.trust_layer.provenance_summary.verification_level
-          : "partially_verified",
-        license_summary: sanitizeList(card?.trust_layer?.provenance_summary?.license_summary),
+          : cardState === "published"
+            ? "verified"
+            : cardState === "limited"
+              ? "partially_verified"
+              : "unverified",
+        license_summary:
+          sanitizeList(card?.trust_layer?.provenance_summary?.license_summary).length > 0
+            ? sanitizeList(card?.trust_layer?.provenance_summary?.license_summary)
+            : domainConfig.source_allowlist,
       },
     },
     prediction_market_frame:
@@ -709,17 +913,25 @@ function normalizeQuotePayload(payload) {
   };
 }
 
-function normalizeQueryPlanPayload(payload = {}) {
-  const domainId = safeText(payload?.domain_id || payload?.domain, SUPPORTED_DOMAINS[0]);
-  const normalizedDomain = SUPPORTED_DOMAINS.includes(domainId) ? domainId : SUPPORTED_DOMAINS[0];
+function normalizeQueryPlanPayload(payload = {}, options = {}) {
+  const fallbackDomain = safeText(options?.fallbackDomain, GENERAL_FORECAST_DOMAIN);
+  const domainId = safeText(payload?.domain_id || payload?.domain, fallbackDomain);
+  const normalizedDomain = isSupportedDomain(domainId) ? resolveDomainId(domainId, fallbackDomain) : fallbackDomain;
   const horizons = Array.isArray(payload?.horizons) && payload.horizons.length > 0 ? payload.horizons : [{ horizon_id: "30d" }];
+  const domainCardTypes = getDomainCardTypes(normalizedDomain);
+  const defaultCardType = safeText(
+    options?.defaultCardType,
+    normalizedDomain === SPORTS_MATCH_OUTCOMES_DOMAIN ? SPORTS_FIXTURE_CARD_TYPE : domainCardTypes[0]
+  );
+  const defaultEntityType = safeText(options?.defaultEntityType, normalizedDomain === SPORTS_MATCH_OUTCOMES_DOMAIN ? "fixture" : "entity");
   const cardTypes =
     Array.isArray(payload?.card_types) && payload.card_types.length > 0
       ? payload.card_types
-      : [{ card_type_id: "prediction_summary" }];
+      : [{ card_type_id: defaultCardType }];
 
   return {
     plan_version: safeText(payload?.plan_version, "crystal-b2c-v1"),
+    catalog_version_id: safeText(payload?.catalog_version_id, CATALOG_VERSION_ID),
     domain_id: normalizedDomain,
     mode: {
       type: payload?.mode?.type === "predict_action" ? "predict_action" : "predict_only",
@@ -727,15 +939,18 @@ function normalizeQueryPlanPayload(payload = {}) {
     entities: Array.isArray(payload?.entities)
       ? payload.entities.map((entity, index) => ({
           entity_id: safeText(entity?.entity_id, `entity_${index + 1}`),
-          entity_type: safeText(entity?.entity_type, "entity"),
-          label: safeText(entity?.label, safeText(entity?.entity_id, `Entity ${index + 1}`)),
+          entity_type: safeText(entity?.entity_type, defaultEntityType),
+          label: safeText(
+            entity?.label,
+            safeText(entity?.entity_id, defaultEntityType === "fixture" ? `Fixture ${index + 1}` : `Entity ${index + 1}`)
+          ),
         }))
       : [],
     horizons: horizons.map((item, index) => ({
       horizon_id: safeText(item?.horizon_id, index === 0 ? "30d" : `horizon_${index + 1}`),
     })),
     card_types: cardTypes.map((item, index) => ({
-      card_type_id: safeText(item?.card_type_id, index === 0 ? "prediction_summary" : `card_type_${index + 1}`),
+      card_type_id: resolveCardTypeId(item?.card_type_id, index === 0 ? defaultCardType : domainCardTypes[0]),
     })),
   };
 }
@@ -763,6 +978,8 @@ function normalizeNextletterPayload(payload = {}) {
 
 function getForecastRuntimeHealth() {
   const metadata = llmRuntime.getRuntimeMetadata();
+  const sportsHealth = getSportsRuntimeHealth();
+  const catalogHealth = getCatalogHealthSummary();
   return {
     available: metadata.available,
     mode: metadata.mode,
@@ -773,8 +990,15 @@ function getForecastRuntimeHealth() {
     fallbackProvider: metadata.fallbackProvider,
     fallbackConfigured: metadata.fallbackConfigured,
     structuredOutputs: metadata.structuredOutputs,
-    grounding: ["historical-cache", "google-trends", "timegpt", "polymarket"],
+    grounding: ["historical-cache", "google-trends", "timegpt", "polymarket"].concat(
+      sportsHealth.configured ? [sportsHealth.provider] : []
+    ),
     rollbackProvider: "gemini",
+    registryVersionId: catalogHealth.catalogVersionId,
+    coverageUnits: catalogHealth.coverageUnits,
+    coverageScore: catalogHealth.coverageScore,
+    depthScore: catalogHealth.depthScore,
+    freshnessScore: catalogHealth.freshnessScore,
   };
 }
 
@@ -954,6 +1178,7 @@ async function fetchHistoricalDataForTimeGPT(domain, city) {
 }
 
 async function fetchTimeGptForecast(domain, city, fh) {
+  if (isSportsDomain(domain)) return null;
   const nixtlaKey = NIXTLA_API_KEY.value();
   if (!nixtlaKey) return null;
   try {
@@ -979,20 +1204,16 @@ async function fetchTimeGptForecast(domain, city, fh) {
   }
 }
 
-async function compileQuery(queryText) {
-  const payload = await withRetry(() =>
-    llmRuntime.generateJson({
-      modelKind: "query",
-      temperature: 0,
-      systemInstruction:
-        "You convert a user question into a Crystal B2C QueryPlan JSON object. Return JSON only. Choose domain_id only from the supported list. Keep entities concise and horizons realistic.",
-      prompt: `Convert the following user query into a Crystal B2C QueryPlan JSON object.
+function buildGenericQueryPlanPrompt(queryText) {
+  return `Convert the following user query into a Crystal B2C QueryPlan JSON object.
 
 Query: "${queryText}"
 
 Extract the intent, domain, entities, horizons, and required card types based on the Crystal B2C Blueprint.
 
-CRITICAL: The domain_id MUST be chosen from the following list of supported domains:
+CRITICAL:
+- If the request is broad or mixed, choose ${GENERAL_FORECAST_DOMAIN}.
+- The domain_id MUST be chosen from the following list of supported domains:
 ${SUPPORTED_DOMAINS.join(", ")}
 
 Return an object with:
@@ -1001,15 +1222,166 @@ Return an object with:
 - mode.type ("predict_only" or "predict_action")
 - entities[]
 - horizons[]
-- card_types[]`,
+- card_types[]`;
+}
+
+function buildSportsQueryPlanPrompt(queryText) {
+  return `Convert the following sports question into a Crystal B2C QueryPlan JSON object.
+
+Query: "${queryText}"
+
+Rules:
+- domain_id must be exactly "${SPORTS_MATCH_OUTCOMES_DOMAIN}".
+- card_types must include "${SPORTS_FIXTURE_CARD_TYPE}".
+- Each match must be its own entity with entity_type "fixture".
+- Each fixture label must use the format "Home Team vs Away Team".
+- If the user lists a matchday date, reflect it in the horizon with "7d" when the matches are close, otherwise "30d".
+- mode.type must be "predict_only".
+
+Return JSON only with:
+- plan_version
+- domain_id
+- mode.type
+- entities[]
+- horizons[]
+- card_types[]`;
+}
+
+function buildGenericForecastPayload({ queryText, queryPlan, contextString, historicalContext, timeGptContext }) {
+  return {
+    systemInstruction: `Sei il motore predittivo di Crystal B2C.
+Restituisci solo JSON valido.
+Non inventare dati o fonti.
+Usa il contesto fornito dal sistema come grounding primario.
+Se il contesto e parziale, abbassa la confidence e dichiaralo nel trust layer.
+Scrivi campi testuali chiari, sintetici e leggibili.`,
+    prompt: `Sei il motore predittivo di Crystal B2C.
+L'utente ha chiesto: "${queryText}"
+Il Query Plan generato dal sistema e: ${JSON.stringify(queryPlan)}
+${contextString}
+${historicalContext}
+${timeGptContext}
+
+Il tuo compito e generare un oggetto JSON CrystalCard finale.
+
+REGOLE FONDAMENTALI:
+1. Non inventare dati. Se i dati non bastano, segnalalo nel trust layer.
+2. Usa il contesto storico solo per calibrare pattern, mai per sovrascrivere i fatti di oggi.
+3. Se sono presenti dati quantitativi, usali per calibrare scenario_set e trust_layer.
+4. Fornisci un verdetto diretto e azioni pratiche.
+5. Mantieni il testo leggibile e ben formattato.
+6. Evita placeholder come Scenario 1, Elemento 1, driver_1 o ranking finti.
+7. Usa il contratto Crystal A.99: prediction chiara, so what, what_to_watch, how_to_raise_confidence, trust, evidence.
+
+Restituisci un oggetto con almeno questi campi:
+- card_id
+- card_type
+- canonical_card_type
+- card_state
+- version_id
+- domain
+- stakes_level
+- risk_band
+- title
+- summary
+- verdict
+- personal_output
+- scenario_set
+- so_what
+- what_to_watch
+- how_to_raise_confidence
+- ranked_list
+- drivers
+- evidence_drawer
+- trust_layer
+- prediction_market_frame`,
+  };
+}
+
+function buildSportsForecastPayload({ queryText, queryPlan, contextString, sportsContext }) {
+  return {
+    systemInstruction: `Sei Crystal, un motore predittivo editoriale per previsioni sportive.
+Restituisci solo JSON valido.
+Non inventare dati, quote, assenze o risultati dell'andata.
+Se il contesto sports e debole, riduci il numero di partite consigliate e abbassa la confidence.
+Scrivi in italiano, con tono netto e leggibile.
+Non usare placeholder come "Scenario 1", "Elemento 1", "driver_1" o percentuali tutte uguali.
+Non trasformare la risposta in tips di bankroll o copy da tipster.`,
+    prompt: `L'utente ha chiesto: "${queryText}"
+Il Query Plan e: ${JSON.stringify(queryPlan)}
+${contextString}
+${sportsContext.contextText || "SPORTS DATA\nNo structured sports data is available. Stay conservative."}
+
+Genera una CrystalCard sports con queste regole:
+1. card_type deve essere "${SPORTS_FIXTURE_CARD_TYPE}".
+2. domain deve essere "${SPORTS_MATCH_OUTCOMES_DOMAIN}".
+3. verdict: 2-4 frasi con il quadro generale e i segnali più forti.
+4. summary: una sintesi asciutta, senza marketing copy.
+5. ranked_list: massimo 5 fixture ordinate per convinzione, con note concrete.
+6. fixture_reads: una riga per ogni partita, con label, primary_call, confidence, rationale, evidence[] e caution se serve.
+7. drivers: 3-5 driver reali e sportivi, niente etichette generiche.
+8. trust_layer: esplicita se il dato e parziale o incompleto.
+9. prediction_market_frame deve restare nullo se non hai un mercato esterno chiaro.
+10. Non includere narrativa geopolitica o WorldSim nel verdetto principale.
+11. Aggiungi what_to_watch, evidence_drawer, card_state e version_id.
+
+Restituisci almeno:
+- card_id
+- card_type
+- canonical_card_type
+- card_state
+- version_id
+- domain
+- stakes_level
+- risk_band
+- title
+- summary
+- verdict
+- ranked_list
+- fixture_reads
+- drivers
+- what_to_watch
+- evidence_drawer
+- trust_layer`,
+  };
+}
+
+async function compileQuery(queryText) {
+  if (looksLikeSportsMatchQuery(queryText)) {
+    const payload = await withRetry(() =>
+      llmRuntime.generateJson({
+        modelKind: "query",
+        temperature: 0,
+        systemInstruction:
+          "You convert a sports question into a Crystal B2C QueryPlan JSON object. Return JSON only. Use the sports domain and one fixture entity per match.",
+        prompt: buildSportsQueryPlanPrompt(queryText),
+      })
+    );
+
+    return normalizeQueryPlanPayload(payload, {
+      fallbackDomain: SPORTS_MATCH_OUTCOMES_DOMAIN,
+      defaultCardType: SPORTS_FIXTURE_CARD_TYPE,
+      defaultEntityType: "fixture",
+    });
+  }
+
+  const payload = await withRetry(() =>
+    llmRuntime.generateJson({
+      modelKind: "query",
+      temperature: 0,
+      systemInstruction:
+        "You convert a user question into a Crystal B2C QueryPlan JSON object. Return JSON only. Choose domain_id only from the supported list. Keep entities concise and horizons realistic.",
+      prompt: buildGenericQueryPlanPrompt(queryText),
     })
   );
 
-  return normalizeQueryPlanPayload(payload);
+  return normalizeQueryPlanPayload(payload, { fallbackDomain: GENERAL_FORECAST_DOMAIN });
 }
 
 async function predict(queryText, queryPlan, userContext, options = {}) {
-  const domain = queryPlan?.domain || queryPlan?.domain_id || "";
+  const domain = resolveDomainId(queryPlan?.domain || queryPlan?.domain_id || "");
+  const domainConfig = getDomain(domain);
+  const sportsForecast = isSportsDomain(domain);
   const city =
     queryPlan?.filters?.location ||
     queryPlan?.entities?.find((entity) => entity.entity_type === "city" || entity.entity_type === "location")?.label ||
@@ -1019,17 +1391,33 @@ async function predict(queryText, queryPlan, userContext, options = {}) {
   const cost = Number.isFinite(Number(options.cost)) ? Number(options.cost) : 1;
   const plan = isPlan(options.plan) ? options.plan : "free";
 
+  if (domainConfig.current_state === "blocked") {
+    return {
+      ...buildCoverageGapCard(queryText, queryPlan, domainConfig),
+      _source: "coverage-gap",
+      _billing: {
+        action,
+        cost,
+        engine,
+        plan,
+      },
+    };
+  }
+
   if (domain) {
     const cached = await fetchCachedCard(queryText, queryPlan, domain, city, engine);
     if (cached) {
-      const enrichedCachedCard = await attachPolymarketToCard({
-        db,
-        admin,
-        fetchJson,
-        queryText,
-        queryPlan,
-        card: normalizeCard(cached, queryPlan),
-      });
+      const normalizedCachedCard = normalizeCard(cached, queryPlan);
+      const enrichedCachedCard = sportsForecast
+        ? normalizedCachedCard
+        : await attachPolymarketToCard({
+            db,
+            admin,
+            fetchJson,
+            queryText,
+            queryPlan,
+            card: normalizedCachedCard,
+          });
       return {
         ...enrichedCachedCard,
         _source: "cache",
@@ -1054,7 +1442,7 @@ CONTESTO UTENTE:
   }
 
   let historicalContext = "";
-  if (domain) {
+  if (domain && !sportsForecast && domain !== GENERAL_FORECAST_DOMAIN) {
     const summary = await get20YearHistoricalContext(domain, city);
     if (summary) {
       historicalContext = `
@@ -1065,7 +1453,7 @@ ${summary}
   }
 
   let timeGptContext = "";
-  if (domain && engine === "oracle") {
+  if (domain && engine === "oracle" && !sportsForecast && domain !== GENERAL_FORECAST_DOMAIN) {
     let fh = 7;
     if (Array.isArray(queryPlan?.horizons) && queryPlan.horizons.length > 0) {
       const horizonId = queryPlan.horizons[0]?.horizon_id;
@@ -1088,48 +1476,41 @@ Usa questi numeri come base quantitativa della previsione.
     }
   }
 
+  let sportsContext = {
+    available: false,
+    configured: false,
+    contextText: "",
+    notes: [],
+  };
+  if (sportsForecast) {
+    sportsContext = await buildSportsForecastContext({
+      queryText,
+      queryPlan,
+      fetchJson,
+    });
+  }
+
+  const forecastRequest = sportsForecast
+    ? buildSportsForecastPayload({
+        queryText,
+        queryPlan,
+        contextString,
+        sportsContext,
+      })
+    : buildGenericForecastPayload({
+        queryText,
+        queryPlan,
+        contextString,
+        historicalContext,
+        timeGptContext,
+      });
+
   const payload = await withRetry(() =>
     llmRuntime.generateJson({
       modelKind: "forecast",
       temperature: 0.2,
-      systemInstruction: `Sei il motore predittivo di Crystal B2C.
-Restituisci solo JSON valido.
-Non inventare dati o fonti.
-Usa il contesto fornito dal sistema come grounding primario.
-Se il contesto e parziale, abbassa la confidence e dichiaralo nel trust layer.
-Scrivi campi testuali chiari, sintetici e leggibili.`,
-      prompt: `Sei il motore predittivo di Crystal B2C.
-L'utente ha chiesto: "${queryText}"
-Il Query Plan generato dal sistema e: ${JSON.stringify(queryPlan)}
-${contextString}
-${historicalContext}
-${timeGptContext}
-
-Il tuo compito e generare un oggetto JSON CrystalCard finale.
-
-REGOLE FONDAMENTALI:
-1. Non inventare dati. Se i dati non bastano, segnalalo nel trust layer.
-2. Usa il contesto storico solo per calibrare pattern, mai per sovrascrivere i fatti di oggi.
-3. Se sono presenti dati quantitativi, usali per calibrare scenario_set e trust_layer.
-4. Fornisci un verdetto diretto e azioni pratiche.
-5. Mantieni il testo leggibile e ben formattato.
-
-Restituisci un oggetto con almeno questi campi:
-- card_id
-- card_type
-- domain
-- stakes_level
-- risk_band
-- title
-- summary
-- verdict
-- personal_output
-- scenario_set
-- so_what
-- ranked_list
-- drivers
-- trust_layer
-- prediction_market_frame`,
+      systemInstruction: forecastRequest.systemInstruction,
+      prompt: forecastRequest.prompt,
     })
   );
 
@@ -1137,14 +1518,16 @@ Restituisci un oggetto con almeno questi campi:
   if (domain) {
     await saveCachedCard(baseCard, queryText, queryPlan, domain, city, engine);
   }
-  const card = await attachPolymarketToCard({
-    db,
-    admin,
-    fetchJson,
-    queryText,
-    queryPlan,
-    card: baseCard,
-  });
+  const card = sportsForecast
+    ? baseCard
+    : await attachPolymarketToCard({
+        db,
+        admin,
+        fetchJson,
+        queryText,
+        queryPlan,
+        card: baseCard,
+      });
   return {
     ...card,
     _source: "live-server",
@@ -1411,23 +1794,89 @@ exports.api = onRequest(
         return;
       }
 
-      if (req.method === "GET" && route === "/health") {
-        const forecastHealth = getForecastRuntimeHealth();
-        const worldSimHealth = await getWorldSimRuntimeHealth({ fetchJson });
-        respondJson(res, 200, {
-          ok: true,
-          timestamp: new Date().toISOString(),
+        if (req.method === "GET" && route === "/health") {
+          const forecastHealth = getForecastRuntimeHealth();
+          const worldSimHealth = await getWorldSimRuntimeHealth({ fetchJson });
+          const sportsHealth = getSportsRuntimeHealth();
+          const coverageSnapshot = getCoverageSnapshot();
+          const sourceHealth = getSourceHealthSummary();
+          respondJson(res, 200, {
+            ok: true,
+            timestamp: new Date().toISOString(),
           forecast: forecastHealth,
           worldSim: worldSimHealth,
+          sports: sportsHealth,
           polymarket: getPolymarketRuntimeHealth(),
           billing: getBillingRuntimeHealth(),
+            registry: {
+              catalogVersionId: coverageSnapshot.catalog_version_id,
+              policyProfile: coverageSnapshot.policy_profile,
+              domains: coverageSnapshot.totals.domains,
+            },
+            sources: sourceHealth,
+            coverage: coverageSnapshot,
+            quality: {
+              deterministicRouting: true,
+              coverageGapCards: true,
+              placeholderGuardrails: true,
+              clientFallbackPrimary: false,
+            },
+          });
+          return;
+        }
+
+      if (req.method === "GET" && route === "/registry/catalog") {
+        respondJson(res, 200, getCatalogRegistryPayload());
+        return;
+      }
+
+      if (req.method === "GET" && route === "/registry/sources") {
+        respondJson(res, 200, getSourceRegistryPayload());
+        return;
+      }
+
+      if (req.method === "GET" && route === "/coverage/ledger") {
+        respondJson(res, 200, {
+          catalog_version_id: CATALOG_VERSION_ID,
+          coverage_units: buildCoverageLedger(),
         });
+        return;
+      }
+
+      if (req.method === "GET" && route === "/coverage/snapshot") {
+        respondJson(res, 200, getCoverageSnapshot());
         return;
       }
 
       if (req.method === "GET" && route === "/quotes") {
         const quotes = await generateCrystalQuotes();
         respondJson(res, 200, quotes);
+        return;
+      }
+
+      if (req.method === "POST" && route === "/public/compile-query") {
+        const plan = await compileQuery(body.query || "");
+        respondJson(res, 200, plan);
+        return;
+      }
+
+      if (req.method === "POST" && route === "/public/predict") {
+        const actionSpec = getPredictSpec(body.queryPlan || {}, "search");
+        if (actionSpec.requiredPlan !== "free" || actionSpec.engine !== "standard") {
+          throw createApiError(
+            "guest-plan-required",
+            "Guest mode currently supports one standard forecast. Sign in for longer horizons or rigorous mode.",
+            403
+          );
+        }
+
+        const card = await predict(body.query || "", body.queryPlan || {}, null, {
+          engine: "standard",
+          action: "search_standard",
+          cost: 0,
+          plan: "free",
+        });
+        respondJson(res, 200, card);
         return;
       }
 

@@ -3,46 +3,42 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useState } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 import { auth, db, loginWithGoogle, logout } from './firebase';
-import { onAuthStateChanged, User } from 'firebase/auth';
+import { onAuthStateChanged, type User } from 'firebase/auth';
 import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { CrystalPlanProvider } from './context/CrystalPlanContext';
 import { AppRuntimeProvider } from './context/AppRuntimeContext';
 import { AppShellProvider } from './context/AppShellContext';
-import { createDefaultEntitlementFields } from './lib/crystalPlans';
+import { createDefaultEntitlementFields, getPlanLabel, PLAN_OFFERS } from './lib/crystalPlans';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import {
-  defaultOnboardingState,
-  ONBOARDING_STORAGE_KEY,
-  OnboardingChecklistKey,
-  OnboardingState,
-} from './types/onboarding';
 import { getDefaultWorldSimPreviewDataset } from './lib/worldSimScene';
 import type { WorldSimSceneData } from './types/worldSim';
 import type { WorldSimJobRef } from './types/worldSimJob';
+import { isFeatureEnabled } from './lib/featureFlags';
+import { ForecastPage } from './components/v1/ForecastPage';
+import { WorldSimPage } from './components/v1/WorldSimPage';
+import { GalleryPage } from './components/v1/GalleryPage';
+import { PrimaryShell } from './components/v1/PrimaryShell';
 
-const MarketingLanding = lazy(async () => ({ default: (await import('./components/MarketingLanding')).MarketingLanding }));
-const AppShell = lazy(async () => ({ default: (await import('./components/AppShell')).AppShell }));
-const AppHome = lazy(async () => ({ default: (await import('./components/AppHome')).AppHome }));
-const Search = lazy(async () => ({ default: (await import('./components/Search')).Search }));
+const Nextletter = lazy(async () => ({ default: (await import('./components/Nextletter')).Nextletter }));
 const Watchlist = lazy(async () => ({ default: (await import('./components/Watchlist')).Watchlist }));
 const Profile = lazy(async () => ({ default: (await import('./components/Profile')).Profile }));
-const Nextletter = lazy(async () => ({ default: (await import('./components/Nextletter')).Nextletter }));
 const WorldSimScene = lazy(async () => ({ default: (await import('./components/WorldSimScene')).WorldSimScene }));
+const DomainCoverageExplorer = lazy(async () => ({
+  default: (await import('./components/DomainCoverageExplorer')).DomainCoverageExplorer,
+}));
 
-type AppRoute = '/app' | '/app/forecast' | '/app/nextletter' | '/app/watchlist' | '/app/profile';
-
-const PENDING_APP_PATH_KEY = 'crystal-pending-app-path-v1';
+const PENDING_ROUTE_KEY = 'crystal-pending-route-v1';
 
 function ViewLoader() {
   return (
     <div className="flex min-h-[42vh] items-center justify-center">
       <div className="inline-flex items-center gap-3 rounded-full border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 shadow-[0_12px_28px_rgba(15,23,42,0.06)]">
         <Loader2 className="h-4 w-4 animate-spin text-[#1453e8]" />
-        Loading…
+        Loading...
       </div>
     </div>
   );
@@ -56,60 +52,41 @@ function AuthLoader() {
   );
 }
 
-function readOnboardingState() {
-  if (typeof window === 'undefined') return defaultOnboardingState;
-  try {
-    const raw = window.localStorage.getItem(ONBOARDING_STORAGE_KEY);
-    if (!raw) return defaultOnboardingState;
-    const parsed = JSON.parse(raw) as Partial<OnboardingState>;
-    return {
-      hasSeenIntro: Boolean(parsed.hasSeenIntro),
-      completedChecklist: {
-        ...defaultOnboardingState.completedChecklist,
-        ...(parsed.completedChecklist || {}),
-      },
-      dismissedAt: typeof parsed.dismissedAt === 'string' ? parsed.dismissedAt : null,
-    };
-  } catch {
-    return defaultOnboardingState;
-  }
-}
+function sanitizeRoutePath(path?: string | null) {
+  if (!path) return '/forecast';
 
-function persistOnboardingState(state: OnboardingState) {
-  if (typeof window === 'undefined') return;
-  window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify(state));
-}
-
-function sanitizeAppPath(path?: string | null): AppRoute | `${AppRoute}?${string}` {
-  if (!path) return '/app';
   let normalized = path;
-
   try {
     normalized = decodeURIComponent(path);
   } catch {
     normalized = path;
   }
 
-  if (!normalized.startsWith('/app')) {
-    return '/app';
+  if (!normalized.startsWith('/') || normalized.startsWith('//') || normalized.startsWith('/api')) {
+    return '/forecast';
   }
 
-  return normalized as AppRoute | `${AppRoute}?${string}`;
+  if (normalized === '/app' || normalized === '/app/forecast') return '/forecast';
+  if (normalized === '/app/profile') return '/settings';
+  if (normalized === '/app/nextletter') return '/beta/nextletter';
+  if (normalized === '/app/watchlist') return '/beta/watchlist';
+
+  return normalized;
 }
 
-function readPendingAppPath() {
+function readPendingRoute() {
   if (typeof window === 'undefined') return null;
-  return window.sessionStorage.getItem(PENDING_APP_PATH_KEY);
+  return window.sessionStorage.getItem(PENDING_ROUTE_KEY);
 }
 
-function writePendingAppPath(path: string) {
+function writePendingRoute(path: string) {
   if (typeof window === 'undefined') return;
-  window.sessionStorage.setItem(PENDING_APP_PATH_KEY, sanitizeAppPath(path));
+  window.sessionStorage.setItem(PENDING_ROUTE_KEY, sanitizeRoutePath(path));
 }
 
-function clearPendingAppPath() {
+function clearPendingRoute() {
   if (typeof window === 'undefined') return;
-  window.sessionStorage.removeItem(PENDING_APP_PATH_KEY);
+  window.sessionStorage.removeItem(PENDING_ROUTE_KEY);
 }
 
 function getUserSyncPayload(
@@ -139,26 +116,120 @@ function getUserSyncPayload(
   return Object.keys(payload).length > 0 ? payload : null;
 }
 
+function UtilitySurface({
+  kicker,
+  title,
+  body,
+  children,
+}: {
+  kicker: string;
+  title: string;
+  body: string;
+  children?: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-[36px] border border-slate-200 bg-white p-8 shadow-[0_18px_44px_rgba(15,23,42,0.05)]">
+      <div className="max-w-3xl">
+        <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">{kicker}</div>
+        <h1 className="mt-4 text-4xl font-semibold tracking-[-0.05em] text-slate-950 md:text-6xl">{title}</h1>
+        <p className="mt-4 text-base leading-8 text-slate-600">{body}</p>
+      </div>
+      {children ? <div className="mt-8">{children}</div> : null}
+    </section>
+  );
+}
+
+function SigninPrompt({ onLogin }: { onLogin: () => void }) {
+  return (
+    <UtilitySurface
+      kicker="Sign in"
+      title="Keep going without losing the thread."
+      body="Crystal v1 supports a real guest forecast lane, but saving, following, and internal beta surfaces stay behind sign-in so the product never offers buttons that dead-end."
+    >
+      <button
+        type="button"
+        onClick={onLogin}
+        className="rounded-full bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800"
+      >
+        Sign in with Google
+      </button>
+    </UtilitySurface>
+  );
+}
+
+function PricingPage({ onLogin }: { onLogin: () => void }) {
+  return (
+    <UtilitySurface
+      kicker="Pricing"
+      title="Simple plans, same ambition."
+      body="Crystal keeps the prediction surface simple while plans mainly control usage budget, longer horizons, and deeper simulation layers."
+    >
+      <div className="grid gap-5 lg:grid-cols-3">
+        {(['free', 'plus', 'pro'] as const).map((plan) => (
+          <div key={plan} className="rounded-[28px] border border-slate-200 bg-slate-50 p-6">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">{getPlanLabel(plan)}</div>
+            <div className="mt-3 text-3xl font-semibold tracking-[-0.04em] text-slate-950">
+              EUR {PLAN_OFFERS[plan].monthlyPrice}
+              <span className="text-base font-medium text-slate-500"> / month</span>
+            </div>
+            <p className="mt-4 text-sm leading-7 text-slate-600">{PLAN_OFFERS[plan].headline}</p>
+            <div className="mt-5 space-y-2 text-sm leading-7 text-slate-700">
+              {PLAN_OFFERS[plan].features.map((feature) => (
+                <p key={feature}>{feature}</p>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+      <button
+        type="button"
+        onClick={onLogin}
+        className="mt-8 rounded-full bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800"
+      >
+        Sign in to continue
+      </button>
+    </UtilitySurface>
+  );
+}
+
+function AboutPage() {
+  return (
+    <UtilitySurface
+      kicker="About"
+      title="Crystal is not a generic chatbot."
+      body="Crystal is a decision-intelligence product built to forecast broad domains over time. The v1 simplification reduces surface complexity, not engine ambition: Forecast for the main flow, World Sim for structured scenario work, Gallery for memory and version history."
+    />
+  );
+}
+
+function BetaSurface({
+  title,
+  body,
+  children,
+}: {
+  title: string;
+  body: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="space-y-6">
+      <UtilitySurface kicker="Beta route" title={title} body={body} />
+      {children}
+    </div>
+  );
+}
+
 function AppRouter() {
   const location = useLocation();
   const navigate = useNavigate();
   const [user, setUser] = useState<User | null>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
-  const [onboardingState, setOnboardingState] = useState<OnboardingState>(defaultOnboardingState);
   const [worldSimSceneOpen, setWorldSimSceneOpen] = useState(false);
   const [worldSimSceneMode, setWorldSimSceneMode] = useState<'preview' | 'live'>('preview');
   const [worldSimPreviewDataset, setWorldSimPreviewDataset] = useState<WorldSimSceneData>(() =>
     getDefaultWorldSimPreviewDataset()
   );
   const [worldSimJobRef, setWorldSimJobRef] = useState<WorldSimJobRef | null>(null);
-
-  useEffect(() => {
-    setOnboardingState(readOnboardingState());
-  }, []);
-
-  useEffect(() => {
-    persistOnboardingState(onboardingState);
-  }, [onboardingState]);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -180,9 +251,7 @@ function AppRouter() {
               ...defaults,
             });
           } else {
-            const data = userDoc.data();
-            const payload = getUserSyncPayload(data, currentUser, defaults);
-
+            const payload = getUserSyncPayload(userDoc.data(), currentUser, defaults);
             if (payload) {
               await setDoc(doc(db, 'users', currentUser.uid), payload, { merge: true });
             }
@@ -199,82 +268,6 @@ function AppRouter() {
     return () => unsubscribe();
   }, []);
 
-  useEffect(() => {
-    if (!isAuthReady || !user || location.pathname !== '/') return;
-    const params = new URLSearchParams(location.search);
-    const next = params.get('next') || readPendingAppPath();
-    if (next) {
-      clearPendingAppPath();
-      void navigate(sanitizeAppPath(next), { replace: true });
-    }
-  }, [isAuthReady, location.pathname, location.search, navigate, user]);
-
-  useEffect(() => {
-    if (location.pathname === '/app/nextletter') {
-      setOnboardingState((current) => {
-        if (current.completedChecklist.openedBriefing) return current;
-        return {
-          ...current,
-          completedChecklist: {
-            ...current.completedChecklist,
-            openedBriefing: true,
-          },
-        };
-      });
-    }
-  }, [location.pathname]);
-
-  const isGuest = !user;
-
-  const handleLogin = async (targetPath?: string) => {
-    const next = sanitizeAppPath(targetPath || new URLSearchParams(location.search).get('next') || readPendingAppPath() || '/app');
-    writePendingAppPath(next);
-
-    if (user) {
-      clearPendingAppPath();
-      await navigate(next, { replace: true });
-      return;
-    }
-
-    const signedInUser = await loginWithGoogle();
-    if (signedInUser) {
-      clearPendingAppPath();
-      await navigate(next, { replace: true });
-    }
-  };
-
-  const handleLogout = async () => {
-    await logout();
-    clearPendingAppPath();
-    await navigate('/', { replace: true });
-  };
-
-  const markChecklist = (key: OnboardingChecklistKey) => {
-    setOnboardingState((current) => {
-      if (current.completedChecklist[key]) return current;
-      return {
-        ...current,
-        completedChecklist: {
-          ...current.completedChecklist,
-          [key]: true,
-        },
-      };
-    });
-  };
-
-  const completeInlineIntro = () => {
-    setOnboardingState((current) => ({
-      ...current,
-      hasSeenIntro: true,
-      dismissedAt: new Date().toISOString(),
-    }));
-  };
-
-  const openForecast = (query = '') => {
-    const target = query ? `/app/forecast?q=${encodeURIComponent(query)}` : '/app/forecast';
-    void navigate(target);
-  };
-
   const openWorldSimScene = (dataset?: WorldSimSceneData, job?: WorldSimJobRef | null) => {
     const nextDataset = dataset || getDefaultWorldSimPreviewDataset();
     setWorldSimPreviewDataset(nextDataset);
@@ -283,115 +276,168 @@ function AppRouter() {
     setWorldSimSceneOpen(true);
   };
 
-  const renderAppRoute = (children: React.ReactNode) => {
-    if (!isAuthReady) {
-      return <AuthLoader />;
+  const handleLogin = async (targetPath?: string) => {
+    const next = sanitizeRoutePath(targetPath || `${location.pathname}${location.search}${location.hash}`);
+    writePendingRoute(next);
+
+    if (user) {
+      clearPendingRoute();
+      await navigate(next, { replace: true });
+      return;
     }
 
-    if (!user) {
-      const target = sanitizeAppPath(`${location.pathname}${location.search}${location.hash}`);
-      writePendingAppPath(target);
-      return <Navigate to={`/?next=${encodeURIComponent(target)}`} replace />;
+    const signedInUser = await loginWithGoogle();
+    if (signedInUser) {
+      clearPendingRoute();
+      await navigate(next, { replace: true });
     }
-
-    return (
-      <Suspense fallback={<ViewLoader />}>
-        <AppShell user={user} onLogout={handleLogout} onOpenWorldSimScene={() => openWorldSimScene()}>
-          {children}
-        </AppShell>
-      </Suspense>
-    );
   };
 
-  const forecastSeed = useMemo(() => new URLSearchParams(location.search).get('q') || '', [location.search]);
+  const handleLogout = async () => {
+    await logout();
+    clearPendingRoute();
+    await navigate('/forecast', { replace: true });
+  };
+
+  useEffect(() => {
+    if (!isAuthReady || !user) return;
+    if (location.pathname !== '/signin') return;
+    const next = new URLSearchParams(location.search).get('next') || readPendingRoute() || '/forecast';
+    clearPendingRoute();
+    void navigate(sanitizeRoutePath(next), { replace: true });
+  }, [isAuthReady, location.pathname, location.search, navigate, user]);
+
+  if (!isAuthReady) {
+    return <AuthLoader />;
+  }
+
+  const shell = (children: React.ReactNode) => (
+    <PrimaryShell
+      user={user}
+      onLogin={() => void handleLogin(`${location.pathname}${location.search}${location.hash}`)}
+      onLogout={() => void handleLogout()}
+    >
+      {children}
+    </PrimaryShell>
+  );
+
+  const protectedRoute = (children: React.ReactNode) =>
+    user ? children : <SigninPrompt onLogin={() => void handleLogin(`${location.pathname}${location.search}${location.hash}`)} />;
+
+  const betaNextletterEnabled = isFeatureEnabled('beta_nextletter');
+  const betaWatchlistEnabled = isFeatureEnabled('beta_watchlist');
+  const internalCoverageEnabled = isFeatureEnabled('internal_coverage');
+  const v1ShellEnabled = isFeatureEnabled('v1_shell');
 
   return (
-    <CrystalPlanProvider user={user} isGuest={isGuest} onLogin={() => handleLogin('/app')}>
+    <CrystalPlanProvider user={user} isGuest={!user} onLogin={() => void handleLogin('/forecast')}>
       <Routes>
+        <Route path="/" element={<Navigate to={v1ShellEnabled ? '/forecast' : '/forecast'} replace />} />
+        <Route path="/forecast" element={shell(<ForecastPage user={user} onLogin={() => void handleLogin('/forecast')} />)} />
+        <Route path="/sim" element={shell(<WorldSimPage user={user} onLogin={() => void handleLogin('/sim')} />)} />
+        <Route path="/gallery" element={shell(<GalleryPage user={user} onLogin={() => void handleLogin('/gallery')} />)} />
+        <Route path="/signin" element={shell(<SigninPrompt onLogin={() => void handleLogin(readPendingRoute() || '/forecast')} />)} />
+        <Route path="/pricing" element={shell(<PricingPage onLogin={() => void handleLogin('/pricing')} />)} />
+        <Route path="/about" element={shell(<AboutPage />)} />
         <Route
-          path="/"
+          path="/settings"
+          element={shell(
+            protectedRoute(
+              <Suspense fallback={<ViewLoader />}>
+                <Profile user={user} isGuest={false} onLogin={() => void handleLogin('/settings')} />
+              </Suspense>
+            )
+          )}
+        />
+
+        <Route path="/app" element={<Navigate to="/forecast" replace />} />
+        <Route path="/app/forecast" element={<Navigate to="/forecast" replace />} />
+        <Route path="/app/profile" element={<Navigate to="/settings" replace />} />
+        <Route path="/app/nextletter" element={<Navigate to="/beta/nextletter" replace />} />
+        <Route path="/app/watchlist" element={<Navigate to="/beta/watchlist" replace />} />
+
+        <Route
+          path="/beta/nextletter"
           element={
-            <Suspense fallback={<AuthLoader />}>
-              <MarketingLanding
-                isAuthenticated={Boolean(user)}
-                onPrimaryAction={() => {
-                  if (user) {
-                    void navigate('/app');
-                    return;
-                  }
-                  void handleLogin('/app');
-                }}
-                onOpenWorldSimPreview={() => openWorldSimScene(getDefaultWorldSimPreviewDataset())}
-              />
-            </Suspense>
+            betaNextletterEnabled
+              ? shell(
+                  protectedRoute(
+                    <Suspense fallback={<ViewLoader />}>
+                      <BetaSurface
+                        title="Nextletter stays alive, but outside the primary product surface."
+                        body="This module is preserved behind a beta route while Forecast, World Sim, and Gallery become the public v1 entry points."
+                      >
+                        <Nextletter
+                          user={user}
+                          isGuest={false}
+                          onLogin={() => void handleLogin('/beta/nextletter')}
+                          onGenerateCard={(query) => void navigate(`/forecast?q=${encodeURIComponent(query)}`)}
+                          onOpenWorldSimScene={openWorldSimScene}
+                        />
+                      </BetaSurface>
+                    </Suspense>
+                  )
+                )
+              : <Navigate to="/forecast" replace />
           }
         />
         <Route
-          path="/app"
-          element={renderAppRoute(
-            <Suspense fallback={<ViewLoader />}>
-              <AppHome
-                user={user}
-                onboardingState={onboardingState}
-                onCompleteIntro={completeInlineIntro}
-                onNavigate={(path) => void navigate(path)}
-                onForecastIntent={openForecast}
-                onOpenWorldSimScene={openWorldSimScene}
-              />
-            </Suspense>
+          path="/beta/watchlist"
+          element={
+            betaWatchlistEnabled
+              ? shell(
+                  protectedRoute(
+                    <Suspense fallback={<ViewLoader />}>
+                      <BetaSurface
+                        title="Watchlist remains available as a secondary memory surface."
+                        body="The underlying follow/save infrastructure stays intact, but Watchlist leaves the main navigation in v1."
+                      >
+                        <Watchlist user={user} isGuest={false} onLogin={() => void handleLogin('/beta/watchlist')} />
+                      </BetaSurface>
+                    </Suspense>
+                  )
+                )
+              : <Navigate to="/forecast" replace />
+          }
+        />
+        <Route
+          path="/beta/profile"
+          element={shell(
+            protectedRoute(
+              <Suspense fallback={<ViewLoader />}>
+                <BetaSurface
+                  title="Profile is preserved as settings and context memory."
+                  body="The personalization layer stays available, but it no longer competes with Forecast in the public product shell."
+                >
+                  <Profile user={user} isGuest={false} onLogin={() => void handleLogin('/beta/profile')} />
+                </BetaSurface>
+              </Suspense>
+            )
           )}
         />
         <Route
-          path="/app/forecast"
-          element={renderAppRoute(
-            <Suspense fallback={<ViewLoader />}>
-              <Search
-                user={user}
-                isGuest={false}
-                onLogin={() => handleLogin('/app')}
-                initialQuery={forecastSeed}
-                onForecastComplete={() => markChecklist('firstForecast')}
-                onOpenWorldSimScene={openWorldSimScene}
-              />
-            </Suspense>
-          )}
+          path="/beta/coverage"
+          element={
+            internalCoverageEnabled
+              ? shell(
+                  <Suspense fallback={<ViewLoader />}>
+                    <BetaSurface
+                      title="Coverage explorer is still available for internal or beta use."
+                      body="This route keeps the registry and coverage debug surface alive without diluting the public v1 experience."
+                    >
+                      <DomainCoverageExplorer
+                        variant="full"
+                        title="Coverage explorer"
+                        description="Use this internal route to inspect blueprint coverage, publication status, and registry depth."
+                      />
+                    </BetaSurface>
+                  </Suspense>
+                )
+              : <Navigate to="/forecast" replace />
+          }
         />
-        <Route
-          path="/app/nextletter"
-          element={renderAppRoute(
-            <Suspense fallback={<ViewLoader />}>
-              <Nextletter
-                user={user}
-                isGuest={false}
-                onLogin={() => handleLogin('/app')}
-                onGenerateCard={(query) => openForecast(query)}
-                onOpenWorldSimScene={openWorldSimScene}
-              />
-            </Suspense>
-          )}
-        />
-        <Route
-          path="/app/watchlist"
-          element={renderAppRoute(
-            <Suspense fallback={<ViewLoader />}>
-              <Watchlist
-                user={user}
-                isGuest={false}
-                onLogin={() => handleLogin('/app')}
-                onChecklistComplete={() => markChecklist('firstWatchlist')}
-              />
-            </Suspense>
-          )}
-        />
-        <Route
-          path="/app/profile"
-          element={renderAppRoute(
-            <Suspense fallback={<ViewLoader />}>
-              <Profile user={user} isGuest={false} onLogin={() => handleLogin('/app')} />
-            </Suspense>
-          )}
-        />
-        <Route path="*" element={<Navigate to={user ? '/app' : '/'} replace />} />
+
+        <Route path="*" element={<Navigate to="/forecast" replace />} />
       </Routes>
 
       {worldSimSceneOpen && (

@@ -14,6 +14,17 @@ export interface TrustLayer {
   };
 }
 
+export interface EvidenceDrawer {
+  metrics_provenance: string[];
+  freshness_summary: {
+    as_of_utc: string;
+    cadence: string;
+    staleness_bucket: string;
+  };
+  coverage_notes: string[];
+  gating_reason: string;
+}
+
 export interface Scenario {
   scenario_id: string;
   label: string;
@@ -31,6 +42,16 @@ export interface Driver {
   direction: 'up' | 'down' | 'flat';
   contribution: number;
   historical_trend?: { year: number; value: number }[];
+}
+
+export interface FixtureRead {
+  fixture_id: string;
+  label: string;
+  primary_call: string;
+  confidence: number;
+  rationale: string;
+  evidence: string[];
+  caution?: string;
 }
 
 export interface PredictionMarketFrame {
@@ -96,6 +117,9 @@ export interface WorldSimDigest {
 export interface CardData {
   card_id: string;
   card_type: string;
+  canonical_card_type?: string;
+  card_state?: 'published' | 'limited' | 'blocked';
+  version_id?: string;
   domain: string;
   stakes_level: 'low' | 'medium' | 'high' | 'imminent';
   risk_band?: 'low' | 'medium' | 'high' | 'extreme';
@@ -106,6 +130,10 @@ export interface CardData {
   scenario_set?: Scenario[];
   so_what?: Option[];
   drivers?: Driver[];
+  fixture_reads?: FixtureRead[];
+  what_to_watch?: string[];
+  how_to_raise_confidence?: string[];
+  evidence_drawer?: EvidenceDrawer;
   ranked_list?: {
     item_id: string;
     label: string;
