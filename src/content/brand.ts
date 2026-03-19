@@ -47,9 +47,9 @@ export const SECTION_COPY = {
     navDescription: 'Turn a question into a clear answer, the reasoning behind it, and the next signals worth watching.',
     headerDescription: 'A calmer way to turn uncertainty into a readable forecast, useful context, and next steps.',
     heroKicker: 'Forecast',
-    heroTitle: 'One clear question. One clear read.',
+    heroTitle: 'Ask the question. Read the verdict.',
     heroBody:
-      'Crystal keeps the flow simple: what may happen, why it looks plausible, and when it is worth opening the WorldSim layer.',
+      'Crystal should surface the main call first, show the real drivers behind it, and keep the simulation layer separate unless it genuinely changes the read.',
   },
   nextletter: {
     navDescription: 'A daily read that keeps signals, context, and next moves in one useful place.',

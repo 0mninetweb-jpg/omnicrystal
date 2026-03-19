@@ -22,6 +22,19 @@ export interface RuntimeCapabilities {
     chat?: string;
     copy?: string;
   };
+  sportsProvider?: string;
+  sportsAvailable?: boolean;
+  sportsMode?: 'live' | 'preview';
+  registryVersionId?: string;
+  registryPolicyProfile?: string;
+  catalogDomains?: number;
+  coverageUnits?: number;
+  coverageScore?: number;
+  depthScore?: number;
+  freshnessScore?: number;
+  publishedDomains?: number;
+  limitedDomains?: number;
+  blockedDomains?: number;
   worldSimProvider?: string;
   worldSimAdapterMode?: string;
   worldSimModels?: {

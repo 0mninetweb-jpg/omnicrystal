@@ -176,6 +176,9 @@ async function probeRuntimeCapabilities(): Promise<RuntimeCapabilities> {
           }
         : undefined;
     const worldSimProvider = typeof healthPayload?.worldSim?.provider === 'string' ? healthPayload.worldSim.provider : undefined;
+    const sportsProvider = typeof healthPayload?.sports?.provider === 'string' ? healthPayload.sports.provider : undefined;
+    const sportsAvailable = Boolean(healthPayload?.sports?.available);
+    const sportsMode = healthPayload?.sports?.mode === 'live' ? 'live' : 'preview';
     const worldSimAdapterMode =
       typeof healthPayload?.worldSim?.adapterMode === 'string' ? healthPayload.worldSim.adapterMode : undefined;
     const worldSimModels =
@@ -244,6 +247,34 @@ async function probeRuntimeCapabilities(): Promise<RuntimeCapabilities> {
       typeof healthPayload?.billing?.message === 'string' && healthPayload.billing.message
         ? healthPayload.billing.message
         : undefined;
+    const registryVersionId =
+      typeof healthPayload?.registry?.catalogVersionId === 'string' ? healthPayload.registry.catalogVersionId : undefined;
+    const registryPolicyProfile =
+      typeof healthPayload?.registry?.policyProfile === 'string' ? healthPayload.registry.policyProfile : undefined;
+    const catalogDomains = Number.isFinite(Number(healthPayload?.registry?.domains))
+      ? Number(healthPayload.registry.domains)
+      : undefined;
+    const coverageUnits = Number.isFinite(Number(healthPayload?.coverage?.totals?.coverage_units))
+      ? Number(healthPayload.coverage.totals.coverage_units)
+      : undefined;
+    const coverageScore = Number.isFinite(Number(healthPayload?.coverage?.scores?.coverage_score))
+      ? Number(healthPayload.coverage.scores.coverage_score)
+      : undefined;
+    const depthScore = Number.isFinite(Number(healthPayload?.coverage?.scores?.depth_score))
+      ? Number(healthPayload.coverage.scores.depth_score)
+      : undefined;
+    const freshnessScore = Number.isFinite(Number(healthPayload?.coverage?.scores?.freshness_score))
+      ? Number(healthPayload.coverage.scores.freshness_score)
+      : undefined;
+    const publishedDomains = Number.isFinite(Number(healthPayload?.coverage?.totals?.published_domains))
+      ? Number(healthPayload.coverage.totals.published_domains)
+      : undefined;
+    const limitedDomains = Number.isFinite(Number(healthPayload?.coverage?.totals?.limited_domains))
+      ? Number(healthPayload.coverage.totals.limited_domains)
+      : undefined;
+    const blockedDomains = Number.isFinite(Number(healthPayload?.coverage?.totals?.blocked_domains))
+      ? Number(healthPayload.coverage.totals.blocked_domains)
+      : undefined;
 
     const capabilities: RuntimeCapabilities = {
       isChecking: false,
@@ -264,6 +295,19 @@ async function probeRuntimeCapabilities(): Promise<RuntimeCapabilities> {
       forecastProvider,
       forecastModel,
       forecastModels,
+      sportsProvider,
+      sportsAvailable,
+      sportsMode,
+      registryVersionId,
+      registryPolicyProfile,
+      catalogDomains,
+      coverageUnits,
+      coverageScore,
+      depthScore,
+      freshnessScore,
+      publishedDomains,
+      limitedDomains,
+      blockedDomains,
       worldSimProvider,
       worldSimAdapterMode,
       worldSimModels,

@@ -26,6 +26,7 @@ import { getDefaultWorldSimPreviewDataset } from '../lib/worldSimScene';
 import { formatProbabilityLabel, getMarketSignalLabel, getMarketSignalState, hasPredictionMarketFrame } from '../lib/predictionMarket';
 import { scheduleIdleTask } from '../lib/scheduleIdle';
 import { cn } from './CrystalCard';
+import { DomainCoverageExplorer } from './DomainCoverageExplorer';
 import type { WorldSimSceneData } from '../types/worldSim';
 
 type HomeProps = {
@@ -409,6 +410,11 @@ export function Home({
           </div>
         </section>
       )}
+
+      <DomainCoverageExplorer
+        title="Crystal blueprint registry"
+        description="Home now exposes the actual product catalog behind Crystal: all blueprint domains are registered, while publication remains honest about what is fully live, partially covered, or still blocked."
+      />
 
       <section className="content-auto grid gap-5 xl:grid-cols-[1.05fr_0.95fr]">
         <div className="editorial-panel rounded-[36px] p-6 md:p-7">

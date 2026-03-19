@@ -27,6 +27,7 @@ import { useAppShell } from '../context/AppShellContext';
 import { formatCredits, getPlanLabel, getPredictActionSpec } from '../lib/crystalPlans';
 import { createWorldSimSceneData } from '../lib/worldSimScene';
 import { PRODUCT_BRAND, RUNTIME_COPY, SECTION_COPY, WORLD_SIM_BRAND } from '../content/brand';
+import { DomainCoverageExplorer } from './DomainCoverageExplorer';
 import { WorldSimInlineCard } from './WorldSimInlineCard';
 import type { WorldSimJobRef, WorldSimJobResult } from '../types/worldSimJob';
 import { isTerminalWorldSimJobStatus as isWorldSimJobTerminal } from '../types/worldSimJob';
@@ -164,6 +165,12 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
       }),
     [canUseWorldSim, generatedCard, query]
   );
+  const isSportsForecastCard = Boolean(
+    generatedCard &&
+      (generatedCard.card_type === 'sports_fixture_board' ||
+        generatedCard.domain === 'A.29.sports_performance_and_outcomes' ||
+        generatedCard.domain === 'A.13.sports.match_outcomes')
+  );
 
   useEffect(() => {
     if (initialQuery && !hasSearched) {
@@ -180,10 +187,11 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
 
   useEffect(() => {
     const jobId = generatedCard?.world_sim_job?.jobId;
+    if (isSportsForecastCard) return;
     if (!jobId || autoOpenedWorldSimJobId === jobId) return;
     onOpenWorldSimScene(worldSimResultScene, generatedCard?.world_sim_job || null);
     setAutoOpenedWorldSimJobId(jobId);
-  }, [autoOpenedWorldSimJobId, generatedCard?.world_sim_job, onOpenWorldSimScene, worldSimResultScene]);
+  }, [autoOpenedWorldSimJobId, generatedCard?.world_sim_job, isSportsForecastCard, onOpenWorldSimScene, worldSimResultScene]);
 
   useEffect(() => {
     const jobId = generatedCard?.world_sim_job?.jobId;
@@ -591,18 +599,18 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
             <div className="mt-7 grid gap-3 sm:grid-cols-3">
               <div className="metric-card rounded-[24px] px-4 py-4">
                 <div className="section-kicker !text-slate-500">What may happen</div>
-                <div className="mt-2 text-xl font-display font-semibold text-slate-950">Answer first</div>
-                <div className="mt-2 text-sm leading-6 text-slate-600">Keep the question concrete and Crystal answers in one readable pass.</div>
+                <div className="mt-2 text-xl font-display font-semibold text-slate-950">Direct verdict</div>
+                <div className="mt-2 text-sm leading-6 text-slate-600">Lead with the call that matters, then expand only where the signal is real.</div>
               </div>
               <div className="metric-card rounded-[24px] px-4 py-4">
                 <div className="section-kicker !text-slate-500">Why</div>
-                <div className="mt-2 text-xl font-display font-semibold text-slate-950">Drivers next</div>
-                <div className="mt-2 text-sm leading-6 text-slate-600">Read the reasoning, context, and the next signals worth watching.</div>
+                <div className="mt-2 text-xl font-display font-semibold text-slate-950">Real drivers</div>
+                <div className="mt-2 text-sm leading-6 text-slate-600">Show the evidence behind the call instead of generic scenario filler.</div>
               </div>
               <div className="metric-card rounded-[24px] px-4 py-4">
                 <div className="section-kicker !text-slate-500">{worldSimResultScene.mode === 'live' ? worldSimLabel : WORLD_SIM_BRAND.previewName}</div>
-                <div className="mt-2 text-xl font-display font-semibold text-slate-950">Open only when needed</div>
-                <div className="mt-2 text-sm leading-6 text-slate-600">Use the deeper layer when actors, pressure, or chain reactions change the read.</div>
+                <div className="mt-2 text-xl font-display font-semibold text-slate-950">Second layer only</div>
+                <div className="mt-2 text-sm leading-6 text-slate-600">Keep Forecast readable. Open WorldSim only when the system dynamics genuinely add value.</div>
               </div>
             </div>
 
@@ -635,7 +643,7 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
                 </span>
               </div>
               <div className="mt-4 text-sm leading-7 text-slate-500">
-              A calmer studio for direct forecasts, deeper reasoning, and selective simulation layers.
+              A cleaner forecast studio: direct verdict, ranked reads, and a separate simulation layer when needed.
               </div>
             <div className="mt-4 rounded-[20px] border border-slate-200 bg-white/82 px-4 py-3 text-sm font-medium text-slate-600">
               {capabilities.message}
@@ -693,9 +701,9 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
 
           <div className="grid gap-3 rounded-[28px] border border-white/80 bg-white/78 p-4 shadow-[0_18px_38px_rgba(15,23,42,0.05)] md:grid-cols-3">
             {[
-              'What may happen: a direct and readable answer.',
-              'Why: the main drivers behind the forecast.',
-              isWorldSimMode ? 'WorldSim: the deeper layer for actors, pressure, and chain reactions.' : 'WorldSim: it opens only when you need more depth.',
+              'Verdict first: the main call should be visible immediately.',
+              'Why it holds: show the real drivers and where confidence drops.',
+              isWorldSimMode ? 'WorldSim stays separate: extra depth without polluting the main read.' : 'WorldSim remains optional and separate from the base forecast.',
             ].map((item) => (
               <div key={item} className="rounded-[18px] bg-slate-50 px-4 py-3 text-sm leading-7 text-slate-600">
                 {item}
@@ -771,25 +779,33 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
       )}
 
       {!hasSearched && !isLoadingPlan && !isLoadingPrediction && (
-        <section className="grid gap-5 lg:grid-cols-[1.05fr_0.95fr]">
-          <div className="editorial-panel content-auto rounded-[32px] p-6">
-            <div className="section-kicker">How to ask</div>
-            <h3 className="mt-3 text-2xl font-display font-semibold text-slate-950">Think about the question like a decision.</h3>
-            <div className="mt-5 space-y-3">
-              {[
-                'Ask something concrete: what do you actually want to understand?',
-                'Use 30 days when you need to act soon, 6 months when you need wider orientation.',
-                'Add profile and watchlist context to make the answer feel closer to your world.',
-              ].map((item) => (
-                <div key={item} className="flex items-start gap-3 rounded-[22px] border border-slate-200 bg-white p-4 text-sm font-medium leading-7 text-slate-600">
-                  <div className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full bg-[#1453e8]" />
-                  <span>{item}</span>
-                </div>
-              ))}
+        <>
+          <section className="grid gap-5 lg:grid-cols-[1.05fr_0.95fr]">
+            <div className="editorial-panel content-auto rounded-[32px] p-6">
+              <div className="section-kicker">How to ask</div>
+              <h3 className="mt-3 text-2xl font-display font-semibold text-slate-950">Think about the question like a decision.</h3>
+              <div className="mt-5 space-y-3">
+                {[
+                  'Ask something concrete: what do you actually want to understand?',
+                  'Use 30 days when you need to act soon, 6 months when you need wider orientation.',
+                  'Add profile and watchlist context to make the answer feel closer to your world.',
+                ].map((item) => (
+                  <div key={item} className="flex items-start gap-3 rounded-[22px] border border-slate-200 bg-white p-4 text-sm font-medium leading-7 text-slate-600">
+                    <div className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full bg-[#1453e8]" />
+                    <span>{item}</span>
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
-          <WorldSimInlineCard data={worldSimPreviewScene} onOpen={() => onOpenWorldSimScene(worldSimPreviewScene, null)} />
-        </section>
+            <WorldSimInlineCard data={worldSimPreviewScene} onOpen={() => onOpenWorldSimScene(worldSimPreviewScene, null)} />
+          </section>
+
+          <DomainCoverageExplorer
+            variant="compact"
+            title="Blueprint registry"
+            description="The forecast studio now knows the full Crystal blueprint. Domains only become readable cards when their evidence coverage is genuinely ready."
+          />
+        </>
       )}
 
       {generatedCard && (
@@ -844,7 +860,7 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
                       </div>
                     </div>
                   ))}
-                  {generatedCard.world_sim?.enabled && (
+                  {generatedCard.world_sim?.enabled && !isSportsForecastCard && (
                     <div className="rounded-[24px] border border-rose-200 bg-rose-50 p-5">
                       <div className="section-kicker !text-rose-600">{WORLD_SIM_BRAND.name}</div>
                       <p className="mt-3 text-sm leading-7 text-rose-800">
@@ -855,13 +871,37 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
                 </div>
               </div>
 
-              <WorldSimInlineCard
-                data={worldSimResultScene}
-                compact
-                job={generatedCard.world_sim_job || null}
-                onOpen={() => onOpenWorldSimScene(worldSimResultScene, generatedCard.world_sim_job || null)}
-                ctaLabel={generatedCard.world_sim?.enabled ? 'Open the simulation layer' : WORLD_SIM_BRAND.enterLabel}
-              />
+              {isSportsForecastCard ? (
+                <details className="editorial-panel rounded-[28px] p-5">
+                  <summary className="cursor-pointer list-none text-sm font-semibold text-slate-900">
+                    Nota WorldSim
+                  </summary>
+                  <div className="mt-4 rounded-[24px] border border-rose-200 bg-rose-50 p-5">
+                    <div className="section-kicker !text-rose-600">{capabilities.worldSimStatusLabel}</div>
+                    <p className="mt-3 text-sm leading-7 text-rose-800">
+                      {generatedCard.world_sim?.enabled
+                        ? 'WorldSim is attached as a secondary layer for system dynamics. It stays outside the main sports verdict.'
+                        : capabilities.worldSimStatusDetail}
+                    </p>
+                    <div className="mt-4">
+                      <button
+                        onClick={() => onOpenWorldSimScene(worldSimResultScene, generatedCard.world_sim_job || null)}
+                        className="inline-flex items-center gap-2 rounded-full border border-rose-300 bg-white px-4 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-50"
+                      >
+                        {generatedCard.world_sim?.enabled ? 'Open the simulation layer' : WORLD_SIM_BRAND.enterLabel}
+                      </button>
+                    </div>
+                  </div>
+                </details>
+              ) : (
+                <WorldSimInlineCard
+                  data={worldSimResultScene}
+                  compact
+                  job={generatedCard.world_sim_job || null}
+                  onOpen={() => onOpenWorldSimScene(worldSimResultScene, generatedCard.world_sim_job || null)}
+                  ctaLabel={generatedCard.world_sim?.enabled ? 'Open the simulation layer' : WORLD_SIM_BRAND.enterLabel}
+                />
+              )}
             </div>
           </div>
 
@@ -899,6 +939,12 @@ export function Search({ user, isGuest, onLogin, initialQuery, onForecastComplet
               </div>
             </details>
           )}
+
+          <DomainCoverageExplorer
+            variant="compact"
+            title="Coverage explorer"
+            description="Use this to check whether a domain is fully published, still limited, or intentionally blocked while the evidence fabric catches up."
+          />
         </section>
       )}
     </div>

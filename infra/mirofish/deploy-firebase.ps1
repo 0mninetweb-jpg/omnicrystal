@@ -11,6 +11,9 @@ param(
   [string]$LlmModelForecast = "openai/gpt-4.1-mini",
   [string]$LlmModelChat = "openai/gpt-4.1-mini",
   [string]$LlmModelCopy = "openai/gpt-4.1-mini",
+  [string]$SportsProvider = "api-football",
+  [string]$SportsProviderBaseUrl = "https://v3.football.api-sports.io",
+  [string]$SportsApiKey = "",
   [switch]$BillingTestMode,
   [switch]$SkipFunctions,
   [switch]$SkipFirestore,
@@ -92,6 +95,9 @@ $envContent = @(
   "LLM_MODEL_FORECAST=$LlmModelForecast"
   "LLM_MODEL_CHAT=$LlmModelChat"
   "LLM_MODEL_COPY=$LlmModelCopy"
+  "SPORTS_PROVIDER=$SportsProvider"
+  "SPORTS_PROVIDER_BASE_URL=$SportsProviderBaseUrl"
+  "API_FOOTBALL_KEY=$SportsApiKey"
   ""
   "BILLING_TEST_MODE=$($BillingTestMode.IsPresent.ToString().ToLower())"
 )

@@ -17,6 +17,9 @@ param(
   [string]$GraphModel = "openai/gpt-4.1-mini",
   [string]$SimModel = "openai/gpt-4.1-mini",
   [string]$ReportModel = "openai/gpt-4.1",
+  [string]$SportsProvider = "api-football",
+  [string]$SportsProviderBaseUrl = "https://v3.football.api-sports.io",
+  [string]$SportsApiKey = "",
   [Parameter(Mandatory = $true)]
   [string]$OpenRouterApiKey,
   [Parameter(Mandatory = $true)]
@@ -289,7 +292,10 @@ try {
       -LlmModelQuery $GraphModel `
       -LlmModelForecast $GraphModel `
       -LlmModelChat $GraphModel `
-      -LlmModelCopy $GraphModel
+      -LlmModelCopy $GraphModel `
+      -SportsProvider $SportsProvider `
+      -SportsProviderBaseUrl $SportsProviderBaseUrl `
+      -SportsApiKey $SportsApiKey
     if ($LASTEXITCODE -ne 0) {
       throw "Firebase deploy failed."
     }
