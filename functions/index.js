@@ -49,6 +49,15 @@ const {
   resolveCardTypeId,
   resolveDomainId,
 } = require("./catalogRegistry");
+const {
+  buildRoutingHints,
+  mergeQueryPlanWithRouting,
+  computeEvidenceQuality,
+  finalizeScorecard,
+  buildDriverObjects,
+  normalizeTextList,
+  clamp01: predictionClamp01,
+} = require("./predictionCore");
 
 const GEMINI_API_KEY = defineSecret("GEMINI_API_KEY");
 const NIXTLA_API_KEY = defineSecret("NIXTLA_API_KEY");
@@ -80,6 +89,7 @@ const STRIPE_PRICING = {
 
 const DEFAULT_PROFILE_AI_FREE_MESSAGES = 10;
 const PLAN_ORDER = ["free", "plus", "pro"];
+const PREDICTION_CORE_VERSION = "v2";
 
 function isBillingTestMode() {
   return ["1", "true", "yes", "on"].includes(String(process.env.BILLING_TEST_MODE || "").trim().toLowerCase());
@@ -160,9 +170,11 @@ function createQueryHash(queryText) {
 function createCardCacheKey(queryText, queryPlan = {}, engine = "standard") {
   return createQueryHash(
     JSON.stringify({
+      predictionCoreVersion: PREDICTION_CORE_VERSION,
       queryText: queryText.trim().toLowerCase(),
       engine,
       domain: queryPlan?.domain || queryPlan?.domain_id || "",
+      primaryDomain: queryPlan?.primary_domain_id || "",
       horizons: Array.isArray(queryPlan?.horizons) ? queryPlan.horizons.map((item) => item?.horizon_id || "") : [],
       filters: queryPlan?.filters || {},
       constraints: queryPlan?.constraints || {},
@@ -182,6 +194,10 @@ function clamp01(value, fallback = 0.5) {
 
 function sanitizeList(list) {
   return Array.isArray(list) ? list.filter((item) => typeof item === "string" && item.trim()) : [];
+}
+
+function uniqueStrings(values = []) {
+  return [...new Set((Array.isArray(values) ? values : []).filter((item) => typeof item === "string" && item.trim()))];
 }
 
 function isPlaceholderText(value) {
@@ -738,9 +754,12 @@ async function applyStripeSubscriptionState(uid, subscription, options = {}) {
   await db.collection("users").doc(uid).set(patch, { merge: true });
 }
 
-function normalizeCard(card, queryPlan) {
+function normalizeCard(card, queryPlan, options = {}) {
   const nowIso = new Date().toISOString();
-  const domain = resolveDomainId(typeof card?.domain === "string" && card.domain ? card.domain : queryPlan?.domain_id || "general");
+  const scorecard = options?.scorecard || {};
+  const evidenceBundle = options?.evidenceBundle || {};
+  const routingDomain = queryPlan?.primary_domain_id || queryPlan?.domain_id || queryPlan?.domain || "general";
+  const domain = resolveDomainId(typeof card?.domain === "string" && card.domain ? card.domain : routingDomain);
   const domainConfig = getDomain(domain);
   const sportsCard = isSportsDomain(domain) || safeText(card?.card_type) === SPORTS_FIXTURE_CARD_TYPE;
   const scenarioSet = Array.isArray(card?.scenario_set)
@@ -762,12 +781,14 @@ function normalizeCard(card, queryPlan) {
         }))
         .filter((option) => isMeaningfulText(option.label) && Boolean(option.tradeoff_note))
     : [];
-  const drivers = Array.isArray(card?.drivers)
-    ? card.drivers
+  const rawDrivers =
+    Array.isArray(card?.drivers) && card.drivers.length > 0 ? card.drivers : buildDriverObjects(scorecard.key_drivers || card?.key_drivers);
+  const drivers = Array.isArray(rawDrivers)
+    ? rawDrivers
         .map((driver, index) => ({
-          feature_key: safeText(driver?.feature_key),
+          feature_key: safeText(driver?.feature_key || driver?.label, `driver_${index + 1}`),
           direction: ["up", "down", "flat"].includes(driver?.direction) ? driver.direction : "flat",
-          contribution: Number.isFinite(Number(driver?.contribution)) ? Number(driver.contribution) : 0.33,
+          contribution: Number.isFinite(Number(driver?.contribution)) ? Number(driver.contribution) : Number((1 - index * 0.15).toFixed(2)),
           historical_trend: Array.isArray(driver?.historical_trend)
             ? driver.historical_trend
                 .filter((point) => Number.isFinite(Number(point?.year)) && Number.isFinite(Number(point?.value)))
@@ -777,11 +798,7 @@ function normalizeCard(card, queryPlan) {
                 }))
             : [],
         }))
-        .filter((driver, index) => isMeaningfulText(driver.feature_key || `driver_${index + 1}`))
-        .map((driver, index) => ({
-          ...driver,
-          feature_key: driver.feature_key || `driver_${index + 1}`,
-        }))
+        .filter((driver) => isMeaningfulText(driver.feature_key))
     : [];
   const fixtureReads = normalizeFixtureReads(card?.fixture_reads || card?.fixtureReads);
   const normalizedRankedList = Array.isArray(card?.ranked_list)
@@ -796,12 +813,46 @@ function normalizeCard(card, queryPlan) {
         .filter((item) => isMeaningfulText(item.label))
     : [];
   const rankedList = normalizedRankedList.length > 0 ? normalizedRankedList : sportsCard ? buildSportsRankedList(fixtureReads) : [];
-  const cardState =
+  let cardState =
     card?.card_state === "published" || card?.card_state === "limited" || card?.card_state === "blocked"
       ? card.card_state
-      : domainConfig.current_state;
-  const whatToWatch = sanitizeList(card?.what_to_watch || card?.whatToWatch).slice(0, 3);
-  const howToRaiseConfidence = sanitizeList(card?.how_to_raise_confidence || card?.howToRaiseConfidence).slice(0, 3);
+      : scorecard?.publication_state === "published" || scorecard?.publication_state === "limited" || scorecard?.publication_state === "blocked"
+        ? scorecard.publication_state
+        : domainConfig.current_state === "published"
+          ? "published"
+          : "limited";
+  if (cardState === "blocked" && !evidenceBundle?.hard_stop && safeText(scorecard?.primary_call || card?.primary_call)) {
+    cardState = "limited";
+  }
+
+  const counterSignals = normalizeTextList(card?.counter_signals || scorecard?.counter_signals, 4);
+  const historicalAnchors = normalizeTextList(card?.historical_anchors || scorecard?.historical_anchors, 4);
+  const invalidators = normalizeTextList(card?.invalidators || scorecard?.invalidators, 4);
+  const whatToWatch = sanitizeList(card?.what_to_watch || card?.whatToWatch)
+    .concat(invalidators)
+    .filter(Boolean)
+    .slice(0, 4);
+  const coverageNotes = uniqueStrings(
+    sanitizeList(card?.evidence_drawer?.coverage_notes).concat(
+      normalizeTextList(scorecard?.publication_basis?.notes, 4),
+      normalizeTextList(evidenceBundle?.notes, 4)
+    )
+  ).slice(0, 4);
+  const howToRaiseConfidence = uniqueStrings(
+    sanitizeList(card?.how_to_raise_confidence || card?.howToRaiseConfidence).concat(
+      cardState !== "published" && !coverageNotes.length ? [safeText(domainConfig.status_reason)] : [],
+      evidenceBundle?.historical_baseline_20y ? [] : ["Add a stronger historical baseline for the core entity or geography."],
+      Array.isArray(evidenceBundle?.live_signals) && evidenceBundle.live_signals.length > 0
+        ? []
+        : ["Add fresher live signals before promoting this read."]
+    )
+  ).slice(0, 4);
+
+  const evidenceQuality =
+    evidenceBundle?.evidence_quality && typeof evidenceBundle.evidence_quality === "object"
+      ? evidenceBundle.evidence_quality
+      : computeEvidenceQuality(evidenceBundle, domainConfig, options?.engine || "standard");
+
   const evidenceDrawer =
     card?.evidence_drawer && typeof card.evidence_drawer === "object"
       ? {
@@ -811,63 +862,148 @@ function normalizeCard(card, queryPlan) {
             cadence: safeText(card.evidence_drawer?.freshness_summary?.cadence, domainConfig.refresh_cadence),
             staleness_bucket: safeText(
               card.evidence_drawer?.freshness_summary?.staleness_bucket,
-              mapCoverageStateToFreshness(cardState)
+              evidenceQuality.freshness_score >= 0.66 ? "fresh" : evidenceQuality.freshness_score <= 0.32 ? "stale" : "unknown"
             ),
           },
-          coverage_notes: sanitizeList(card.evidence_drawer.coverage_notes),
+          coverage_notes: coverageNotes,
           gating_reason: safeText(card.evidence_drawer.gating_reason, cardState),
         }
-      : createEvidenceDrawer(card, domainConfig, nowIso);
+      : {
+          ...createEvidenceDrawer(card, domainConfig, nowIso),
+          metrics_provenance: uniqueStrings(
+            sanitizeList(evidenceBundle?.source_ledger).concat(domainConfig.source_allowlist || [])
+          ).slice(0, 6),
+          freshness_summary: {
+            as_of_utc: safeText(
+              card?.trust_layer?.freshness?.as_of_utc ||
+                evidenceBundle?.prediction_market_frame?.price_updated_at ||
+                nowIso,
+              nowIso
+            ),
+            cadence: safeText(domainConfig.refresh_cadence, "session-based"),
+            staleness_bucket: evidenceQuality.freshness_score >= 0.66 ? "fresh" : evidenceQuality.freshness_score <= 0.32 ? "stale" : "unknown",
+          },
+          coverage_notes: coverageNotes,
+          gating_reason: cardState === "blocked" ? "blocked_by_runtime" : cardState === "published" ? "published" : "limited_by_evidence",
+        };
+
   const canonicalCardType = resolveCardTypeId(
     card?.canonical_card_type || card?.card_type,
     sportsCard ? "rank_compare" : getDomainCardTypes(domain)[0]
   );
+
+  const confidenceScore =
+    Number.isFinite(Number(card?.trust_layer?.confidence_score))
+      ? clamp01(card.trust_layer.confidence_score, 0.5)
+      : Number.isFinite(Number(scorecard?.confidence_score))
+        ? clamp01(scorecard.confidence_score, 0.5)
+        : clamp01(
+            0.28 +
+              evidenceQuality.coverage_score * 0.28 +
+              evidenceQuality.freshness_score * 0.16 +
+              evidenceQuality.agreement_score * 0.14 -
+              evidenceQuality.conflict_score * 0.08,
+            0.5
+          );
+
+  const titleFallback = sportsCard
+    ? "Verdetto Crystal sulle partite selezionate"
+    : safeText(queryPlan?.entities?.[0]?.label)
+      ? `${safeText(queryPlan.entities[0].label)} forecast`
+      : "Crystal Forecast";
+  const summaryFallback = safeText(scorecard?.why_this_side) ||
+    (cardState === "published"
+      ? "Crystal found a directional read grounded in historical baseline and current signals."
+      : cardState === "limited"
+        ? "Crystal found a directional read, but the evidence is still partial or converging."
+        : "Crystal is holding this forecast until the signal becomes strong enough to publish.");
+  const verdictFallback = safeText(scorecard?.primary_call) || summaryFallback;
+  const recommendedActionFallback =
+    safeText(scorecard?.recommended_posture) ||
+    safeText(card?.personal_output) ||
+    (cardState === "published"
+      ? "Act on the current read, but keep monitoring the invalidation triggers."
+      : "Use this as orientation and wait for one more confirming signal before acting decisively.");
 
   return {
     card_id: card?.card_id || crypto.randomUUID(),
     card_type: safeText(card?.card_type, sportsCard ? SPORTS_FIXTURE_CARD_TYPE : canonicalCardType),
     canonical_card_type: canonicalCardType,
     card_state: cardState,
-    version_id: safeText(card?.version_id, `catalog_${CATALOG_VERSION_ID}`),
+    version_id: safeText(card?.version_id, `catalog_${CATALOG_VERSION_ID}_${PREDICTION_CORE_VERSION}`),
     domain,
     stakes_level: ["low", "medium", "high", "imminent"].includes(card?.stakes_level) ? card.stakes_level : "medium",
     risk_band: ["low", "medium", "high", "extreme"].includes(card?.risk_band) ? card.risk_band : "medium",
-    title: card?.title || (sportsCard ? "Verdetto Crystal sulle partite selezionate" : "Crystal Forecast"),
-    summary:
-      card?.summary ||
-      (sportsCard
-        ? "Crystal ha costruito una lettura partita per partita usando i segnali disponibili e ha evitato di riempire i vuoti."
-        : "Crystal ha generato una previsione basata sui segnali disponibili."),
-    verdict:
-      card?.verdict ||
-      card?.summary ||
-      (sportsCard ? "Il segnale resta selettivo: meglio poche partite con edge chiaro che una lista generica." : "Scenario in evoluzione."),
-    personal_output: typeof card?.personal_output === "string" ? card.personal_output : "",
+    title: safeText(card?.title, titleFallback),
+    summary: safeText(card?.summary, summaryFallback),
+    verdict: safeText(card?.verdict, verdictFallback),
+    primary_call: safeText(card?.primary_call, safeText(scorecard?.primary_call)),
+    probability_split:
+      card?.probability_split && typeof card.probability_split === "object"
+        ? {
+            primary_label: safeText(card.probability_split.primary_label),
+            primary_probability: clamp01(card.probability_split.primary_probability, 0.5),
+            secondary_label: safeText(card.probability_split.secondary_label),
+            secondary_probability: clamp01(card.probability_split.secondary_probability, 0.5),
+          }
+        : scorecard?.probability_split && typeof scorecard.probability_split === "object"
+          ? {
+              primary_label: safeText(scorecard.probability_split.primary_label),
+              primary_probability: clamp01(scorecard.probability_split.primary_probability, 0.5),
+              secondary_label: safeText(scorecard.probability_split.secondary_label),
+              secondary_probability: clamp01(scorecard.probability_split.secondary_probability, 0.5),
+            }
+          : null,
+    why_this_side: safeText(card?.why_this_side, safeText(scorecard?.why_this_side)),
+    personal_output: typeof card?.personal_output === "string" && card.personal_output.trim() ? card.personal_output : recommendedActionFallback,
     scenario_set: normalizedScenarioSet,
     so_what: soWhat,
     ranked_list: rankedList,
     fixture_reads: fixtureReads,
     drivers,
+    counter_signals: counterSignals,
+    historical_anchors: historicalAnchors,
+    invalidators,
+    publication_basis:
+      scorecard?.publication_basis && typeof scorecard.publication_basis === "object"
+        ? { ...scorecard.publication_basis }
+        : {
+            coverage_score: evidenceQuality.coverage_score,
+            freshness_score: evidenceQuality.freshness_score,
+            agreement_score: evidenceQuality.agreement_score,
+            conflict_score: evidenceQuality.conflict_score,
+            source_count: evidenceQuality.source_count,
+            domain_state: domainConfig.current_state,
+            notes: coverageNotes,
+          },
     what_to_watch: whatToWatch,
     how_to_raise_confidence: howToRaiseConfidence,
     evidence_drawer: evidenceDrawer,
     trust_layer: {
-      confidence_score: clamp01(card?.trust_layer?.confidence_score, 0.62),
-      confidence_tier: ["low", "medium", "high"].includes(card?.trust_layer?.confidence_tier)
-        ? card.trust_layer.confidence_tier
-        : cardState === "published"
-          ? "high"
-          : cardState === "limited"
-            ? "medium"
-            : "low",
+      confidence_score: Number(confidenceScore.toFixed(3)),
+      confidence_tier:
+        ["low", "medium", "high"].includes(card?.trust_layer?.confidence_tier)
+          ? card.trust_layer.confidence_tier
+          : confidenceScore >= 0.72
+            ? "high"
+            : confidenceScore >= 0.46
+              ? "medium"
+              : "low",
       data_sufficiency_flag: ["insufficient", "partial", "sufficient"].includes(card?.trust_layer?.data_sufficiency_flag)
         ? card.trust_layer.data_sufficiency_flag
-        : mapCoverageStateToTrustFlag(cardState),
+        : cardState === "published"
+          ? "sufficient"
+          : cardState === "limited"
+            ? "partial"
+            : "insufficient",
       freshness: {
         staleness_bucket: ["fresh", "stale", "unknown"].includes(card?.trust_layer?.freshness?.staleness_bucket)
           ? card.trust_layer.freshness.staleness_bucket
-          : mapCoverageStateToFreshness(cardState),
-        as_of_utc: typeof card?.trust_layer?.freshness?.as_of_utc === "string" ? card.trust_layer.freshness.as_of_utc : nowIso,
+          : evidenceDrawer.freshness_summary.staleness_bucket,
+        as_of_utc:
+          typeof card?.trust_layer?.freshness?.as_of_utc === "string"
+            ? card.trust_layer.freshness.as_of_utc
+            : evidenceDrawer.freshness_summary.as_of_utc,
       },
       provenance_summary: {
         verification_level: ["unverified", "partially_verified", "verified", "official"].includes(
@@ -882,13 +1018,15 @@ function normalizeCard(card, queryPlan) {
         license_summary:
           sanitizeList(card?.trust_layer?.provenance_summary?.license_summary).length > 0
             ? sanitizeList(card?.trust_layer?.provenance_summary?.license_summary)
-            : domainConfig.source_allowlist,
+            : evidenceDrawer.metrics_provenance,
       },
     },
     prediction_market_frame:
       card?.prediction_market_frame && typeof card.prediction_market_frame === "object"
         ? { ...card.prediction_market_frame }
-        : null,
+        : evidenceBundle?.prediction_market_frame && typeof evidenceBundle.prediction_market_frame === "object"
+          ? { ...evidenceBundle.prediction_market_frame }
+          : null,
   };
 }
 
@@ -914,10 +1052,13 @@ function normalizeQuotePayload(payload) {
 }
 
 function normalizeQueryPlanPayload(payload = {}, options = {}) {
+  const routingHints = options?.routingHints || {};
   const fallbackDomain = safeText(options?.fallbackDomain, GENERAL_FORECAST_DOMAIN);
-  const domainId = safeText(payload?.domain_id || payload?.domain, fallbackDomain);
+  const mergedPayload = mergeQueryPlanWithRouting(payload, routingHints, { fallbackDomain });
+  const domainId = safeText(mergedPayload?.primary_domain_id || mergedPayload?.domain_id || mergedPayload?.domain, fallbackDomain);
   const normalizedDomain = isSupportedDomain(domainId) ? resolveDomainId(domainId, fallbackDomain) : fallbackDomain;
-  const horizons = Array.isArray(payload?.horizons) && payload.horizons.length > 0 ? payload.horizons : [{ horizon_id: "30d" }];
+  const horizons =
+    Array.isArray(mergedPayload?.horizons) && mergedPayload.horizons.length > 0 ? mergedPayload.horizons : [{ horizon_id: "30d" }];
   const domainCardTypes = getDomainCardTypes(normalizedDomain);
   const defaultCardType = safeText(
     options?.defaultCardType,
@@ -925,19 +1066,31 @@ function normalizeQueryPlanPayload(payload = {}, options = {}) {
   );
   const defaultEntityType = safeText(options?.defaultEntityType, normalizedDomain === SPORTS_MATCH_OUTCOMES_DOMAIN ? "fixture" : "entity");
   const cardTypes =
-    Array.isArray(payload?.card_types) && payload.card_types.length > 0
-      ? payload.card_types
+    Array.isArray(mergedPayload?.card_types) && mergedPayload.card_types.length > 0
+      ? mergedPayload.card_types
       : [{ card_type_id: defaultCardType }];
 
   return {
-    plan_version: safeText(payload?.plan_version, "crystal-b2c-v1"),
-    catalog_version_id: safeText(payload?.catalog_version_id, CATALOG_VERSION_ID),
+    plan_version: safeText(mergedPayload?.plan_version, "crystal-b2c-v1"),
+    catalog_version_id: safeText(mergedPayload?.catalog_version_id, CATALOG_VERSION_ID),
+    primary_domain_id: normalizedDomain,
     domain_id: normalizedDomain,
+    candidate_domains: Array.isArray(mergedPayload?.candidate_domains) ? mergedPayload.candidate_domains : [],
+    intent_shape: safeText(mergedPayload?.intent_shape, routingHints.intentShape || "directional_range"),
+    resolution_frame: safeText(mergedPayload?.resolution_frame, routingHints.resolutionFrame || "trend"),
+    confidence_mode: safeText(mergedPayload?.confidence_mode, routingHints.confidenceMode || "balanced"),
+    question_side_a: safeText(mergedPayload?.question_side_a),
+    question_side_b: safeText(mergedPayload?.question_side_b),
+    event_date: safeText(mergedPayload?.event_date),
+    governing_entity: safeText(mergedPayload?.governing_entity),
+    jurisdiction: safeText(mergedPayload?.jurisdiction),
+    supporting_domains: Array.isArray(mergedPayload?.supporting_domains) ? mergedPayload.supporting_domains : [],
     mode: {
-      type: payload?.mode?.type === "predict_action" ? "predict_action" : "predict_only",
+      type: mergedPayload?.mode?.type === "predict_action" ? "predict_action" : "predict_only",
     },
-    entities: Array.isArray(payload?.entities)
-      ? payload.entities.map((entity, index) => ({
+    entity_set: Array.isArray(mergedPayload?.entity_set) ? mergedPayload.entity_set : [],
+    entities: Array.isArray(mergedPayload?.entities)
+      ? mergedPayload.entities.map((entity, index) => ({
           entity_id: safeText(entity?.entity_id, `entity_${index + 1}`),
           entity_type: safeText(entity?.entity_type, defaultEntityType),
           label: safeText(
@@ -952,6 +1105,8 @@ function normalizeQueryPlanPayload(payload = {}, options = {}) {
     card_types: cardTypes.map((item, index) => ({
       card_type_id: resolveCardTypeId(item?.card_type_id, index === 0 ? defaultCardType : domainCardTypes[0]),
     })),
+    filters: mergedPayload?.filters && typeof mergedPayload.filters === "object" ? { ...mergedPayload.filters } : undefined,
+    constraints: mergedPayload?.constraints && typeof mergedPayload.constraints === "object" ? { ...mergedPayload.constraints } : undefined,
   };
 }
 
@@ -1089,8 +1244,9 @@ async function saveCachedCard(card, queryText, queryPlan, domain, city, engine =
   );
 }
 
-async function get20YearHistoricalContext(domain, city) {
-  const docId = sanitizeSegment(`${domain}_${city || "global"}`, "global");
+async function get20YearHistoricalContext(domain, locationFocus, analyticalFocus = "") {
+  const focusSegment = safeText(locationFocus || analyticalFocus, "global");
+  const docId = sanitizeSegment(`${domain}_${focusSegment}`, "global");
   const docRef = db.collection("historical_20y_summaries").doc(docId);
   const snapshot = await docRef.get();
   if (snapshot.exists) {
@@ -1098,13 +1254,15 @@ async function get20YearHistoricalContext(domain, city) {
   }
 
   const prompt = `Genera un riassunto storico fattuale e analitico degli ultimi 20 anni per il dominio "${domain}"${
-    city ? ` con focus specifico sull'area di ${city}` : " a livello globale"
+    locationFocus ? ` con focus specifico su ${locationFocus}` : " a livello globale"
   }.
+${analyticalFocus ? `La domanda corrente riguarda: "${analyticalFocus}". Usa questo focus per scegliere analoghi e trigger storici rilevanti.` : ""}
 Includi:
 1. Principali cicli di mercato o trend.
 2. Cambiamenti strutturali e normativi.
 3. Eventi cigno nero o shock esogeni.
 4. Benchmark storici rilevanti.
+5. Se utile, analoghi diretti rispetto alla domanda corrente.
 Sii conciso, usa elenchi puntati, massimo 250 parole.`;
 
   const summary = await llmRuntime.generateText({
@@ -1204,25 +1362,433 @@ async function fetchTimeGptForecast(domain, city, fh) {
   }
 }
 
-function buildGenericQueryPlanPrompt(queryText) {
+function getPrimaryLocationFromPlan(queryPlan = {}) {
+  return (
+    safeText(queryPlan?.filters?.location) ||
+    safeText(queryPlan?.jurisdiction) ||
+    safeText(
+      (Array.isArray(queryPlan?.entities) ? queryPlan.entities : []).find((entity) =>
+        ["city", "country", "region", "zone", "location"].includes(safeText(entity?.entity_type))
+      )?.label
+    )
+  );
+}
+
+function getPrimaryEntityLabel(queryPlan = {}) {
+  return safeText((Array.isArray(queryPlan?.entities) ? queryPlan.entities[0] : null)?.label);
+}
+
+function buildTrendKeyword(queryText, queryPlan = {}, domainConfig = {}) {
+  const primaryEntity = getPrimaryEntityLabel(queryPlan);
+  const location = getPrimaryLocationFromPlan(queryPlan);
+  if (primaryEntity && location && primaryEntity.toLowerCase() !== location.toLowerCase()) {
+    return `${primaryEntity} ${location}`;
+  }
+  if (primaryEntity) return primaryEntity;
+  if (location) return `${domainConfig.short_label || "forecast"} ${location}`;
+  return queryText
+    .split(/\s+/)
+    .slice(0, 8)
+    .join(" ");
+}
+
+async function fetchTrendSignal(queryText, queryPlan = {}, domainConfig = {}) {
+  const keyword = buildTrendKeyword(queryText, queryPlan, domainConfig);
+  if (!keyword) return null;
+
+  try {
+    const trendRaw = await googleTrends.interestOverTime({
+      keyword,
+      startTime: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000),
+    });
+    const trend = JSON.parse(trendRaw);
+    const values = (trend?.default?.timelineData || [])
+      .map((item) => Number(item.value?.[0] || 0))
+      .filter((value) => Number.isFinite(value));
+
+    if (values.length < 6) return null;
+
+    const latestWindow = values.slice(-7);
+    const previousWindow = values.slice(-14, -7);
+    const latestAvg = latestWindow.reduce((total, value) => total + value, 0) / latestWindow.length;
+    const previousAvg =
+      previousWindow.length > 0 ? previousWindow.reduce((total, value) => total + value, 0) / previousWindow.length : latestAvg;
+    const delta = latestAvg - previousAvg;
+    const lean = delta > 4 ? "up" : delta < -4 ? "down" : "flat";
+
+    return {
+      source_id: "google_trends",
+      label: "Search momentum",
+      summary: `${keyword} shows ${lean === "up" ? "rising" : lean === "down" ? "cooling" : "stable"} attention over the last 90 days.`,
+      lean,
+      freshness_score: 0.76,
+    };
+  } catch (error) {
+    console.error("Trend signal unavailable:", error);
+    return null;
+  }
+}
+
+function summarizeTimeGptSignal(forecast, horizonId = "30d") {
+  if (!forecast?.value || !Array.isArray(forecast.value) || forecast.value.length < 2) return null;
+  const first = Number(forecast.value[0]);
+  const last = Number(forecast.value[forecast.value.length - 1]);
+  if (!Number.isFinite(first) || !Number.isFinite(last)) return null;
+  const delta = last - first;
+  const lean = delta > 0 ? "up" : delta < 0 ? "down" : "flat";
+  const pct = first !== 0 ? ((delta / Math.abs(first)) * 100).toFixed(1) : "0.0";
+  return {
+    source_id: "timegpt",
+    label: "TimeGPT directional projection",
+    summary: `TimeGPT projects a ${lean === "up" ? "higher" : lean === "down" ? "lower" : "flat"} path over ${horizonId} (${pct}% change across the projected window).`,
+    lean,
+    freshness_score: 0.72,
+  };
+}
+
+function buildHistoricalBundle(mainBaseline, supportingBaselines = []) {
+  const sections = [];
+  if (safeText(mainBaseline)) {
+    sections.push(`PRIMARY BASELINE\n${mainBaseline}`);
+  }
+  supportingBaselines
+    .filter((section) => safeText(section?.summary))
+    .forEach((section) => {
+      sections.push(`${section.label}\n${section.summary}`);
+    });
+  return sections.join("\n\n");
+}
+
+function buildEvidenceSignalsText(evidenceBundle = {}) {
+  const signals = Array.isArray(evidenceBundle.live_signals) ? evidenceBundle.live_signals : [];
+  if (!signals.length) {
+    return "LIVE SIGNALS\n- No fresh structured live signals were available for this run.";
+  }
+
+  return `LIVE SIGNALS\n${signals
+    .map((signal) => `- ${signal.label}: ${signal.summary}`)
+    .join("\n")}`;
+}
+
+async function buildEvidenceBundle({ queryText, queryPlan, domainConfig, engine }) {
+  const locationFocus = getPrimaryLocationFromPlan(queryPlan) || getPrimaryEntityLabel(queryPlan) || "global";
+  const supportingDomains = Array.isArray(queryPlan?.supporting_domains) ? queryPlan.supporting_domains.slice(0, 3) : [];
+  const mainBaseline = await get20YearHistoricalContext(domainConfig.domain_id, locationFocus, queryText);
+  const supportingBaselines = [];
+
+  for (const supportingDomainId of supportingDomains) {
+    const supportingDomain = getDomain(supportingDomainId, supportingDomainId);
+    const summary = await get20YearHistoricalContext(supportingDomain.domain_id, locationFocus, queryText);
+    if (summary) {
+      supportingBaselines.push({
+        label: `${supportingDomain.short_label} baseline`,
+        summary,
+      });
+    }
+  }
+
+  const liveSignals = [];
+  const trendSignal = await fetchTrendSignal(queryText, queryPlan, domainConfig);
+  if (trendSignal) {
+    liveSignals.push(trendSignal);
+  }
+
+  let predictionMarketFrame = null;
+  if (queryPlan?.intent_shape === "binary_outcome" || safeText(queryPlan?.question_side_a) || safeText(queryPlan?.question_side_b)) {
+    try {
+      predictionMarketFrame = await getPolymarketPulse({
+        db,
+        admin,
+        fetchJson,
+        queryText,
+        queryPlan,
+      });
+      if (predictionMarketFrame) {
+        liveSignals.push({
+          source_id: "polymarket_public",
+          label: "Prediction market reference",
+          summary: `Closest market read: ${predictionMarketFrame.market_question || predictionMarketFrame.outcome || "binary frame"} with implied probability ${Math.round(
+            clamp01(
+              predictionMarketFrame.calibrated_probability ?? predictionMarketFrame.implied_probability ?? 0.5,
+              0.5
+            ) * 100
+          )}%`,
+          lean:
+            Number(predictionMarketFrame.calibrated_probability ?? predictionMarketFrame.implied_probability ?? 0.5) >= 0.55
+              ? "up"
+              : "down",
+          freshness_score: 0.88,
+        });
+      }
+    } catch (error) {
+      console.error("Polymarket signal unavailable:", error);
+    }
+  }
+
+  if (!isSportsDomain(domainConfig.domain_id) && engine !== "standard") {
+    const horizonId = queryPlan?.horizons?.[0]?.horizon_id || "30d";
+    let fh = 30;
+    if (horizonId === "7d") fh = 7;
+    else if (horizonId === "90d") fh = 90;
+    else if (horizonId === "6m") fh = 180;
+    else if (horizonId === "12m") fh = 365;
+    const timeGptForecast = await fetchTimeGptForecast(domainConfig.domain_id, locationFocus, fh);
+    const timeGptSignal = summarizeTimeGptSignal(timeGptForecast, horizonId);
+    if (timeGptSignal) {
+      liveSignals.push(timeGptSignal);
+    }
+  }
+
+  const sourceLedger = uniqueStrings(
+    (domainConfig.source_allowlist || [])
+      .concat(supportingDomains.flatMap((supportingDomainId) => getDomain(supportingDomainId, supportingDomainId).source_allowlist || []))
+      .concat(liveSignals.map((signal) => signal.source_id))
+  );
+
+  const evidenceBundle = {
+    historical_baseline_20y: buildHistoricalBundle(mainBaseline, supportingBaselines),
+    live_signals: liveSignals,
+    source_ledger: sourceLedger,
+    entity_resolution: {
+      resolved: Array.isArray(queryPlan?.entities) && queryPlan.entities.length > 0,
+      entities: Array.isArray(queryPlan?.entities) ? queryPlan.entities.map((entity) => entity.label).filter(Boolean) : [],
+    },
+    event_resolution: {
+      resolved: Boolean(safeText(queryPlan?.question_side_a) || safeText(queryPlan?.event_date) || safeText(queryPlan?.jurisdiction)),
+      event_date: safeText(queryPlan?.event_date),
+      governing_entity: safeText(queryPlan?.governing_entity),
+      jurisdiction: safeText(queryPlan?.jurisdiction),
+    },
+    supporting_domains: supportingDomains,
+    prediction_market_frame: predictionMarketFrame,
+    notes: uniqueStrings([
+      domainConfig.current_state === "blocked"
+        ? `${domainConfig.short_label} is still registry-blocked, so Crystal is publishing a cautious directional read instead of a full trust publish.`
+        : "",
+      !mainBaseline ? "The 20-year baseline was thin for this specific entity or geography." : "",
+      liveSignals.length < 2 ? "Live evidence is present but still light for this run." : "",
+    ]).slice(0, 4),
+  };
+
+  evidenceBundle.evidence_quality = computeEvidenceQuality(evidenceBundle, domainConfig, engine);
+  return evidenceBundle;
+}
+
+function buildEvidenceSynthesisPrompt({ queryText, queryPlan, domainConfig, evidenceBundle, contextString }) {
+  return `You are Crystal's evidence synthesizer. Return JSON only.
+
+Query: "${queryText}"
+Primary domain: ${domainConfig.domain_id} | ${domainConfig.title}
+Query plan: ${JSON.stringify(queryPlan)}
+${contextString}
+
+${evidenceBundle.historical_baseline_20y ? `HISTORICAL BASELINE 20Y\n${evidenceBundle.historical_baseline_20y}` : "HISTORICAL BASELINE 20Y\n- Baseline unavailable."}
+
+${buildEvidenceSignalsText(evidenceBundle)}
+
+SOURCE LEDGER
+- ${evidenceBundle.source_ledger.join("\n- ")}
+
+Return a JSON object with:
+- directional_hypothesis
+- why_this_side
+- key_drivers[]
+- counter_signals[]
+- invalidators[]
+- historical_anchors[]
+- recommended_posture
+- evidence_notes[]
+
+Rules:
+1. Use only the evidence provided.
+2. If the query is binary, still choose a directional hypothesis when the evidence gives orientation.
+3. Keep each array at 2-4 items.
+4. Do not write vague filler like "scenario in evoluzione" or "non si puo prevedere" unless there is truly no directional read.`;
+}
+
+function buildForecastScorecardPrompt({ queryText, queryPlan, domainConfig, evidenceBundle, evidenceSynthesis }) {
+  return `You are Crystal's scorecard model. Return JSON only.
+
+Query: "${queryText}"
+Primary domain: ${domainConfig.domain_id} | ${domainConfig.title}
+Query plan: ${JSON.stringify(queryPlan)}
+Evidence quality: ${JSON.stringify(evidenceBundle.evidence_quality)}
+Evidence synthesis: ${JSON.stringify(evidenceSynthesis)}
+
+Return a JSON object with:
+- primary_call
+- probability_split { primary_label, primary_probability, secondary_label, secondary_probability }
+- key_drivers[]
+- counter_signals[]
+- invalidators[]
+- historical_anchors[]
+- why_this_side
+- recommended_posture
+
+Rules:
+1. Prefer a directional call when the evidence has orientation.
+2. If the query is binary and question_side_a/question_side_b exist, use those labels.
+3. Avoid 50/50 unless the evidence is genuinely unresolved.
+4. Keep the call crisp, decisive, and grounded.`;
+}
+
+function buildForecastVerbalizationPrompt({ queryText, queryPlan, domainConfig, evidenceBundle, scorecard }) {
+  return `You are Crystal's editorial prediction writer. Return JSON only.
+
+Query: "${queryText}"
+Primary domain: ${domainConfig.domain_id} | ${domainConfig.title}
+Query plan: ${JSON.stringify(queryPlan)}
+Scorecard: ${JSON.stringify(scorecard)}
+Evidence quality: ${JSON.stringify(evidenceBundle.evidence_quality)}
+
+Return a JSON object with:
+- title
+- summary
+- verdict
+- recommended_action
+- scenario_set[]
+- what_to_watch[]
+- how_to_raise_confidence[]
+- coverage_notes[]
+
+Rules:
+1. The verdict must clearly state the call, not just the uncertainty.
+2. If publication_state is limited, keep the call but say that evidence is still converging.
+3. Summary max 2 sentences.
+4. scenario_set max 3 items with label and probability.
+5. what_to_watch must focus on invalidators and countersignals.`;
+}
+
+function buildDraftCard({ queryText, queryPlan, domainConfig, voicePayload, scorecard, evidenceBundle }) {
+  const probabilitySplit = scorecard?.probability_split || null;
+  const scenarioSet = Array.isArray(voicePayload?.scenario_set) && voicePayload.scenario_set.length > 0
+    ? voicePayload.scenario_set.slice(0, 3)
+    : probabilitySplit
+      ? [
+          {
+            scenario_id: "scenario_primary",
+            label: probabilitySplit.primary_label,
+            probability: probabilitySplit.primary_probability,
+          },
+          {
+            scenario_id: "scenario_secondary",
+            label: probabilitySplit.secondary_label,
+            probability: probabilitySplit.secondary_probability,
+          },
+        ]
+      : [];
+
+  const notes = uniqueStrings(
+    normalizeTextList(voicePayload?.coverage_notes, 4).concat(normalizeTextList(scorecard?.publication_basis?.notes, 4))
+  );
+
+  return {
+    card_id: crypto.randomUUID(),
+    card_type: getDomainCardTypes(domainConfig.domain_id)[0] || "forecast_band",
+    canonical_card_type: getDomainCardTypes(domainConfig.domain_id)[0] || "forecast_band",
+    card_state: scorecard?.publication_state || "limited",
+    version_id: `catalog_${CATALOG_VERSION_ID}_${PREDICTION_CORE_VERSION}`,
+    domain: domainConfig.domain_id,
+    stakes_level:
+      domainConfig.domain_id.includes("safety") || domainConfig.domain_id.includes("geopolitics") || domainConfig.domain_id.includes("governance")
+        ? "high"
+        : "medium",
+    risk_band: scorecard?.publication_state === "published" ? "medium" : "high",
+    title: safeText(voicePayload?.title, safeText(queryText, "Crystal Forecast")),
+    summary: safeText(voicePayload?.summary, safeText(scorecard?.why_this_side)),
+    verdict: safeText(voicePayload?.verdict, safeText(scorecard?.primary_call)),
+    primary_call: safeText(scorecard?.primary_call),
+    probability_split: probabilitySplit,
+    why_this_side: safeText(scorecard?.why_this_side),
+    personal_output: safeText(voicePayload?.recommended_action, safeText(scorecard?.recommended_posture)),
+    scenario_set: scenarioSet,
+    so_what: [],
+    drivers: buildDriverObjects(scorecard?.key_drivers || []),
+    counter_signals: normalizeTextList(scorecard?.counter_signals, 4),
+    historical_anchors: normalizeTextList(scorecard?.historical_anchors, 4),
+    invalidators: normalizeTextList(scorecard?.invalidators, 4),
+    what_to_watch: normalizeTextList(voicePayload?.what_to_watch, 4),
+    how_to_raise_confidence: normalizeTextList(voicePayload?.how_to_raise_confidence, 4),
+    evidence_drawer: {
+      metrics_provenance: uniqueStrings(evidenceBundle.source_ledger || []).slice(0, 6),
+      freshness_summary: {
+        as_of_utc: safeText(evidenceBundle?.prediction_market_frame?.price_updated_at, new Date().toISOString()),
+        cadence: safeText(domainConfig.refresh_cadence, "session-based"),
+        staleness_bucket: evidenceBundle?.evidence_quality?.freshness_score >= 0.66 ? "fresh" : "unknown",
+      },
+      coverage_notes: notes,
+      gating_reason: scorecard?.publication_state === "published" ? "published" : "limited_by_evidence",
+    },
+    trust_layer: {
+      confidence_score: predictionClamp01(scorecard?.confidence_score, 0.5),
+      confidence_tier: scorecard?.confidence_score >= 0.72 ? "high" : scorecard?.confidence_score >= 0.46 ? "medium" : "low",
+      data_sufficiency_flag: scorecard?.publication_state === "published" ? "sufficient" : "partial",
+      freshness: {
+        staleness_bucket: evidenceBundle?.evidence_quality?.freshness_score >= 0.66 ? "fresh" : "unknown",
+        as_of_utc: safeText(evidenceBundle?.prediction_market_frame?.price_updated_at, new Date().toISOString()),
+      },
+      provenance_summary: {
+        verification_level: scorecard?.publication_state === "published" ? "verified" : "partially_verified",
+        license_summary: uniqueStrings(evidenceBundle.source_ledger || []).slice(0, 6),
+      },
+    },
+    publication_basis: scorecard?.publication_basis || null,
+    prediction_market_frame: evidenceBundle?.prediction_market_frame || null,
+  };
+}
+
+function buildGenericQueryPlanPrompt(queryText, routingHints = {}) {
+  const candidateLines = (routingHints?.candidateDomains || [])
+    .slice(0, 6)
+    .map((candidate, index) => {
+      const domain = getDomain(candidate.domain_id, GENERAL_FORECAST_DOMAIN);
+      return `${index + 1}. ${domain.domain_id} | ${domain.short_label} | score=${candidate.score} | ${domain.summary}`;
+    })
+    .join("\n");
   return `Convert the following user query into a Crystal B2C QueryPlan JSON object.
 
 Query: "${queryText}"
 
 Extract the intent, domain, entities, horizons, and required card types based on the Crystal B2C Blueprint.
 
+Routing hints from the system:
+- primary_domain_id candidate: ${routingHints.primaryDomainId || GENERAL_FORECAST_DOMAIN}
+- intent_shape: ${routingHints.intentShape || "directional_range"}
+- resolution_frame: ${routingHints.resolutionFrame || "trend"}
+- question_side_a: ${routingHints?.binaryFrame?.question_side_a || ""}
+- question_side_b: ${routingHints?.binaryFrame?.question_side_b || ""}
+- supporting_domains: ${Array.isArray(routingHints?.supportingDomains) ? routingHints.supportingDomains.join(", ") : ""}
+
+Top candidate domains:
+${candidateLines || "- none"}
+
 CRITICAL:
-- If the request is broad or mixed, choose ${GENERAL_FORECAST_DOMAIN}.
 - The domain_id MUST be chosen from the following list of supported domains:
 ${SUPPORTED_DOMAINS.join(", ")}
+- Do NOT fall back to ${GENERAL_FORECAST_DOMAIN} unless the query is genuinely meta, mixed, or impossible to ground to a concrete domain.
+- For politics, referendum, regulation, housing, startup, safety, and personal decision queries, prefer the closest concrete domain.
+- For binary questions, explicitly frame question_side_a and question_side_b.
+- If a B-domain is the right public surface, keep it and add supporting_domains from the underlying A-layer where useful.
 
 Return an object with:
 - plan_version
+- primary_domain_id
 - domain_id
+- candidate_domains[]
+- intent_shape
+- resolution_frame
+- confidence_mode
 - mode.type ("predict_only" or "predict_action")
+- entity_set[]
 - entities[]
 - horizons[]
-- card_types[]`;
+- card_types[]
+- question_side_a
+- question_side_b
+- event_date
+- governing_entity
+- jurisdiction
+- supporting_domains[]`;
 }
 
 function buildSportsQueryPlanPrompt(queryText) {
@@ -1365,21 +1931,25 @@ async function compileQuery(queryText) {
     });
   }
 
+  const routingHints = buildRoutingHints(queryText);
   const payload = await withRetry(() =>
     llmRuntime.generateJson({
       modelKind: "query",
       temperature: 0,
       systemInstruction:
-        "You convert a user question into a Crystal B2C QueryPlan JSON object. Return JSON only. Choose domain_id only from the supported list. Keep entities concise and horizons realistic.",
-      prompt: buildGenericQueryPlanPrompt(queryText),
+        "You convert a user question into a Crystal B2C QueryPlan JSON object. Return JSON only. Choose a concrete blueprint domain whenever possible, avoid the generic router unless absolutely necessary, and preserve binary framing when the question is yes/no-like.",
+      prompt: buildGenericQueryPlanPrompt(queryText, routingHints),
     })
   );
 
-  return normalizeQueryPlanPayload(payload, { fallbackDomain: GENERAL_FORECAST_DOMAIN });
+  return normalizeQueryPlanPayload(payload, {
+    fallbackDomain: routingHints.primaryDomainId || GENERAL_FORECAST_DOMAIN,
+    routingHints,
+  });
 }
 
 async function predict(queryText, queryPlan, userContext, options = {}) {
-  const domain = resolveDomainId(queryPlan?.domain || queryPlan?.domain_id || "");
+  const domain = resolveDomainId(queryPlan?.primary_domain_id || queryPlan?.domain || queryPlan?.domain_id || "");
   const domainConfig = getDomain(domain);
   const sportsForecast = isSportsDomain(domain);
   const city =
@@ -1391,10 +1961,10 @@ async function predict(queryText, queryPlan, userContext, options = {}) {
   const cost = Number.isFinite(Number(options.cost)) ? Number(options.cost) : 1;
   const plan = isPlan(options.plan) ? options.plan : "free";
 
-  if (domainConfig.current_state === "blocked") {
+  if (!safeText(queryText)) {
     return {
       ...buildCoverageGapCard(queryText, queryPlan, domainConfig),
-      _source: "coverage-gap",
+      _source: "invalid-query",
       _billing: {
         action,
         cost,
@@ -1408,18 +1978,8 @@ async function predict(queryText, queryPlan, userContext, options = {}) {
     const cached = await fetchCachedCard(queryText, queryPlan, domain, city, engine);
     if (cached) {
       const normalizedCachedCard = normalizeCard(cached, queryPlan);
-      const enrichedCachedCard = sportsForecast
-        ? normalizedCachedCard
-        : await attachPolymarketToCard({
-            db,
-            admin,
-            fetchJson,
-            queryText,
-            queryPlan,
-            card: normalizedCachedCard,
-          });
       return {
-        ...enrichedCachedCard,
+        ...normalizedCachedCard,
         _source: "cache",
         _billing: {
           action,
@@ -1441,41 +2001,6 @@ CONTESTO UTENTE:
 `;
   }
 
-  let historicalContext = "";
-  if (domain && !sportsForecast && domain !== GENERAL_FORECAST_DOMAIN) {
-    const summary = await get20YearHistoricalContext(domain, city);
-    if (summary) {
-      historicalContext = `
-BASELINE STORICA 20 ANNI:
-${summary}
-`;
-    }
-  }
-
-  let timeGptContext = "";
-  if (domain && engine === "oracle" && !sportsForecast && domain !== GENERAL_FORECAST_DOMAIN) {
-    let fh = 7;
-    if (Array.isArray(queryPlan?.horizons) && queryPlan.horizons.length > 0) {
-      const horizonId = queryPlan.horizons[0]?.horizon_id;
-      if (horizonId === "30d") fh = 30;
-      else if (horizonId === "90d") fh = 90;
-      else if (horizonId === "6m") fh = 180;
-      else if (horizonId === "12m") fh = 365;
-      else if (horizonId === "14d") fh = 14;
-      else if (horizonId === "12w") fh = 84;
-    }
-    const forecast = await fetchTimeGptForecast(domain, city, fh);
-    if (forecast) {
-      timeGptContext = `
-DATI PREVISIONALI TIMEGPT:
-- Orizzonte: ${forecast.value.length} periodi
-- Valori previsti: ${JSON.stringify(forecast.value)}
-- Timestamp: ${JSON.stringify(forecast.timestamp)}
-Usa questi numeri come base quantitativa della previsione.
-`;
-    }
-  }
-
   let sportsContext = {
     available: false,
     configured: false,
@@ -1490,44 +2015,117 @@ Usa questi numeri come base quantitativa della previsione.
     });
   }
 
-  const forecastRequest = sportsForecast
-    ? buildSportsForecastPayload({
-        queryText,
-        queryPlan,
-        contextString,
-        sportsContext,
+  let baseCard;
+  if (sportsForecast) {
+    const forecastRequest = buildSportsForecastPayload({
+      queryText,
+      queryPlan,
+      contextString,
+      sportsContext,
+    });
+
+    const payload = await withRetry(() =>
+      llmRuntime.generateJson({
+        modelKind: "forecast",
+        temperature: 0.2,
+        systemInstruction: forecastRequest.systemInstruction,
+        prompt: forecastRequest.prompt,
       })
-    : buildGenericForecastPayload({
-        queryText,
-        queryPlan,
-        contextString,
-        historicalContext,
-        timeGptContext,
-      });
+    );
 
-  const payload = await withRetry(() =>
-    llmRuntime.generateJson({
-      modelKind: "forecast",
-      temperature: 0.2,
-      systemInstruction: forecastRequest.systemInstruction,
-      prompt: forecastRequest.prompt,
-    })
-  );
+    baseCard = normalizeCard(payload, queryPlan);
+  } else {
+    const evidenceBundle = await buildEvidenceBundle({
+      queryText,
+      queryPlan,
+      domainConfig,
+      engine,
+    });
 
-  const baseCard = normalizeCard(payload, queryPlan);
+    const evidenceSynthesis = await withRetry(() =>
+      llmRuntime.generateJson({
+        modelKind: "forecast",
+        temperature: 0.1,
+        systemInstruction:
+          "You synthesize evidence for Crystal. Return JSON only. Stay grounded in the supplied evidence and preserve a directional thesis when the evidence allows one.",
+        prompt: buildEvidenceSynthesisPrompt({
+          queryText,
+          queryPlan,
+          domainConfig,
+          evidenceBundle,
+          contextString,
+        }),
+      })
+    );
+
+    const rawScorecard = await withRetry(() =>
+      llmRuntime.generateJson({
+        modelKind: "forecast",
+        temperature: 0,
+        systemInstruction:
+          "You create Crystal's forecast scorecard. Return JSON only. Use binary labels when present and avoid hedging filler.",
+        prompt: buildForecastScorecardPrompt({
+          queryText,
+          queryPlan,
+          domainConfig,
+          evidenceBundle,
+          evidenceSynthesis,
+        }),
+      })
+    );
+
+    const finalizedScorecard = finalizeScorecard(rawScorecard, evidenceBundle, queryPlan, domainConfig, {
+      engine,
+    });
+
+    const voicePayload = await withRetry(() =>
+      llmRuntime.generateJson({
+        modelKind: "forecast",
+        temperature: 0.15,
+        systemInstruction:
+          "You write Crystal prediction cards. Return JSON only. State the call first, then the nuance, and never hide the thesis behind generic uncertainty boilerplate.",
+        prompt: buildForecastVerbalizationPrompt({
+          queryText,
+          queryPlan,
+          domainConfig,
+          evidenceBundle,
+          scorecard: finalizedScorecard,
+        }),
+      })
+    );
+
+    const draftCard = buildDraftCard({
+      queryText,
+      queryPlan,
+      domainConfig,
+      voicePayload,
+      scorecard: finalizedScorecard,
+      evidenceBundle,
+    });
+
+    baseCard = normalizeCard(draftCard, queryPlan, {
+      scorecard: finalizedScorecard,
+      evidenceBundle,
+      engine,
+    });
+  }
+
   if (domain) {
     await saveCachedCard(baseCard, queryText, queryPlan, domain, city, engine);
   }
-  const card = sportsForecast
-    ? baseCard
-    : await attachPolymarketToCard({
-        db,
-        admin,
-        fetchJson,
-        queryText,
-        queryPlan,
-        card: baseCard,
-      });
+
+  const card =
+    sportsForecast || baseCard?.prediction_market_frame
+      ? baseCard
+      : await attachPolymarketToCard({
+          db,
+          admin,
+          fetchJson,
+          queryText,
+          queryPlan,
+          card: baseCard,
+        });
+
   return {
     ...card,
     _source: "live-server",

@@ -79,6 +79,23 @@ export interface PredictionMarketFrame {
   price_change_7d?: number | null;
 }
 
+export interface ProbabilitySplit {
+  primary_label: string;
+  primary_probability: number;
+  secondary_label: string;
+  secondary_probability: number;
+}
+
+export interface PublicationBasis {
+  coverage_score: number;
+  freshness_score: number;
+  agreement_score: number;
+  conflict_score: number;
+  source_count?: number;
+  domain_state?: string;
+  notes?: string[];
+}
+
 export interface WorldSimCounterfactual {
   label: string;
   outcome: string;
@@ -126,11 +143,18 @@ export interface CardData {
   title: string;
   summary: string;
   verdict?: string;
+  primary_call?: string;
+  probability_split?: ProbabilitySplit | null;
+  why_this_side?: string;
   personal_output?: string;
   scenario_set?: Scenario[];
   so_what?: Option[];
   drivers?: Driver[];
   fixture_reads?: FixtureRead[];
+  counter_signals?: string[];
+  historical_anchors?: string[];
+  invalidators?: string[];
+  publication_basis?: PublicationBasis | null;
   what_to_watch?: string[];
   how_to_raise_confidence?: string[];
   evidence_drawer?: EvidenceDrawer;

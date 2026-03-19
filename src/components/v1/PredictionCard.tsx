@@ -27,6 +27,10 @@ export function PredictionCard({
   onShare,
 }: PredictionCardProps) {
   const meta = getForecastMetaCopy(item.card);
+  const probabilityLabel = item.probabilitySplit
+    ? `${item.probabilitySplit.primary_label} ${Math.round(item.probabilitySplit.primary_probability * 100)}% · ${item.probabilitySplit.secondary_label} ${Math.round(item.probabilitySplit.secondary_probability * 100)}%`
+    : null;
+  const heroCall = item.primaryCall || item.primaryOutcome;
 
   return (
     <article className="rounded-[32px] border border-slate-200 bg-white p-6 shadow-[0_18px_44px_rgba(15,23,42,0.06)]">
@@ -43,19 +47,28 @@ export function PredictionCard({
       </div>
 
       <div className="mt-6 rounded-[28px] bg-slate-950 p-6 text-white">
-        <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-300">Primary outcome</div>
-        <div className="mt-3 text-2xl font-semibold tracking-[-0.03em]">{item.primaryOutcome}</div>
+        <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-300">Primary call</div>
+        <div className="mt-3 text-2xl font-semibold tracking-[-0.03em]">{heroCall}</div>
+        {probabilityLabel ? <div className="mt-3 text-sm font-semibold text-sky-200">{probabilityLabel}</div> : null}
         <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">{item.summary}</p>
       </div>
 
-      <div className="mt-5 grid gap-4 md:grid-cols-2">
+      <div className="mt-5 grid gap-4 md:grid-cols-3">
         <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">So what</div>
-          <p className="mt-2 text-sm leading-7 text-slate-700">{item.summary}</p>
+          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Why this side</div>
+          <p className="mt-2 text-sm leading-7 text-slate-700">{item.whyThisSide || item.summary}</p>
         </div>
         <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
           <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">What to do</div>
           <p className="mt-2 text-sm leading-7 text-slate-700">{item.recommendedAction}</p>
+        </div>
+        <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">What would flip it</div>
+          <div className="mt-2 space-y-2 text-sm leading-7 text-slate-700">
+            {(item.invalidators.length > 0 ? item.invalidators : item.whatToWatch.slice(0, 3)).map((point) => (
+              <p key={point}>{point}</p>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -68,6 +81,27 @@ export function PredictionCard({
                 {driver}
               </span>
             ))}
+          </div>
+        </div>
+      )}
+
+      {(item.counterSignals.length > 0 || item.historicalAnchors.length > 0) && (
+        <div className="mt-5 grid gap-4 md:grid-cols-2">
+          <div className="rounded-3xl border border-slate-200 bg-white p-4">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Counter-signals</div>
+            <div className="mt-3 space-y-2 text-sm leading-7 text-slate-700">
+              {(item.counterSignals.length > 0 ? item.counterSignals : ['No major countersignal is currently dominating the main read.']).map((signal) => (
+                <p key={signal}>{signal}</p>
+              ))}
+            </div>
+          </div>
+          <div className="rounded-3xl border border-slate-200 bg-white p-4">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Historical anchors</div>
+            <div className="mt-3 space-y-2 text-sm leading-7 text-slate-700">
+              {(item.historicalAnchors.length > 0 ? item.historicalAnchors : ['Historical anchors were weaker than the current live read.']).map((anchor) => (
+                <p key={anchor}>{anchor}</p>
+              ))}
+            </div>
           </div>
         </div>
       )}

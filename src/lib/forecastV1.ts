@@ -315,14 +315,21 @@ export function buildForecastStack(card: CardData, context: ForecastResolvedCont
       horizon: context.horizon,
       versionId: context.versionId,
       title: safeText(card.title, 'Crystal forecast'),
-      primaryOutcome: safeText(card.verdict, safeText(card.summary, 'Crystal is still evaluating this question.')),
+      primaryOutcome: safeText(card.verdict, safeText(card.primary_call, safeText(card.summary, 'Crystal is still evaluating this question.'))),
       summary: safeText(card.summary, 'No summary available yet.'),
+      primaryCall: safeText(card.primary_call, undefined),
+      probabilitySplit: card.probability_split || null,
+      whyThisSide: safeText(card.why_this_side, undefined),
       recommendedAction:
         safeText(card.personal_output) ||
         safeText(card.so_what?.[0]?.tradeoff_note) ||
         `Watch ${context.entity} closely before making a bigger decision.`,
       topDrivers: uniqueList((card.drivers || []).slice(0, 4).map((driver) => safeText(driver.feature_key).replace(/_/g, ' '))),
+      counterSignals: uniqueList((card.counter_signals || []).slice(0, 4)),
+      historicalAnchors: uniqueList((card.historical_anchors || []).slice(0, 4)),
+      invalidators: uniqueList((card.invalidators || []).slice(0, 4)),
       whatToWatch: uniqueList((card.what_to_watch || []).slice(0, 4)),
+      publicationBasis: card.publication_basis || null,
       trustLayer: card.trust_layer,
       evidenceDrawer: card.evidence_drawer,
       card,
