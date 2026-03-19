@@ -1273,7 +1273,7 @@ Sii conciso, usa elenchi puntati, massimo 250 parole.`;
   });
   await docRef.set({
     domain,
-    city: city || "global",
+    location_focus: locationFocus || "global",
     summary,
     created_at: admin.firestore.FieldValue.serverTimestamp(),
   });
