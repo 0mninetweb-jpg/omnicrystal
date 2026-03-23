@@ -2,7 +2,9 @@ const crypto = require("node:crypto");
 const admin = require("firebase-admin");
 const { GoogleGenAI } = require("@google/genai");
 const { onRequest } = require("firebase-functions/v2/https");
+const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { defineSecret } = require("firebase-functions/params");
+const { GoogleAuth } = require("google-auth-library");
 const googleTrends = require("google-trends-api");
 const Stripe = require("stripe");
 const { createLlmRuntime } = require("./llmRuntime");
@@ -58,6 +60,7 @@ const {
   normalizeTextList,
   clamp01: predictionClamp01,
 } = require("./predictionCore");
+const { createCrystalCoreRuntime, CRYSTAL_CORE_VERSION } = require("./crystalCore/runtime");
 
 const GEMINI_API_KEY = defineSecret("GEMINI_API_KEY");
 const NIXTLA_API_KEY = defineSecret("NIXTLA_API_KEY");
@@ -183,6 +186,177 @@ function createCardCacheKey(queryText, queryPlan = {}, engine = "standard") {
         : [],
     })
   );
+}
+
+const HORIZON_LABELS = {
+  now: "Now",
+  "7d": "7 days",
+  "30d": "30 days",
+  "90d": "90 days",
+  "6m": "6 months",
+  "12m": "12 months",
+};
+
+function slugifyText(value, fallback = "forecast") {
+  const normalized = String(value || fallback)
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  const slug = normalized.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return slug || fallback;
+}
+
+function getCardStateUi(cardState) {
+  if (cardState === "blocked") return "coverage_gap";
+  if (cardState === "limited") return "limited";
+  return "published";
+}
+
+function getPrimaryForecastEntityLabel(queryPlan = {}, queryText = "") {
+  return safeText(getPrimaryEntityLabel(queryPlan), safeText(getPrimaryLocationFromPlan(queryPlan), safeText(queryText.split(/\s+/).slice(0, 4).join(" "), "General")));
+}
+
+function getForecastHorizonId(queryPlan = {}) {
+  return safeText(queryPlan?.filters?.horizon, safeText(queryPlan?.horizons?.[0]?.horizon_id, "30d"));
+}
+
+function formatForecastHorizonLabel(horizonId = "30d") {
+  return HORIZON_LABELS[horizonId] || horizonId;
+}
+
+function createForecastLineageId(queryText, queryPlan = {}, card = {}) {
+  const seed = [
+    safeText(queryText).toLowerCase(),
+    resolveDomainId(queryPlan?.primary_domain_id || queryPlan?.domain || queryPlan?.domain_id || card?.domain || ""),
+    slugifyText(getPrimaryForecastEntityLabel(queryPlan, queryText), "general"),
+    slugifyText(getPrimaryLocationFromPlan(queryPlan), "auto"),
+    getForecastHorizonId(queryPlan),
+  ].join("|");
+  return `lineage_${createQueryHash(seed).slice(0, 24)}`;
+}
+
+function buildPublicForecastIds(queryText, queryPlan = {}, card = {}, existingPublicSlug = "") {
+  const lineageId = createForecastLineageId(queryText, queryPlan, card);
+  const domainId = resolveDomainId(queryPlan?.primary_domain_id || queryPlan?.domain || queryPlan?.domain_id || card?.domain || "");
+  const domainConfig = getDomain(domainId);
+  const entityLabel = getPrimaryForecastEntityLabel(queryPlan, queryText);
+  const entitySlug = slugifyText(entityLabel, "general");
+  const geographyLabel = safeText(getPrimaryLocationFromPlan(queryPlan), "Auto");
+  const geographySlug = slugifyText(geographyLabel, "auto");
+  const topicLabel = safeText(domainConfig?.short_label || domainConfig?.title, "Forecast");
+  const topicSlug = slugifyText(topicLabel, "forecast");
+  const publicSlug =
+    safeText(existingPublicSlug) || `${entitySlug}-${topicSlug}-${lineageId.replace(/^lineage_/, "").slice(0, 8)}`;
+
+  return {
+    lineageId,
+    publicSlug,
+    entityLabel,
+    entitySlug,
+    geographyLabel,
+    geographySlug,
+    topicLabel,
+    topicSlug,
+    domainId,
+  };
+}
+
+async function maybePublishForecastArtifacts({
+  queryText,
+  queryPlan,
+  card,
+  sourceView = "search",
+  uid = null,
+}) {
+  if (!card || getCardStateUi(card.card_state) === "coverage_gap") {
+    return card;
+  }
+
+  if (!safeText(card?.title) || !(safeText(card?.summary) || safeText(card?.verdict) || safeText(card?.primary_call))) {
+    return card;
+  }
+
+  const lineageId = createForecastLineageId(queryText, queryPlan, card);
+  const ledgerRef = db.collection("forecast_ledger").doc(lineageId);
+  const ledgerSnapshot = await ledgerRef.get();
+  const existingPublicSlug = safeText(ledgerSnapshot.data()?.public_slug);
+  const ids = buildPublicForecastIds(queryText, queryPlan, card, existingPublicSlug);
+  const publicRef = db.collection("public_forecasts").doc(ids.publicSlug);
+  const publicSnapshot = await publicRef.get();
+  const versionId = safeText(card.card_id, `version_${Date.now()}`);
+  const versionRef = ledgerRef.collection("versions").doc(versionId);
+  const publishedAt =
+    safeText(publicSnapshot.data()?.published_at) ||
+    safeText(ledgerSnapshot.data()?.published_at) ||
+    new Date().toISOString();
+  const horizonId = getForecastHorizonId(queryPlan);
+  const confidenceScore = Number.isFinite(Number(card?.trust_layer?.confidence_score))
+    ? Number(card.trust_layer.confidence_score)
+    : 0;
+  const publicPayload = {
+    ...card,
+    lineage_id: lineageId,
+    ledger_ref: `forecast_ledger/${lineageId}`,
+    public_forecast_ref: `public_forecasts/${ids.publicSlug}`,
+    public_slug: ids.publicSlug,
+    query_origin: safeText(queryText),
+    query_text: safeText(queryText),
+    query_plan: queryPlan || {},
+    entity_label: ids.entityLabel,
+    entity_slug: ids.entitySlug,
+    geography_label: ids.geographyLabel,
+    geography_slug: ids.geographySlug,
+    horizon_id: horizonId,
+    horizon_label: formatForecastHorizonLabel(horizonId),
+    domain_label: safeText(ids.topicLabel, ids.domainId),
+    topic_label: ids.topicLabel,
+    topic_slug: ids.topicSlug,
+    card_state_ui: getCardStateUi(card.card_state),
+    trust_confidence: confidenceScore,
+    public_visibility: "public",
+    source_view: safeText(sourceView, "search"),
+    published_by_uid: uid,
+    published_at: publishedAt,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  };
+
+  const createdAt = admin.firestore.FieldValue.serverTimestamp();
+  const ledgerPayload = ledgerSnapshot.exists
+    ? publicPayload
+    : {
+        ...publicPayload,
+        createdAt,
+      };
+  const publicDocPayload = publicSnapshot.exists
+    ? publicPayload
+    : {
+        ...publicPayload,
+        createdAt,
+      };
+
+  await Promise.all([
+    ledgerRef.set(ledgerPayload, { merge: true }),
+    versionRef.set(
+      {
+        ...publicPayload,
+        parent_lineage_id: lineageId,
+        version_saved_at: admin.firestore.FieldValue.serverTimestamp(),
+        createdAt,
+      },
+      { merge: true }
+    ),
+    publicRef.set(publicDocPayload, { merge: true }),
+  ]);
+
+  return {
+    ...card,
+    lineage_id: lineageId,
+    ledger_ref: `forecast_ledger/${lineageId}`,
+    public_forecast_ref: `public_forecasts/${ids.publicSlug}`,
+    public_slug: ids.publicSlug,
+    query_origin: safeText(queryText),
+  };
 }
 
 function clamp01(value, fallback = 0.5) {
@@ -1207,6 +1381,573 @@ async function withRetry(fn, retries = 2, delayMs = 2000) {
     }
     throw error;
   }
+}
+
+let crystalCoreRuntime = null;
+let crystalCoreGoogleAuth = null;
+const runtimeRolloutCache = {
+  value: null,
+  expiresAt: 0,
+};
+const RUNTIME_ROLLOUT_CACHE_TTL_MS = 30 * 1000;
+
+function readBooleanValue(value, fallback = false) {
+  if (typeof value === "boolean") return value;
+  const normalized = safeText(String(value || "")).toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return fallback;
+}
+
+function clampPercent(value, fallback = 0) {
+  const next = Number(value);
+  if (!Number.isFinite(next)) return fallback;
+  return Math.max(0, Math.min(100, Math.round(next)));
+}
+
+function getCrystalCoreBaseUrl() {
+  return safeText(process.env.CRYSTAL_CORE_BASE_URL).replace(/\/$/, "");
+}
+
+function getCrystalCoreInvokerAudience() {
+  return safeText(process.env.CRYSTAL_CORE_INVOKER_AUDIENCE, getCrystalCoreBaseUrl());
+}
+
+function getCrystalCoreProjectId() {
+  return safeText(process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT, "omnicrystal");
+}
+
+function getCrystalCoreRegion() {
+  return safeText(process.env.CRYSTAL_CORE_REGION, "europe-west1");
+}
+
+function getCrystalCoreEvalJobName() {
+  return safeText(process.env.CRYSTAL_CORE_EVAL_JOB_NAME, "crystal-core-eval");
+}
+
+function isCrystalCoreRemoteEnabled() {
+  return Boolean(getCrystalCoreBaseUrl());
+}
+
+function getCrystalCoreGoogleAuth() {
+  if (!crystalCoreGoogleAuth) {
+    crystalCoreGoogleAuth = new GoogleAuth({
+      scopes: ["https://www.googleapis.com/auth/cloud-platform"],
+    });
+  }
+  return crystalCoreGoogleAuth;
+}
+
+function canSkipCloudRunAuth(url) {
+  return /localhost|127\.0\.0\.1/i.test(safeText(url));
+}
+
+async function invokeCloudRunJson(pathname, { method = "GET", body } = {}) {
+  const baseUrl = getCrystalCoreBaseUrl();
+  if (!baseUrl) {
+    throw createApiError("crystal-core-base-url-missing", "CRYSTAL_CORE_BASE_URL is not configured.", 503);
+  }
+  const url = `${baseUrl}${pathname}`;
+  if (canSkipCloudRunAuth(baseUrl)) {
+    return fetchJson(url, {
+      method,
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+  }
+
+  const client = await getCrystalCoreGoogleAuth().getIdTokenClient(getCrystalCoreInvokerAudience());
+  const response = await client.request({
+    url,
+    method,
+    headers: body !== undefined ? { "Content-Type": "application/json" } : undefined,
+    data: body,
+  });
+  return response.data;
+}
+
+async function getGoogleApiAccessToken() {
+  const client = await getCrystalCoreGoogleAuth().getClient();
+  const token = await client.getAccessToken();
+  if (typeof token === "string" && token) return token;
+  if (token?.token) return token.token;
+  throw new Error("Unable to mint a Google API access token.");
+}
+
+function getCrystalCoreRuntime() {
+  if (!crystalCoreRuntime) {
+    crystalCoreRuntime = createCrystalCoreRuntime({
+      db,
+      admin,
+      llmRuntime,
+      withRetry,
+      fetchJson,
+      getGeminiApiKey: () => GEMINI_API_KEY.value(),
+    });
+  }
+  return crystalCoreRuntime;
+}
+
+function createRunAccessToken() {
+  return createQueryHash(`${Date.now()}_${Math.random()}_${crypto.randomUUID()}`).slice(0, 24);
+}
+
+function createForecastRunId(queryText, queryPlan = {}, engine = "extended") {
+  return `forecast_run_${Date.now()}_${createCardCacheKey(queryText, queryPlan, engine).slice(0, 12)}`;
+}
+
+function getDefaultRuntimeRolloutConfig() {
+  return {
+    enabled: true,
+    transport: getCrystalCoreBaseUrl() ? "remote" : "local",
+    signed_in_percent: clampPercent(process.env.CRYSTAL_CORE_ROLLOUT_PERCENT, 0),
+    guest_percent: clampPercent(process.env.CRYSTAL_CORE_GUEST_ROLLOUT_PERCENT, 0),
+    salt: safeText(process.env.CRYSTAL_CORE_ROLLOUT_SALT, "crystal-core-default-salt"),
+    kill_switch: false,
+    updated_at: null,
+  };
+}
+
+async function getRuntimeRolloutConfig() {
+  if (runtimeRolloutCache.value && runtimeRolloutCache.expiresAt > Date.now()) {
+    return runtimeRolloutCache.value;
+  }
+
+  const defaults = getDefaultRuntimeRolloutConfig();
+  let next = { ...defaults };
+
+  try {
+    const snapshot = await db.collection("system_config").doc("runtime_rollout").get();
+    if (snapshot.exists) {
+      const payload = snapshot.data()?.crystal_core || {};
+      next = {
+        enabled: readBooleanValue(payload?.enabled, defaults.enabled),
+        transport: safeText(payload?.transport, defaults.transport) === "local" ? "local" : "remote",
+        signed_in_percent: clampPercent(payload?.signed_in_percent, defaults.signed_in_percent),
+        guest_percent: clampPercent(payload?.guest_percent, defaults.guest_percent),
+        salt: safeText(payload?.salt, defaults.salt),
+        kill_switch: readBooleanValue(payload?.kill_switch, defaults.kill_switch),
+        updated_at: serializeApiValue(payload?.updated_at || snapshot.updateTime || null),
+      };
+    }
+  } catch (error) {
+    console.warn("Unable to read crystal-core rollout config, using env defaults.", error?.message || error);
+  }
+
+  runtimeRolloutCache.value = next;
+  runtimeRolloutCache.expiresAt = Date.now() + RUNTIME_ROLLOUT_CACHE_TTL_MS;
+  return next;
+}
+
+function getGuestRolloutKeyFromRequest(req, queryText = "") {
+  const headerValue = req?.headers?.["x-crystal-guest-key"];
+  if (typeof headerValue === "string" && headerValue.trim()) {
+    return sanitizeSegment(headerValue, "guest");
+  }
+  const fallbackSeed = [
+    safeText(queryText),
+    safeText(req?.headers?.["user-agent"]),
+    safeText(req?.headers?.["x-forwarded-for"]),
+  ].join("|");
+  return createQueryHash(fallbackSeed || "guest").slice(0, 20);
+}
+
+function computeRolloutBucket(seed, salt) {
+  const hash = createQueryHash(`${safeText(seed)}|${safeText(salt)}`);
+  return Number.parseInt(hash.slice(0, 8), 16) % 100;
+}
+
+async function resolveCrystalCoreSelection({ req, uid = null, queryText = "" }) {
+  const config = await getRuntimeRolloutConfig();
+  const guestKey = uid ? null : getGuestRolloutKeyFromRequest(req, queryText);
+  const bucket = computeRolloutBucket(uid || guestKey || queryText || "guest", config.salt);
+  const percent = uid ? config.signed_in_percent : config.guest_percent;
+  const selectedTransport =
+    config.enabled && !config.kill_switch && config.transport === "remote" && isCrystalCoreRemoteEnabled() && bucket < percent
+      ? "remote"
+      : "local";
+
+  return {
+    selectedTransport,
+    rolloutBucket: `${uid ? "signed_in" : "guest"}:${bucket}`,
+    rolloutPercent: percent,
+    guestKey,
+    config,
+  };
+}
+
+function serializeApiValue(value) {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (Array.isArray(value)) {
+    return value.map((item) => serializeApiValue(item)).filter((item) => item !== undefined);
+  }
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+  if (typeof value?.toDate === "function") {
+    const date = value.toDate();
+    return date instanceof Date ? date.toISOString() : value;
+  }
+  if (typeof value !== "object") {
+    return value;
+  }
+
+  const ctorName = value.constructor?.name;
+  if (ctorName && ctorName !== "Object") {
+    return value;
+  }
+
+  return Object.fromEntries(
+    Object.entries(value)
+      .map(([key, nestedValue]) => [key, serializeApiValue(nestedValue)])
+      .filter(([, nestedValue]) => nestedValue !== undefined)
+  );
+}
+
+function sanitizeForecastRunForApi(runDoc = {}) {
+  return {
+    run_id: safeText(runDoc?.run_id),
+    status: safeText(runDoc?.status, "created"),
+    visibility: safeText(runDoc?.visibility, "private"),
+    current_stage: safeText(runDoc?.current_stage, "created"),
+    query_text: safeText(runDoc?.query_text),
+    query_plan: serializeApiValue(runDoc?.query_plan || null),
+    source_view: safeText(runDoc?.source_view),
+    engine: safeText(runDoc?.engine, "extended"),
+    plan: safeText(runDoc?.plan, "free"),
+    error_message: safeText(runDoc?.error_message),
+    runtime_transport: safeText(runDoc?.runtime_transport, "local"),
+    rollout_bucket: safeText(runDoc?.rollout_bucket),
+    evaluation_eligible: Boolean(runDoc?.evaluation_eligible),
+    resolution_status: safeText(runDoc?.resolution_status),
+    created_at: serializeApiValue(runDoc?.created_at),
+    started_at: serializeApiValue(runDoc?.started_at),
+    updated_at: serializeApiValue(runDoc?.updated_at),
+    completed_at: serializeApiValue(runDoc?.completed_at),
+    result_available: Boolean(runDoc?.result_card),
+    pending_poll_after_ms: Number.isFinite(Number(runDoc?.pending_poll_after_ms)) ? Number(runDoc.pending_poll_after_ms) : 2500,
+    core_runtime: safeText(runDoc?.core_runtime, CRYSTAL_CORE_VERSION),
+  };
+}
+
+async function createForecastRunRecord({
+  runId,
+  queryText,
+  queryPlan,
+  userContext = null,
+  uid = null,
+  visibility = "private",
+  publicAccessToken = null,
+  sourceView = "search",
+  routeOrigin = "predict",
+  engine = "extended",
+  plan = "free",
+  runtimeTransport = "local",
+  rolloutBucket = null,
+}) {
+  const payload = {
+    run_id: runId,
+    status: "created",
+    visibility: visibility === "public" ? "public" : "private",
+    access_token: visibility === "public" ? publicAccessToken : null,
+    uid,
+    source_view: safeText(sourceView, "search"),
+    route_origin: safeText(routeOrigin, "predict"),
+    query_text: safeText(queryText),
+    query_plan: sanitizeFirestoreValue(queryPlan || null),
+    user_context: sanitizeFirestoreValue(userContext || null),
+    engine: safeText(engine, "extended"),
+    plan: safeText(plan, "free"),
+    runtime_transport: safeText(runtimeTransport, "local"),
+    rollout_bucket: rolloutBucket ? safeText(rolloutBucket) : null,
+    pending_poll_after_ms: 2500,
+    core_runtime: CRYSTAL_CORE_VERSION,
+    created_at: admin.firestore.FieldValue.serverTimestamp(),
+    updated_at: admin.firestore.FieldValue.serverTimestamp(),
+  };
+
+  await db.collection("forecast_runs").doc(runId).set(payload, { merge: true });
+  return payload;
+}
+
+async function readForecastRunResult(runId) {
+  const snapshot = await db.collection("forecast_runs").doc(runId).get();
+  return snapshot.exists ? snapshot.data() || null : null;
+}
+
+async function completePublishedRunCardIfNeeded(runDoc, sourceView = "search", uid = null) {
+  if (!runDoc?.result_card || runDoc.result_card?.pending_run?.status === "running") {
+    return runDoc?.result_card || null;
+  }
+
+  const publishedCard = await maybePublishForecastArtifacts({
+    queryText: safeText(runDoc.query_text),
+    queryPlan: runDoc.query_plan || {},
+    card: runDoc.result_card,
+    sourceView: safeText(sourceView, safeText(runDoc.source_view, "search")),
+    uid,
+  });
+
+  await db.collection("forecast_runs").doc(runDoc.run_id).set(
+    {
+      result_card: sanitizeFirestoreValue(publishedCard),
+      publicized_at: admin.firestore.FieldValue.serverTimestamp(),
+      updated_at: admin.firestore.FieldValue.serverTimestamp(),
+    },
+    { merge: true }
+  );
+
+  return publishedCard;
+}
+
+async function startRemoteCrystalCoreRun(payload = {}) {
+  return invokeCloudRunJson("/v1/runs", {
+    method: "POST",
+    body: payload,
+  });
+}
+
+function buildPendingForecastResponse({ runId, queryText, queryPlan = {}, visibility = "private", accessToken = null }) {
+  return getCrystalCoreRuntime().buildPendingRunCard({
+    runId,
+    queryText,
+    queryPlan,
+    visibility,
+    accessToken,
+    pollAfterMs: 2500,
+  });
+}
+
+async function compileQueryThroughCrystalCore(queryText, options = {}) {
+  const transport = safeText(options?.transport, "auto");
+  if ((transport === "remote" || (transport === "auto" && isCrystalCoreRemoteEnabled())) && isCrystalCoreRemoteEnabled()) {
+    try {
+      const response = await invokeCloudRunJson("/v1/compile", {
+        method: "POST",
+        body: { query: queryText },
+      });
+      return response?.query_plan || response?.plan || response;
+    } catch (error) {
+      console.warn("Crystal core remote compile failed, falling back locally.", error?.message || error);
+    }
+  }
+
+  try {
+    return await getCrystalCoreRuntime().compileQuery(queryText);
+  } catch (error) {
+    console.warn("Crystal core local compile failed, falling back to legacy planner.", error?.message || error);
+    return compileQuery(queryText);
+  }
+}
+
+async function startCrystalEdgePrediction({
+  runId,
+  queryText,
+  queryPlan = {},
+  userContext = null,
+  uid = null,
+  visibility = "private",
+  publicAccessToken = null,
+  sourceView = "search",
+  routeOrigin = "predict",
+  engine = "extended",
+  plan = "free",
+  transport = "local",
+  rolloutBucket = null,
+}) {
+  await createForecastRunRecord({
+    runId,
+    queryText,
+    queryPlan,
+    userContext,
+    uid,
+    visibility,
+    publicAccessToken,
+    sourceView,
+    routeOrigin,
+    engine,
+    plan,
+    runtimeTransport: transport,
+    rolloutBucket,
+  });
+
+  if (transport === "remote" && isCrystalCoreRemoteEnabled()) {
+    try {
+      const response = await startRemoteCrystalCoreRun({
+        runId,
+        queryText,
+        queryPlan,
+        userContext,
+        uid,
+        visibility,
+        publicAccessToken,
+        sourceView,
+        routeOrigin,
+        engine,
+        plan,
+        runtimeTransport: "remote",
+        rolloutBucket,
+        waitMs: 8000,
+      });
+
+      if (response?.status === "completed" && response?.card) {
+        return {
+          runId,
+          pending: false,
+          card: response.card,
+        };
+      }
+
+      if (response?.status === "pending") {
+        return {
+          runId,
+          pending: true,
+          card: buildPendingForecastResponse({
+            runId,
+            queryText,
+            queryPlan,
+            visibility,
+            accessToken: visibility === "public" ? publicAccessToken : null,
+          }),
+        };
+      }
+
+      if (response?.status === "failed") {
+        throw createApiError(
+          "crystal-core-remote-failed",
+          safeText(response?.run?.error_message, "Crystal core remote run failed."),
+          502
+        );
+      }
+    } catch (error) {
+      console.warn("Crystal core remote run failed, falling back locally.", error?.message || error);
+      await db.collection("forecast_runs").doc(runId).set(
+        {
+          runtime_transport: "local_fallback",
+          transport_fallback_reason: error instanceof Error ? error.message : "remote_transport_failed",
+          updated_at: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+    }
+  }
+
+  const result = await getCrystalCoreRuntime().executeForecastRun({
+    runId,
+    queryText,
+    queryPlan,
+    userContext,
+    uid,
+    visibility,
+    publicAccessToken,
+    sourceView,
+    routeOrigin,
+    engine,
+    plan,
+    runtimeTransport: transport === "remote" ? "local_fallback" : "local",
+    rolloutBucket,
+  });
+
+  return {
+    runId,
+    pending: false,
+    card: result.card,
+  };
+}
+
+async function getPublicForecastRun(runId, token) {
+  const runDoc = await readForecastRunResult(runId);
+  if (!runDoc || safeText(runDoc.visibility) !== "public") {
+    throw createApiError("forecast-run-not-found", "Forecast run not found.", 404);
+  }
+  if (safeText(runDoc.access_token) !== safeText(token)) {
+    throw createApiError("forecast-run-forbidden", "Forecast run not available.", 403);
+  }
+  return runDoc;
+}
+
+async function getAuthorizedForecastRun(uid, runId) {
+  const runDoc = await readForecastRunResult(runId);
+  if (!runDoc) {
+    throw createApiError("forecast-run-not-found", "Forecast run not found.", 404);
+  }
+  if (safeText(runDoc.uid) !== safeText(uid)) {
+    throw createApiError("forecast-run-forbidden", "You do not have access to this forecast run.", 403);
+  }
+  return runDoc;
+}
+
+async function getCrystalCoreHealth() {
+  if (isCrystalCoreRemoteEnabled()) {
+    try {
+      const remoteHealth = await invokeCloudRunJson("/health");
+      return {
+        transport: "remote",
+        base_url: getCrystalCoreBaseUrl(),
+        rollout: await getRuntimeRolloutConfig(),
+        ...remoteHealth,
+      };
+    } catch (error) {
+      return {
+        transport: "remote",
+        base_url: getCrystalCoreBaseUrl(),
+        rollout: await getRuntimeRolloutConfig(),
+        available: false,
+        message: error instanceof Error ? error.message : "Crystal core remote health check failed.",
+      };
+    }
+  }
+
+  const localHealth = await getCrystalCoreRuntime().getHealth();
+  return {
+    transport: "local",
+    rollout: await getRuntimeRolloutConfig(),
+    ...localHealth,
+  };
+}
+
+async function runCrystalCoreEvalJob(mode, metadata = {}) {
+  const jobName = getCrystalCoreEvalJobName();
+  if (!jobName) {
+    return {
+      status: "skipped",
+      reason: "missing_job_name",
+      mode,
+    };
+  }
+
+  const projectId = getCrystalCoreProjectId();
+  const region = getCrystalCoreRegion();
+  const accessToken = await getGoogleApiAccessToken();
+  const url = `https://run.googleapis.com/v2/projects/${projectId}/locations/${region}/jobs/${jobName}:run`;
+  const response = await fetchJson(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      overrides: {
+        containerOverrides: [
+          {
+            env: [
+              { name: "CRYSTAL_CORE_EVAL_MODE", value: mode },
+              { name: "CRYSTAL_CORE_EVAL_TRIGGER", value: safeText(metadata.trigger, "scheduler") },
+            ],
+          },
+        ],
+      },
+    }),
+  });
+
+  return {
+    status: "started",
+    mode,
+    operation: response?.name || null,
+  };
 }
 
 async function fetchCachedCard(queryText, queryPlan, domain, city, engine = "standard") {
@@ -2394,6 +3135,7 @@ exports.api = onRequest(
 
         if (req.method === "GET" && route === "/health") {
           const forecastHealth = getForecastRuntimeHealth();
+          const crystalCoreHealth = await getCrystalCoreHealth();
           const worldSimHealth = await getWorldSimRuntimeHealth({ fetchJson });
           const sportsHealth = getSportsRuntimeHealth();
           const coverageSnapshot = getCoverageSnapshot();
@@ -2401,11 +3143,12 @@ exports.api = onRequest(
           respondJson(res, 200, {
             ok: true,
             timestamp: new Date().toISOString(),
-          forecast: forecastHealth,
-          worldSim: worldSimHealth,
-          sports: sportsHealth,
-          polymarket: getPolymarketRuntimeHealth(),
-          billing: getBillingRuntimeHealth(),
+            forecast: forecastHealth,
+            crystalCore: crystalCoreHealth,
+            worldSim: worldSimHealth,
+            sports: sportsHealth,
+            polymarket: getPolymarketRuntimeHealth(),
+            billing: getBillingRuntimeHealth(),
             registry: {
               catalogVersionId: coverageSnapshot.catalog_version_id,
               policyProfile: coverageSnapshot.policy_profile,
@@ -2453,8 +3196,30 @@ exports.api = onRequest(
       }
 
       if (req.method === "POST" && route === "/public/compile-query") {
-        const plan = await compileQuery(body.query || "");
+        const runtimeSelection = await resolveCrystalCoreSelection({
+          req,
+          uid: null,
+          queryText: body.query || "",
+        });
+        const plan = await compileQueryThroughCrystalCore(body.query || "", {
+          transport: runtimeSelection.selectedTransport,
+        });
         respondJson(res, 200, plan);
+        return;
+      }
+
+      if (req.method === "GET" && /^\/public\/forecast-runs\/[^/]+$/.test(route)) {
+        const runId = decodeURIComponent(route.split("/")[3] || "");
+        const token = typeof req.query?.token === "string" ? req.query.token : "";
+        const runDoc = await getPublicForecastRun(runId, token);
+        const card =
+          runDoc.status === "completed" && runDoc.result_card
+            ? await completePublishedRunCardIfNeeded(runDoc, safeText(runDoc.source_view, "forecast-gallery-guest"), null)
+            : null;
+        respondJson(res, 200, {
+          run: sanitizeForecastRunForApi(runDoc),
+          card: card ? serializeApiValue(card) : null,
+        });
         return;
       }
 
@@ -2468,14 +3233,67 @@ exports.api = onRequest(
           );
         }
 
-        const card = await predict(body.query || "", body.queryPlan || {}, null, {
-          engine: "standard",
-          action: "search_standard",
-          cost: 0,
-          plan: "free",
+        const queryText = body.query || "";
+        const queryPlan = body.queryPlan || {};
+        const runtimeSelection = await resolveCrystalCoreSelection({
+          req,
+          uid: null,
+          queryText,
         });
-        respondJson(res, 200, card);
-        return;
+        const runId = createForecastRunId(queryText, queryPlan, actionSpec.engine);
+        const publicAccessToken = createRunAccessToken();
+
+        try {
+          const edgeResult = await startCrystalEdgePrediction({
+            runId,
+            queryText,
+            queryPlan,
+            userContext: null,
+            uid: null,
+            visibility: "public",
+            publicAccessToken,
+            sourceView: "forecast-gallery-guest",
+            routeOrigin: "public/predict",
+            engine: actionSpec.engine,
+            plan: "free",
+            transport: runtimeSelection.selectedTransport,
+            rolloutBucket: runtimeSelection.rolloutBucket,
+          });
+
+          if (edgeResult.pending) {
+            respondJson(res, 200, edgeResult.card);
+            return;
+          }
+
+          const runDoc =
+            (await readForecastRunResult(runId)) || {
+              run_id: runId,
+              query_text: queryText,
+              query_plan: queryPlan,
+              result_card: edgeResult.card,
+              source_view: "forecast-gallery-guest",
+              status: "completed",
+            };
+          const publishedCard = await completePublishedRunCardIfNeeded(runDoc, "forecast-gallery-guest", null);
+          respondJson(res, 200, publishedCard);
+          return;
+        } catch (edgeError) {
+          console.warn("Crystal edge guest run failed, falling back to legacy predict.", edgeError?.message || edgeError);
+          const card = await predict(body.query || "", body.queryPlan || {}, null, {
+            engine: "standard",
+            action: "search_standard",
+            cost: 0,
+            plan: "free",
+          });
+          const publishedCard = await maybePublishForecastArtifacts({
+            queryText: body.query || "",
+            queryPlan: body.queryPlan || {},
+            card,
+            sourceView: "forecast-gallery-guest",
+          });
+          respondJson(res, 200, publishedCard);
+          return;
+        }
       }
 
       const decodedUser = await requireUser(req);
@@ -2492,6 +3310,39 @@ exports.api = onRequest(
                 : "app"
       );
       const userState = await syncUserState(decodedUser.uid, decodedUser);
+
+      if (req.method === "GET" && /^\/forecast-runs\/[^/]+$/.test(route)) {
+        const runId = decodeURIComponent(route.split("/")[2] || "");
+        const runDoc = await getAuthorizedForecastRun(decodedUser.uid, runId);
+        const card =
+          runDoc.status === "completed" && runDoc.result_card
+            ? await completePublishedRunCardIfNeeded(runDoc, safeText(runDoc.source_view, sourceView), decodedUser.uid)
+            : null;
+        respondJson(res, 200, {
+          run: sanitizeForecastRunForApi(runDoc),
+          card: card ? serializeApiValue(card) : null,
+        });
+        return;
+      }
+
+      if (req.method === "POST" && /^\/forecast-runs\/[^/]+\/cancel$/.test(route)) {
+        const runId = decodeURIComponent(route.split("/")[2] || "");
+        await getAuthorizedForecastRun(decodedUser.uid, runId);
+        await db.collection("forecast_runs").doc(runId).set(
+          {
+            status: "canceled",
+            current_stage: "canceled",
+            completed_at: admin.firestore.FieldValue.serverTimestamp(),
+            updated_at: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+        respondJson(res, 200, {
+          ok: true,
+          run_id: runId,
+        });
+        return;
+      }
 
       if (req.method === "POST" && route === "/worldsim/jobs") {
         const created = await createManualWorldSimJob(createWorldSimJobContext(), {
@@ -2643,7 +3494,14 @@ exports.api = onRequest(
       }
 
       if (req.method === "POST" && route === "/compile-query") {
-        const plan = await compileQuery(body.query || "");
+        const runtimeSelection = await resolveCrystalCoreSelection({
+          req,
+          uid: decodedUser.uid,
+          queryText: body.query || "",
+        });
+        const plan = await compileQueryThroughCrystalCore(body.query || "", {
+          transport: runtimeSelection.selectedTransport,
+        });
         respondJson(res, 200, plan);
         return;
       }
@@ -2651,8 +3509,64 @@ exports.api = onRequest(
       if (req.method === "POST" && route === "/predict") {
         const actionSpec = getPredictSpec(body.queryPlan || {}, sourceView === "dashboard" ? "dashboard" : "search");
         ensureActionAllowed(userState, actionSpec);
+        const queryText = body.query || "";
+        const queryPlan = body.queryPlan || {};
+        const userContext = body.userContext || null;
+        const runtimeSelection = await resolveCrystalCoreSelection({
+          req,
+          uid: decodedUser.uid,
+          queryText,
+        });
+        const runId = createForecastRunId(queryText, queryPlan, actionSpec.engine);
+
         try {
-          const baseCard = await predict(body.query || "", body.queryPlan || {}, body.userContext || null, {
+          const edgeResult = await startCrystalEdgePrediction({
+            runId,
+            queryText,
+            queryPlan,
+            userContext,
+            uid: decodedUser.uid,
+            visibility: "private",
+            publicAccessToken: null,
+            sourceView,
+            routeOrigin: "predict",
+            engine: actionSpec.engine,
+            plan: userState.plan,
+            transport: runtimeSelection.selectedTransport,
+            rolloutBucket: runtimeSelection.rolloutBucket,
+          });
+
+          await consumeCredits(decodedUser.uid, decodedUser, actionSpec, sourceView, {
+            route: "predict",
+            engine: actionSpec.engine,
+            horizon: actionSpec.horizon,
+            confidence: actionSpec.confidence,
+            transport: edgeResult.pending ? "edge_pending" : "edge_completed",
+          });
+
+          if (edgeResult.pending) {
+            respondJson(res, 200, edgeResult.card);
+            return;
+          }
+
+          const runDoc =
+            (await readForecastRunResult(runId)) || {
+              run_id: runId,
+              query_text: queryText,
+              query_plan: queryPlan,
+              result_card: edgeResult.card,
+              source_view: sourceView,
+              status: "completed",
+            };
+          const publishedCard = await completePublishedRunCardIfNeeded(runDoc, sourceView, decodedUser.uid);
+          respondJson(res, 200, publishedCard);
+          return;
+        } catch (edgeError) {
+          console.warn("Crystal edge authenticated run failed, falling back to legacy predict.", edgeError?.message || edgeError);
+        }
+
+        try {
+          const baseCard = await predict(queryText, queryPlan, userContext, {
             engine: actionSpec.engine,
             action: actionSpec.action,
             cost: actionSpec.cost,
@@ -2663,18 +3577,26 @@ exports.api = onRequest(
             engine: actionSpec.engine,
             horizon: actionSpec.horizon,
             confidence: actionSpec.confidence,
+            transport: "legacy",
           });
           const { card } = await maybeCreatePredictionWorldSimJob(createWorldSimJobContext(), {
             uid: decodedUser.uid,
-            queryText: body.query || "",
-            queryPlan: body.queryPlan || {},
-            userContext: body.userContext || null,
+            queryText,
+            queryPlan,
+            userContext,
             plan: userState.plan,
             engine: actionSpec.engine,
             sourceRef: sourceView,
             card: baseCard,
           });
-          respondJson(res, 200, card);
+          const publishedCard = await maybePublishForecastArtifacts({
+            queryText,
+            queryPlan,
+            card,
+            sourceView,
+            uid: decodedUser.uid,
+          });
+          respondJson(res, 200, publishedCard);
           return;
         } catch (error) {
           await recordFailedCreditEvent(decodedUser.uid, actionSpec.action, actionSpec.cost, sourceView, {
@@ -2761,5 +3683,47 @@ exports.api = onRequest(
         details: error?.details || null,
       });
     }
+  }
+);
+
+exports.crystalCoreResolutionSweep = onSchedule(
+  {
+    schedule: "10 * * * *",
+    timeZone: "Europe/Rome",
+    region: "europe-west1",
+    timeoutSeconds: 540,
+    memory: "256MiB",
+  },
+  async () => {
+    const result = await runCrystalCoreEvalJob("resolution", { trigger: "scheduler_hourly" });
+    console.log("crystalCoreResolutionSweep", result);
+  }
+);
+
+exports.crystalCoreEvaluationSweep = onSchedule(
+  {
+    schedule: "15 3 * * *",
+    timeZone: "Europe/Rome",
+    region: "europe-west1",
+    timeoutSeconds: 540,
+    memory: "256MiB",
+  },
+  async () => {
+    const result = await runCrystalCoreEvalJob("evaluation", { trigger: "scheduler_nightly" });
+    console.log("crystalCoreEvaluationSweep", result);
+  }
+);
+
+exports.crystalCoreReportGeneration = onSchedule(
+  {
+    schedule: "30 6 * * *",
+    timeZone: "Europe/Rome",
+    region: "europe-west1",
+    timeoutSeconds: 540,
+    memory: "256MiB",
+  },
+  async () => {
+    const result = await runCrystalCoreEvalJob("report", { trigger: "scheduler_daily" });
+    console.log("crystalCoreReportGeneration", result);
   }
 );

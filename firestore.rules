@@ -89,6 +89,10 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    match /system_config/{document=**} {
+      allow read, write: if false;
+    }
+
     match /facts/{document=**} {
       allow read, write: if false;
     }
@@ -125,6 +129,39 @@ service cloud.firestore {
     match /worldsim_jobs/{jobId} {
       allow read: if isAuthenticated() && resource.data.uid == request.auth.uid;
       allow write: if false;
+    }
+
+    match /forecast_ledger/{forecastId} {
+      allow read, write: if false;
+
+      match /versions/{versionId} {
+        allow read, write: if false;
+      }
+    }
+
+    match /public_forecasts/{forecastId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    match /forecast_runs/{runId} {
+      allow read, write: if false;
+
+      match /artifacts/{artifactId} {
+        allow read, write: if false;
+      }
+    }
+
+    match /forecast_resolutions/{resolutionId} {
+      allow read, write: if false;
+    }
+
+    match /domain_calibration/{domainId} {
+      allow read, write: if false;
+    }
+
+    match /evaluation_reports/{reportId} {
+      allow read, write: if false;
     }
 
     match /users/{userId} {

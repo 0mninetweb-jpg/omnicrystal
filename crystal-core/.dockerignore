@@ -1,0 +1,12 @@
+node_modules
+.git
+.firebase
+dist
+app
+src
+infra
+world-sim
+functions/node_modules
+crystal-core/node_modules
+npm-debug.log
+firebase-debug.log

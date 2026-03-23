@@ -9,6 +9,7 @@ type ServerRequestContext = {
 
 let activeRequestContext: ServerRequestContext | null = null;
 let clientFallbackModulePromise: Promise<typeof import('./geminiClientFallback')> | null = null;
+const GUEST_ROLLOUT_KEY_STORAGE = 'crystal-core-guest-rollout-key';
 
 class BackendUnavailableError extends Error {
   constructor(message: string) {
@@ -19,6 +20,15 @@ class BackendUnavailableError extends Error {
 
 function looksLikeHtml(text: string) {
   return /<!doctype html>|<html[\s>]/i.test(text);
+}
+
+function getGuestRolloutKey() {
+  if (typeof window === 'undefined') return '';
+  const existing = window.sessionStorage.getItem(GUEST_ROLLOUT_KEY_STORAGE);
+  if (existing) return existing;
+  const next = `guest_${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+  window.sessionStorage.setItem(GUEST_ROLLOUT_KEY_STORAGE, next);
+  return next;
 }
 
 function getFriendlyServerErrorMessage(
@@ -127,6 +137,11 @@ async function requestServer<T>(
     }
     const token = await auth.currentUser.getIdToken();
     headers.Authorization = `Bearer ${token}`;
+  } else {
+    const guestRolloutKey = getGuestRolloutKey();
+    if (guestRolloutKey) {
+      headers['X-Crystal-Guest-Key'] = guestRolloutKey;
+    }
   }
 
   let response: Response;
@@ -226,6 +241,25 @@ export async function predictPublic(query: string, queryPlan: any) {
     }
     throw error;
   }
+}
+
+export async function getForecastRun(runId: string) {
+  return requestServer<any>(`forecast-runs/${encodeURIComponent(runId)}`, {
+    method: 'GET',
+  });
+}
+
+export async function getPublicForecastRun(runId: string, token: string) {
+  return requestServer<any>(`public/forecast-runs/${encodeURIComponent(runId)}?token=${encodeURIComponent(token)}`, {
+    method: 'GET',
+    requireAuth: false,
+  });
+}
+
+export async function cancelForecastRun(runId: string) {
+  return requestServer<any>(`forecast-runs/${encodeURIComponent(runId)}/cancel`, {
+    method: 'POST',
+  });
 }
 
 export async function chatWithProfileBot(messages: { role: string; content: string }[]) {

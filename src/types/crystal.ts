@@ -96,6 +96,35 @@ export interface PublicationBasis {
   notes?: string[];
 }
 
+export interface ResolutionTarget {
+  resolution_id: string;
+  target_type: 'binary_outcome' | 'directional_range';
+  source_type: string;
+  resolution_due_at: string;
+  resolution_window_days?: number;
+  question_side_a?: string | null;
+  question_side_b?: string | null;
+  market_slug?: string | null;
+  market_id?: string | null;
+  event_date?: string | null;
+  evaluation_eligible?: boolean;
+}
+
+export interface CalibrationSnapshot {
+  active: boolean;
+  calibration_version?: string | null;
+  raw_probability?: number;
+  calibrated_probability?: number;
+  raw_confidence?: number;
+  calibrated_confidence?: number;
+  thresholds?: {
+    published_min_confidence?: number;
+    published_min_coverage?: number;
+    max_conflict_for_published?: number;
+  };
+  updated_at?: string | null;
+}
+
 export interface WorldSimCounterfactual {
   label: string;
   outcome: string;
@@ -158,6 +187,11 @@ export interface CardData {
   what_to_watch?: string[];
   how_to_raise_confidence?: string[];
   evidence_drawer?: EvidenceDrawer;
+  lineage_id?: string;
+  ledger_ref?: string | null;
+  public_forecast_ref?: string | null;
+  public_slug?: string | null;
+  query_origin?: string;
   ranked_list?: {
     item_id: string;
     label: string;
@@ -169,6 +203,19 @@ export interface CardData {
   prediction_market_frame?: PredictionMarketFrame | null;
   world_sim?: WorldSimDigest;
   world_sim_job?: WorldSimJobRef | null;
+  pending_run?: {
+    run_id: string;
+    status: 'running' | 'completed' | 'failed';
+    visibility: 'private' | 'public';
+    access_token?: string | null;
+    poll_after_ms?: number;
+  };
+  resolution_target?: ResolutionTarget;
+  evaluation_eligible?: boolean;
+  runtime_transport?: 'local' | 'remote' | 'local_fallback';
+  rollout_bucket?: string;
+  calibration_snapshot?: CalibrationSnapshot;
+  core_version?: string;
   _source?: string;
   _billing?: {
     action: string;
