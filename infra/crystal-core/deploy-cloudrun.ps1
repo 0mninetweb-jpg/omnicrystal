@@ -15,6 +15,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$PSNativeCommandUseErrorActionPreference = $false
 
 function Get-GcloudExecutable {
   $cmd = Get-Command gcloud.cmd -ErrorAction SilentlyContinue
