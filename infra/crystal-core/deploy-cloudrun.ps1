@@ -46,13 +46,13 @@ Invoke-GcloudChecked config set project $ProjectId
 Invoke-GcloudChecked services enable run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com cloudtasks.googleapis.com cloudscheduler.googleapis.com --project $ProjectId --quiet
 
 $repoName = "cloud-run-source-deploy"
-& $gcloud artifacts repositories describe $repoName --location $Region --project $ProjectId *> $null
-if ($LASTEXITCODE -ne 0) {
+$repoExists = (& $gcloud artifacts repositories describe $repoName --location $Region --project $ProjectId --format "value(name)" 2>$null | Select-Object -First 1).Trim()
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($repoExists)) {
   Invoke-GcloudChecked artifacts repositories create $repoName --repository-format docker --location $Region --project $ProjectId
 }
 
-& $gcloud tasks queues describe $TaskQueueName --location $Region --project $ProjectId *> $null
-if ($LASTEXITCODE -ne 0) {
+$queueExists = (& $gcloud tasks queues describe $TaskQueueName --location $Region --project $ProjectId --format "value(name)" 2>$null | Select-Object -First 1).Trim()
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($queueExists)) {
   Invoke-GcloudChecked tasks queues create $TaskQueueName --location $Region --project $ProjectId
 }
 
