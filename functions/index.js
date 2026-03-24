@@ -56,6 +56,8 @@ const {
   mergeQueryPlanWithRouting,
   computeEvidenceQuality,
   finalizeScorecard,
+  buildBinaryContract,
+  buildCompatibleProbabilitySplit,
   buildDriverObjects,
   normalizeTextList,
   clamp01: predictionClamp01,
@@ -1098,6 +1100,48 @@ function normalizeCard(card, queryPlan, options = {}) {
     (cardState === "published"
       ? "Act on the current read, but keep monitoring the invalidation triggers."
       : "Use this as orientation and wait for one more confirming signal before acting decisively.");
+  const binaryContract =
+    card?.binary_contract && typeof card.binary_contract === "object"
+      ? card.binary_contract
+      : scorecard?.binary_contract && typeof scorecard.binary_contract === "object"
+        ? scorecard.binary_contract
+        : buildBinaryContract(
+            card?.binary_contract || {},
+            {
+              question_side_a: safeText(queryPlan?.question_side_a),
+              question_side_b: safeText(queryPlan?.question_side_b),
+            },
+            card?.probability_split || scorecard?.probability_split || null,
+            card?.primary_call || scorecard?.primary_call,
+            {
+              fallbackProbability:
+                scorecard?.binary_contract?.winning_probability ??
+                scorecard?.probability_split?.primary_probability ??
+                card?.probability_split?.primary_probability ??
+                confidenceScore,
+              publicationState: cardState,
+              confidenceScore,
+              evidenceQuality,
+            }
+          );
+  const compatibilityProbabilitySplit =
+    binaryContract && typeof binaryContract === "object"
+      ? buildCompatibleProbabilitySplit(binaryContract)
+      : card?.probability_split && typeof card.probability_split === "object"
+        ? {
+            primary_label: safeText(card.probability_split.primary_label),
+            primary_probability: predictionClamp01(card.probability_split.primary_probability, 0.5),
+            secondary_label: safeText(card.probability_split.secondary_label),
+            secondary_probability: predictionClamp01(card.probability_split.secondary_probability, 0.5),
+          }
+        : scorecard?.probability_split && typeof scorecard.probability_split === "object"
+          ? {
+              primary_label: safeText(scorecard.probability_split.primary_label),
+              primary_probability: predictionClamp01(scorecard.probability_split.primary_probability, 0.5),
+              secondary_label: safeText(scorecard.probability_split.secondary_label),
+              secondary_probability: predictionClamp01(scorecard.probability_split.secondary_probability, 0.5),
+            }
+          : null;
 
   return {
     card_id: card?.card_id || crypto.randomUUID(),
@@ -1111,23 +1155,9 @@ function normalizeCard(card, queryPlan, options = {}) {
     title: safeText(card?.title, titleFallback),
     summary: safeText(card?.summary, summaryFallback),
     verdict: safeText(card?.verdict, verdictFallback),
-    primary_call: safeText(card?.primary_call, safeText(scorecard?.primary_call)),
-    probability_split:
-      card?.probability_split && typeof card.probability_split === "object"
-        ? {
-            primary_label: safeText(card.probability_split.primary_label),
-            primary_probability: clamp01(card.probability_split.primary_probability, 0.5),
-            secondary_label: safeText(card.probability_split.secondary_label),
-            secondary_probability: clamp01(card.probability_split.secondary_probability, 0.5),
-          }
-        : scorecard?.probability_split && typeof scorecard.probability_split === "object"
-          ? {
-              primary_label: safeText(scorecard.probability_split.primary_label),
-              primary_probability: clamp01(scorecard.probability_split.primary_probability, 0.5),
-              secondary_label: safeText(scorecard.probability_split.secondary_label),
-              secondary_probability: clamp01(scorecard.probability_split.secondary_probability, 0.5),
-            }
-          : null,
+    primary_call: safeText(binaryContract?.display_call, safeText(card?.primary_call, safeText(scorecard?.primary_call))),
+    binary_contract: binaryContract || null,
+    probability_split: compatibilityProbabilitySplit,
     why_this_side: safeText(card?.why_this_side, safeText(scorecard?.why_this_side)),
     personal_output: typeof card?.personal_output === "string" && card.personal_output.trim() ? card.personal_output : recommendedActionFallback,
     scenario_set: normalizedScenarioSet,
@@ -2401,6 +2431,7 @@ Rules:
 }
 
 function buildDraftCard({ queryText, queryPlan, domainConfig, voicePayload, scorecard, evidenceBundle }) {
+  const binaryContract = scorecard?.binary_contract || null;
   const probabilitySplit = scorecard?.probability_split || null;
   const scenarioSet = Array.isArray(voicePayload?.scenario_set) && voicePayload.scenario_set.length > 0
     ? voicePayload.scenario_set.slice(0, 3)
@@ -2437,8 +2468,9 @@ function buildDraftCard({ queryText, queryPlan, domainConfig, voicePayload, scor
     risk_band: scorecard?.publication_state === "published" ? "medium" : "high",
     title: safeText(voicePayload?.title, safeText(queryText, "Crystal Forecast")),
     summary: safeText(voicePayload?.summary, safeText(scorecard?.why_this_side)),
-    verdict: safeText(voicePayload?.verdict, safeText(scorecard?.primary_call)),
-    primary_call: safeText(scorecard?.primary_call),
+    verdict: safeText(voicePayload?.verdict, safeText(binaryContract?.display_call, safeText(scorecard?.primary_call))),
+    primary_call: safeText(binaryContract?.display_call, safeText(scorecard?.primary_call)),
+    binary_contract: binaryContract,
     probability_split: probabilitySplit,
     why_this_side: safeText(scorecard?.why_this_side),
     personal_output: safeText(voicePayload?.recommended_action, safeText(scorecard?.recommended_posture)),

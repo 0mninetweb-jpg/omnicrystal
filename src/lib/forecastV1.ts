@@ -72,6 +72,19 @@ function uniqueList(values: string[]) {
   return Array.from(new Set(values.filter(Boolean)));
 }
 
+function deriveProbabilitySplit(card: CardData) {
+  if (card.probability_split) return card.probability_split;
+  if (card.binary_contract) {
+    return {
+      primary_label: safeText(card.binary_contract.question_side_a, 'Side A'),
+      primary_probability: Number(card.binary_contract.question_side_a_probability || 0.5),
+      secondary_label: safeText(card.binary_contract.question_side_b, 'Side B'),
+      secondary_probability: Number(card.binary_contract.question_side_b_probability || 0.5),
+    };
+  }
+  return null;
+}
+
 export function formatHorizonLabel(horizon: ForecastHorizon) {
   return HORIZON_OPTIONS.find((item) => item.value === horizon)?.label || horizon;
 }
@@ -317,8 +330,9 @@ export function buildForecastStack(card: CardData, context: ForecastResolvedCont
       title: safeText(card.title, 'Crystal forecast'),
       primaryOutcome: safeText(card.verdict, safeText(card.primary_call, safeText(card.summary, 'Crystal is still evaluating this question.'))),
       summary: safeText(card.summary, 'No summary available yet.'),
-      primaryCall: safeText(card.primary_call, undefined),
-      probabilitySplit: card.probability_split || null,
+      primaryCall: safeText(card.binary_contract?.display_call, safeText(card.primary_call, undefined)),
+      binaryContract: card.binary_contract || null,
+      probabilitySplit: deriveProbabilitySplit(card),
       whyThisSide: safeText(card.why_this_side, undefined),
       recommendedAction:
         safeText(card.personal_output) ||

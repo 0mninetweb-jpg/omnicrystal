@@ -1,6 +1,6 @@
 const crypto = require("node:crypto");
 
-const { safeText, clamp01 } = require("../predictionCore");
+const { safeText, clamp01, buildBinaryContract, buildCompatibleProbabilitySplit } = require("../predictionCore");
 
 const ACTIVE_CALIBRATION_SAMPLE_SIZE = 30;
 const ACTIVE_CALIBRATION_MAX_AGE_DAYS = 7;
@@ -9,6 +9,14 @@ const DEFAULT_PUBLISH_THRESHOLDS = {
   published_min_coverage: 0.58,
   max_conflict_for_published: 0.42,
 };
+
+function normalizeBinaryLabel(value) {
+  return safeText(value).trim().toLowerCase().replace(/ì/g, "i");
+}
+
+function binaryLabelsMatch(left, right) {
+  return Boolean(normalizeBinaryLabel(left) && normalizeBinaryLabel(left) === normalizeBinaryLabel(right));
+}
 
 function nowIso() {
   return new Date().toISOString();
@@ -80,7 +88,23 @@ function buildResolutionTarget({ normalizedQuery = {}, scorecard = {}, verifiedE
     eventDate && !Number.isNaN(eventDate.getTime()) ? eventDate.toISOString() : addDays(new Date(), horizonDays).toISOString();
   const binaryFrame = normalizedQuery?.binary_frame || {};
   const marketFrame = verifiedEvidencePack?.prediction_market_frame || null;
-  const isBinary = Boolean(binaryFrame.asks_binary_question || (scorecard?.probability_split?.primary_label && scorecard?.probability_split?.secondary_label));
+  const binaryContract =
+    scorecard?.binary_contract ||
+    buildBinaryContract(
+      {},
+      {
+        question_side_a: safeText(binaryFrame.question_side_a, safeText(scorecard?.probability_split?.primary_label)),
+        question_side_b: safeText(binaryFrame.question_side_b, safeText(scorecard?.probability_split?.secondary_label)),
+      },
+      scorecard?.probability_split || null,
+      scorecard?.primary_call,
+      {
+        publicationState: safeText(scorecard?.publication_state, "limited"),
+        confidenceScore: clamp01(scorecard?.confidence_score, 0.58),
+        evidenceQuality: scorecard?.publication_basis || {},
+      }
+    );
+  const isBinary = Boolean(binaryFrame.asks_binary_question || binaryContract);
   const intentShape = safeText(normalizedQuery?.intent_shape, isBinary ? "binary_outcome" : "directional_range");
   const sourceType = marketFrame?.market_slug && isBinary ? "polymarket_binary" : intentShape === "binary_outcome" ? "binary_manual" : "directional_manual";
   const evaluationEligible = intentShape === "binary_outcome" || intentShape === "directional_range";
@@ -97,8 +121,8 @@ function buildResolutionTarget({ normalizedQuery = {}, scorecard = {}, verifiedE
     source_type: sourceType,
     resolution_due_at: resolutionDueAt,
     resolution_window_days: horizonDays,
-    question_side_a: safeText(binaryFrame.question_side_a, safeText(scorecard?.probability_split?.primary_label)),
-    question_side_b: safeText(binaryFrame.question_side_b, safeText(scorecard?.probability_split?.secondary_label)),
+    question_side_a: safeText(binaryContract?.question_side_a, safeText(binaryFrame.question_side_a, safeText(scorecard?.probability_split?.primary_label))),
+    question_side_b: safeText(binaryContract?.question_side_b, safeText(binaryFrame.question_side_b, safeText(scorecard?.probability_split?.secondary_label))),
     market_slug: safeText(marketFrame?.market_slug) || null,
     market_id: safeText(marketFrame?.market_id) || null,
     event_date: eventDateRaw || null,
@@ -213,8 +237,9 @@ function applyCalibrationToScorecard(scorecard = {}, calibrationDoc = null) {
 
   const adjustment = calibrationDoc.confidence_adjustment || {};
   const thresholds = calibrationDoc.publish_thresholds || DEFAULT_PUBLISH_THRESHOLDS;
+  const binaryContract = scorecard?.binary_contract || null;
   const rawProbability = clamp01(
-    scorecard?.probability_split?.primary_probability,
+    binaryContract?.winning_probability ?? scorecard?.probability_split?.primary_probability,
     Number.isFinite(Number(scorecard?.confidence_score)) ? Number(scorecard.confidence_score) : 0.5
   );
   const rawConfidence = clamp01(scorecard?.confidence_score, rawProbability);
@@ -236,7 +261,37 @@ function applyCalibrationToScorecard(scorecard = {}, calibrationDoc = null) {
     confidence_score: Number(calibratedConfidence.toFixed(4)),
   };
 
-  if (scorecard?.probability_split) {
+  if (binaryContract) {
+    const calibratedBinaryContract = buildBinaryContract(
+      {
+        ...binaryContract,
+        question_side_a_probability: binaryLabelsMatch(binaryContract?.winning_side, binaryContract?.question_side_a)
+          ? calibratedProbability
+          : 1 - calibratedProbability,
+        question_side_b_probability: binaryLabelsMatch(binaryContract?.winning_side, binaryContract?.question_side_b)
+          ? calibratedProbability
+          : 1 - calibratedProbability,
+        winning_probability: calibratedProbability,
+      },
+      {
+        question_side_a: safeText(binaryContract?.question_side_a),
+        question_side_b: safeText(binaryContract?.question_side_b),
+      },
+      scorecard?.probability_split || null,
+      scorecard?.primary_call,
+      {
+        fallbackProbability: binaryLabelsMatch(binaryContract?.winning_side, binaryContract?.question_side_a)
+          ? calibratedProbability
+          : 1 - calibratedProbability,
+        publicationState: safeText(scorecard?.publication_state, "limited"),
+        confidenceScore: calibratedConfidence,
+        evidenceQuality: scorecard?.publication_basis || {},
+      }
+    );
+    nextScorecard.binary_contract = calibratedBinaryContract;
+    nextScorecard.probability_split = buildCompatibleProbabilitySplit(calibratedBinaryContract);
+    nextScorecard.primary_call = safeText(calibratedBinaryContract?.display_call, safeText(nextScorecard.primary_call));
+  } else if (scorecard?.probability_split) {
     nextScorecard.probability_split = {
       ...scorecard.probability_split,
       primary_probability: Number(calibratedProbability.toFixed(4)),
@@ -256,6 +311,38 @@ function applyCalibrationToScorecard(scorecard = {}, calibrationDoc = null) {
     nextScorecard.publication_state = "limited";
   }
 
+  if (nextScorecard?.binary_contract) {
+    const recalibratedBinaryContract = buildBinaryContract(
+      {
+        ...nextScorecard.binary_contract,
+        question_side_a_probability: binaryLabelsMatch(nextScorecard.binary_contract?.winning_side, nextScorecard.binary_contract?.question_side_a)
+          ? calibratedProbability
+          : 1 - calibratedProbability,
+        question_side_b_probability: binaryLabelsMatch(nextScorecard.binary_contract?.winning_side, nextScorecard.binary_contract?.question_side_b)
+          ? calibratedProbability
+          : 1 - calibratedProbability,
+        winning_probability: calibratedProbability,
+      },
+      {
+        question_side_a: safeText(nextScorecard.binary_contract?.question_side_a),
+        question_side_b: safeText(nextScorecard.binary_contract?.question_side_b),
+      },
+      nextScorecard.probability_split || null,
+      nextScorecard.primary_call,
+      {
+        fallbackProbability: binaryLabelsMatch(nextScorecard.binary_contract?.winning_side, nextScorecard.binary_contract?.question_side_a)
+          ? calibratedProbability
+          : 1 - calibratedProbability,
+        publicationState: safeText(nextScorecard.publication_state, "limited"),
+        confidenceScore: calibratedConfidence,
+        evidenceQuality: nextScorecard.publication_basis || {},
+      }
+    );
+    nextScorecard.binary_contract = recalibratedBinaryContract;
+    nextScorecard.probability_split = buildCompatibleProbabilitySplit(recalibratedBinaryContract);
+    nextScorecard.primary_call = safeText(recalibratedBinaryContract?.display_call, safeText(nextScorecard.primary_call));
+  }
+
   const calibrationNote = `Domain calibration ${safeText(calibrationDoc.calibration_version, "active")} adjusted probability from ${Math.round(
     rawProbability * 100
   )}% to ${Math.round(calibratedProbability * 100)}%.`;
@@ -271,8 +358,11 @@ function applyCalibrationToScorecard(scorecard = {}, calibrationDoc = null) {
       calibration_version: safeText(calibrationDoc.calibration_version),
       raw_probability: Number(rawProbability.toFixed(4)),
       calibrated_probability: Number(calibratedProbability.toFixed(4)),
+      raw_winning_probability: Number(rawProbability.toFixed(4)),
+      calibrated_winning_probability: Number(calibratedProbability.toFixed(4)),
       raw_confidence: Number(rawConfidence.toFixed(4)),
       calibrated_confidence: Number(calibratedConfidence.toFixed(4)),
+      band: safeText(nextScorecard?.binary_contract?.band),
       thresholds: toSerializable(thresholds),
       updated_at: toSerializable(calibrationDoc.updated_at),
     },
@@ -409,15 +499,22 @@ async function runResolutionSweep(context, options = {}) {
       resolved_at: admin.firestore.FieldValue.serverTimestamp(),
       resolution_source: safeText(target.source_type, "manual"),
       resolution_quality: 0.78,
-      predicted_label: safeText(runDoc?.result_card?.probability_split?.primary_label, safeText(runDoc?.result_card?.primary_call)),
+      predicted_label: safeText(
+        runDoc?.result_card?.binary_contract?.winning_side,
+        safeText(runDoc?.result_card?.probability_split?.primary_label, safeText(runDoc?.result_card?.primary_call))
+      ),
       predicted_probability: clamp01(
-        runDoc?.result_card?.calibration_snapshot?.calibrated_probability ??
+        runDoc?.result_card?.calibration_snapshot?.calibrated_winning_probability ??
+          runDoc?.result_card?.calibration_snapshot?.calibrated_probability ??
+          runDoc?.result_card?.binary_contract?.winning_probability ??
           runDoc?.result_card?.probability_split?.primary_probability ??
           runDoc?.result_card?.trust_layer?.confidence_score,
         0.5
       ),
       raw_probability: clamp01(
-        runDoc?.result_card?.calibration_snapshot?.raw_probability ??
+        runDoc?.result_card?.calibration_snapshot?.raw_winning_probability ??
+          runDoc?.result_card?.calibration_snapshot?.raw_probability ??
+          runDoc?.result_card?.binary_contract?.winning_probability ??
           runDoc?.result_card?.probability_split?.primary_probability ??
           runDoc?.result_card?.trust_layer?.confidence_score,
         0.5
@@ -623,7 +720,14 @@ async function generateEvaluationReport(context, options = {}) {
       : null;
   const deterministicCallRate =
     recentRuns.length > 0
-      ? recentRuns.filter((runDoc) => Number(runDoc?.result_card?.probability_split?.primary_probability) >= 0.55).length / recentRuns.length
+      ? recentRuns.filter((runDoc) => {
+          const winningProbability = Number(
+            runDoc?.result_card?.calibration_snapshot?.calibrated_winning_probability ??
+              runDoc?.result_card?.binary_contract?.winning_probability ??
+              runDoc?.result_card?.probability_split?.primary_probability
+          );
+          return Number.isFinite(winningProbability) && winningProbability >= 0.55;
+        }).length / recentRuns.length
       : null;
   const generalRate =
     recentRuns.length > 0

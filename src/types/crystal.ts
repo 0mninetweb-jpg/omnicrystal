@@ -86,6 +86,18 @@ export interface ProbabilitySplit {
   secondary_probability: number;
 }
 
+export interface BinaryContract {
+  question_side_a: string;
+  question_side_b: string;
+  question_side_a_probability: number;
+  question_side_b_probability: number;
+  winning_side: string;
+  winning_probability: number;
+  band: 'limited' | 'lean' | 'tilted' | 'strong' | string;
+  display_call: string;
+  flip_conditions?: string[];
+}
+
 export interface PublicationBasis {
   coverage_score: number;
   freshness_score: number;
@@ -115,8 +127,11 @@ export interface CalibrationSnapshot {
   calibration_version?: string | null;
   raw_probability?: number;
   calibrated_probability?: number;
+  raw_winning_probability?: number;
+  calibrated_winning_probability?: number;
   raw_confidence?: number;
   calibrated_confidence?: number;
+  band?: string;
   thresholds?: {
     published_min_confidence?: number;
     published_min_coverage?: number;
@@ -173,6 +188,7 @@ export interface CardData {
   summary: string;
   verdict?: string;
   primary_call?: string;
+  binary_contract?: BinaryContract | null;
   probability_split?: ProbabilitySplit | null;
   why_this_side?: string;
   personal_output?: string;

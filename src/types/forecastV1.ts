@@ -1,4 +1,4 @@
-import type { CardData, Driver, EvidenceDrawer, PublicationBasis, ProbabilitySplit, Scenario, TrustLayer } from './crystal';
+import type { BinaryContract, CardData, Driver, EvidenceDrawer, PublicationBasis, ProbabilitySplit, Scenario, TrustLayer } from './crystal';
 
 export type ForecastGeography = 'auto' | 'global' | 'italy' | 'rome' | 'milan';
 export type ForecastHorizon = 'now' | '7d' | '30d' | '90d' | '6m' | '12m';
@@ -42,6 +42,7 @@ export interface ForecastPrimaryStackItem extends ForecastBaseStackItem {
   primaryOutcome: string;
   summary: string;
   primaryCall?: string;
+  binaryContract?: BinaryContract | null;
   probabilitySplit?: ProbabilitySplit | null;
   whyThisSide?: string;
   recommendedAction: string;

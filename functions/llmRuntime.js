@@ -620,6 +620,44 @@ function normalizeProbabilitySplit(probabilitySplit) {
   return normalized;
 }
 
+function normalizeBinaryContract(binaryContract) {
+  if (!isPlainObject(binaryContract)) return null;
+
+  const normalized = {
+    question_side_a: safeText(binaryContract.question_side_a),
+    question_side_b: safeText(binaryContract.question_side_b),
+    question_side_a_probability: Number(binaryContract.question_side_a_probability),
+    question_side_b_probability: Number(binaryContract.question_side_b_probability),
+    winning_side: safeText(binaryContract.winning_side),
+    winning_probability: Number(binaryContract.winning_probability),
+    band: safeText(binaryContract.band),
+    display_call: safeText(binaryContract.display_call),
+    flip_conditions: sanitizeStringList(binaryContract.flip_conditions),
+  };
+
+  if (
+    !normalized.question_side_a &&
+    !normalized.question_side_b &&
+    !normalized.winning_side &&
+    !normalized.display_call &&
+    normalized.flip_conditions.length === 0
+  ) {
+    return null;
+  }
+
+  if (!Number.isFinite(normalized.question_side_a_probability)) {
+    delete normalized.question_side_a_probability;
+  }
+  if (!Number.isFinite(normalized.question_side_b_probability)) {
+    delete normalized.question_side_b_probability;
+  }
+  if (!Number.isFinite(normalized.winning_probability)) {
+    delete normalized.winning_probability;
+  }
+
+  return normalized;
+}
+
 function normalizeDossierPayload(payload) {
   const value = unwrapStagePayload(payload, "dossier");
   if (!isPlainObject(value)) return value;
@@ -644,6 +682,7 @@ function normalizeDossierPayload(payload) {
       ...rawPrediction,
       primary_call: safeText(rawPrediction.primary_call),
       probability_split: normalizeProbabilitySplit(rawPrediction.probability_split),
+      binary_contract: normalizeBinaryContract(rawPrediction.binary_contract),
       confidence_score: Number.isFinite(Number(rawPrediction.confidence_score)) ? Number(rawPrediction.confidence_score) : undefined,
       key_drivers: sanitizeStringList(rawPrediction.key_drivers),
       counter_signals: sanitizeStringList(rawPrediction.counter_signals),
@@ -724,6 +763,7 @@ function validateStagePayload(payload, jsonStage) {
     }
     if (
       !safeText(normalized.raw_prediction.primary_call) &&
+      !normalized.raw_prediction.binary_contract &&
       !normalized.raw_prediction.probability_split &&
       normalized.raw_prediction.key_drivers.length === 0
     ) {
@@ -787,6 +827,7 @@ function getJsonRepairContract(jsonStage) {
 - raw_prediction {
   primary_call,
   probability_split {},
+  binary_contract {},
   confidence_score,
   key_drivers[],
   counter_signals[],

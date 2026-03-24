@@ -735,7 +735,191 @@ function inferPrimaryCallFromSplit(probabilitySplit) {
   return "";
 }
 
-function normalizeProbabilitySplit(rawProbabilitySplit, queryPlan = {}, rawPrimaryCall = "", fallbackProbability = null) {
+const BINARY_BAND_RANGES = {
+  limited: { min: 0.52, max: 0.64, label: "Lean" },
+  lean: { min: 0.55, max: 0.62, label: "Lean" },
+  tilted: { min: 0.63, max: 0.72, label: "Tilted" },
+  strong: { min: 0.73, max: 0.84, label: "Strong" },
+};
+
+function normalizeBinaryLabel(value) {
+  return normalizeText(value).replace(/\bsì\b/g, "si");
+}
+
+function binaryLabelsMatch(left, right) {
+  return Boolean(normalizeBinaryLabel(left) && normalizeBinaryLabel(left) === normalizeBinaryLabel(right));
+}
+
+function extractProbabilityFromCandidate(candidate) {
+  if (!Number.isFinite(Number(candidate))) return null;
+  return clamp01(candidate, NaN);
+}
+
+function inferSideAProbabilityFromRawSplit(rawProbabilitySplit, sideA, sideB) {
+  if (!rawProbabilitySplit || typeof rawProbabilitySplit !== "object") return null;
+
+  const directSideA =
+    extractProbabilityFromCandidate(rawProbabilitySplit.question_side_a_probability) ??
+    extractProbabilityFromCandidate(rawProbabilitySplit.side_a_probability);
+  if (Number.isFinite(directSideA)) {
+    return directSideA;
+  }
+
+  const directSideB =
+    extractProbabilityFromCandidate(rawProbabilitySplit.question_side_b_probability) ??
+    extractProbabilityFromCandidate(rawProbabilitySplit.side_b_probability);
+  if (Number.isFinite(directSideB)) {
+    return clamp01(1 - directSideB, 0.5);
+  }
+
+  const primaryLabel = safeText(rawProbabilitySplit.primary_label);
+  const secondaryLabel = safeText(rawProbabilitySplit.secondary_label);
+  const primaryProbability = extractProbabilityFromCandidate(rawProbabilitySplit.primary_probability);
+  const secondaryProbability = extractProbabilityFromCandidate(rawProbabilitySplit.secondary_probability);
+
+  if (binaryLabelsMatch(primaryLabel, sideA) && Number.isFinite(primaryProbability)) {
+    return primaryProbability;
+  }
+  if (binaryLabelsMatch(primaryLabel, sideB) && Number.isFinite(primaryProbability)) {
+    return clamp01(1 - primaryProbability, 0.5);
+  }
+  if (binaryLabelsMatch(secondaryLabel, sideA) && Number.isFinite(secondaryProbability)) {
+    return secondaryProbability;
+  }
+  if (binaryLabelsMatch(secondaryLabel, sideB) && Number.isFinite(secondaryProbability)) {
+    return clamp01(1 - secondaryProbability, 0.5);
+  }
+
+  const genericProbability = extractProbabilityFromCandidate(rawProbabilitySplit.probability);
+  if (Number.isFinite(genericProbability)) {
+    return genericProbability;
+  }
+
+  return null;
+}
+
+function inferSideMentionFromCall(rawPrimaryCall, sideA, sideB) {
+  const normalizedPrimaryCall = normalizeText(rawPrimaryCall);
+  if (!normalizedPrimaryCall) return null;
+
+  const mentionsSideA = sideA && normalizedPrimaryCall.includes(normalizeBinaryLabel(sideA));
+  const mentionsSideB = sideB && normalizedPrimaryCall.includes(normalizeBinaryLabel(sideB));
+
+  if (mentionsSideA && !mentionsSideB) return "a";
+  if (mentionsSideB && !mentionsSideA) return "b";
+  return null;
+}
+
+function selectBinaryBand(rawWinningProbability, publicationState, confidenceScore, evidenceQuality = {}) {
+  const probability = clamp01(rawWinningProbability, 0.56);
+  if (publicationState !== "published") {
+    return "limited";
+  }
+
+  if (
+    probability >= 0.73 &&
+    confidenceScore >= 0.8 &&
+    Number(evidenceQuality.coverage_score || 0) >= 0.72 &&
+    Number(evidenceQuality.agreement_score || 0) >= 0.62 &&
+    Number(evidenceQuality.conflict_score || 0) <= 0.28
+  ) {
+    return "strong";
+  }
+
+  if (probability >= 0.63 && confidenceScore >= 0.67) {
+    return "tilted";
+  }
+
+  return "lean";
+}
+
+function boundWinningProbability(rawWinningProbability, band = "limited") {
+  const config = BINARY_BAND_RANGES[band] || BINARY_BAND_RANGES.limited;
+  return Number(Math.max(config.min, Math.min(config.max, clamp01(rawWinningProbability, config.min))).toFixed(3));
+}
+
+function buildCompatibleProbabilitySplit(binaryContract) {
+  if (!binaryContract || !safeText(binaryContract.winning_side)) return null;
+  const losingSide = binaryLabelsMatch(binaryContract.winning_side, binaryContract.question_side_a)
+    ? safeText(binaryContract.question_side_b, "Alternative")
+    : safeText(binaryContract.question_side_a, "Alternative");
+  const winningProbability = Number(clamp01(binaryContract.winning_probability, 0.56).toFixed(3));
+  return {
+    primary_label: safeText(binaryContract.winning_side, "Primary"),
+    primary_probability: winningProbability,
+    secondary_label: losingSide,
+    secondary_probability: Number((1 - winningProbability).toFixed(3)),
+  };
+}
+
+function buildBinaryContract(rawBinaryContract = {}, queryPlan = {}, rawProbabilitySplit = null, rawPrimaryCall = "", options = {}) {
+  const sideA = safeText(queryPlan?.question_side_a, safeText(rawBinaryContract?.question_side_a));
+  const sideB = safeText(queryPlan?.question_side_b, safeText(rawBinaryContract?.question_side_b));
+  if (!sideA || !sideB) return null;
+
+  let sideAProbability =
+    inferSideAProbabilityFromRawSplit(rawBinaryContract, sideA, sideB) ??
+    inferSideAProbabilityFromRawSplit(rawProbabilitySplit, sideA, sideB);
+
+  const fallbackProbability = extractProbabilityFromCandidate(options?.fallbackProbability);
+  const sideMention = inferSideMentionFromCall(rawPrimaryCall, sideA, sideB);
+
+  if (!Number.isFinite(sideAProbability) && Number.isFinite(fallbackProbability)) {
+    sideAProbability = sideMention === "b" ? clamp01(1 - fallbackProbability, 0.42) : fallbackProbability;
+  }
+
+  if (!Number.isFinite(sideAProbability)) {
+    sideAProbability = sideMention === "b" ? 0.42 : sideMention === "a" ? 0.58 : 0.56;
+  }
+
+  let winningSide = sideAProbability >= 0.5 ? sideA : sideB;
+  if (sideMention === "a") {
+    winningSide = sideA;
+  } else if (sideMention === "b") {
+    winningSide = sideB;
+  } else if (safeText(rawBinaryContract?.winning_side)) {
+    const explicitWinner = safeText(rawBinaryContract.winning_side);
+    if (binaryLabelsMatch(explicitWinner, sideA)) {
+      winningSide = sideA;
+    } else if (binaryLabelsMatch(explicitWinner, sideB)) {
+      winningSide = sideB;
+    }
+  }
+
+  const rawWinningProbability = winningSide === sideA ? sideAProbability : clamp01(1 - sideAProbability, 0.44);
+  const band = selectBinaryBand(
+    rawWinningProbability,
+    safeText(options?.publicationState, "limited"),
+    clamp01(options?.confidenceScore, 0.58),
+    options?.evidenceQuality || {}
+  );
+  const winningProbability = boundWinningProbability(rawWinningProbability, band);
+  const questionSideAProbability = Number(
+    (winningSide === sideA ? winningProbability : 1 - winningProbability).toFixed(3)
+  );
+  const questionSideBProbability = Number((1 - questionSideAProbability).toFixed(3));
+  const bandLabel = BINARY_BAND_RANGES[band]?.label || "Lean";
+  const displayCall = `${bandLabel} ${winningSide} ${Math.round(winningProbability * 100)}/${Math.round(
+    (1 - winningProbability) * 100
+  )}`;
+
+  return {
+    question_side_a: sideA,
+    question_side_b: sideB,
+    question_side_a_probability: questionSideAProbability,
+    question_side_b_probability: questionSideBProbability,
+    winning_side: winningSide,
+    winning_probability: winningProbability,
+    band,
+    display_call: displayCall,
+    flip_conditions: normalizeTextList(rawBinaryContract?.flip_conditions || rawBinaryContract?.what_would_flip, 4),
+  };
+}
+
+function normalizeProbabilitySplit(rawProbabilitySplit, queryPlan = {}, rawPrimaryCall = "", fallbackProbability = null, options = {}) {
+  if (options?.binaryContract) {
+    return buildCompatibleProbabilitySplit(options.binaryContract);
+  }
   const sideA = safeText(queryPlan?.question_side_a);
   const sideB = safeText(queryPlan?.question_side_b);
   const binary = Boolean(sideA && sideB);
@@ -788,24 +972,15 @@ function finalizeScorecard(rawScorecard = {}, evidenceBundle = {}, queryPlan = {
     evidenceBundle.prediction_market_frame?.implied_probability ??
     null;
 
-  const probabilitySplit = normalizeProbabilitySplit(
+  const provisionalProbabilitySplit = normalizeProbabilitySplit(
     rawScorecard.probability_split,
     queryPlan,
     rawScorecard.primary_call || rawScorecard.directional_hypothesis || rawScorecard.verdict,
     fallbackProbability
   );
 
-  let primaryCall = safeText(rawScorecard.primary_call || rawScorecard.directional_hypothesis || rawScorecard.verdict);
-  if (!primaryCall) {
-    primaryCall = inferPrimaryCallFromSplit(probabilitySplit);
-  }
-
   const keyDrivers = normalizeTextList(rawScorecard.key_drivers || rawScorecard.drivers, 4);
-  const counterSignals = normalizeTextList(rawScorecard.counter_signals, 4);
-  const invalidators = normalizeTextList(rawScorecard.invalidators || rawScorecard.what_would_flip, 4);
   const historicalAnchors = normalizeTextList(rawScorecard.historical_anchors, 4);
-  const whyThisSide = safeText(rawScorecard.why_this_side || rawScorecard.why_this_outcome);
-  const recommendedPosture = safeText(rawScorecard.recommended_posture || rawScorecard.recommended_action);
 
   const computedConfidence = clamp01(
     0.24 +
@@ -813,8 +988,8 @@ function finalizeScorecard(rawScorecard = {}, evidenceBundle = {}, queryPlan = {
       evidenceQuality.freshness_score * 0.16 +
       evidenceQuality.agreement_score * 0.16 -
       evidenceQuality.conflict_score * 0.1 +
-      (primaryCall ? 0.08 : 0) +
-      (probabilitySplit ? 0.04 : 0),
+      (safeText(rawScorecard.primary_call || rawScorecard.directional_hypothesis || rawScorecard.verdict) ? 0.08 : 0) +
+      (provisionalProbabilitySplit ? 0.04 : 0),
     0.24
   );
 
@@ -829,7 +1004,7 @@ function finalizeScorecard(rawScorecard = {}, evidenceBundle = {}, queryPlan = {
 
   const hardStop = Boolean(evidenceBundle.hard_stop);
   let publicationState = "limited";
-  if (hardStop || !primaryCall) {
+  if (hardStop) {
     publicationState = "blocked";
   } else if (
     confidenceScore >= 0.67 &&
@@ -840,8 +1015,85 @@ function finalizeScorecard(rawScorecard = {}, evidenceBundle = {}, queryPlan = {
     publicationState = "published";
   }
 
+  const binaryContract = buildBinaryContract(
+    rawScorecard.binary_contract || {},
+    queryPlan,
+    rawScorecard.probability_split,
+    rawScorecard.primary_call || rawScorecard.directional_hypothesis || rawScorecard.verdict,
+    {
+      fallbackProbability,
+      publicationState,
+      confidenceScore,
+      evidenceQuality,
+    }
+  );
+  const probabilitySplit = normalizeProbabilitySplit(
+    rawScorecard.probability_split,
+    queryPlan,
+    rawScorecard.primary_call || rawScorecard.directional_hypothesis || rawScorecard.verdict,
+    fallbackProbability,
+    {
+      binaryContract,
+    }
+  );
+
+  let primaryCall = safeText(rawScorecard.primary_call || rawScorecard.directional_hypothesis || rawScorecard.verdict);
+  if (binaryContract?.display_call) {
+    primaryCall = binaryContract.display_call;
+  } else if (!primaryCall) {
+    primaryCall = inferPrimaryCallFromSplit(probabilitySplit);
+  }
+
+  let counterSignals = normalizeTextList(rawScorecard.counter_signals, 4);
+  if (binaryContract && counterSignals.length === 0) {
+    counterSignals = normalizeTextList(
+      evidenceBundle?.conflict_map?.map((item) => safeText(item?.issue || item?.note)) || [],
+      4
+    );
+  }
+  if (binaryContract && counterSignals.length === 0) {
+    counterSignals = ["Counter-signals remain active and could still compress the edge."];
+  }
+
+  let invalidators = normalizeTextList(rawScorecard.invalidators || rawScorecard.what_would_flip, 4);
+  if (binaryContract?.flip_conditions?.length) {
+    invalidators = uniqueStrings(binaryContract.flip_conditions.concat(invalidators)).slice(0, 4);
+  }
+  if (binaryContract && invalidators.length === 0) {
+    invalidators = ["A late reversal in the strongest live signals would flip this call."];
+  }
+
+  let whyThisSide = safeText(rawScorecard.why_this_side || rawScorecard.why_this_outcome);
+  if (binaryContract && !whyThisSide) {
+    whyThisSide = keyDrivers.length
+      ? `Crystal leans ${binaryContract.winning_side} because ${keyDrivers.slice(0, 2).join(" and ")} are currently setting the edge.`
+      : `Crystal leans ${binaryContract.winning_side} because the verified evidence stack still points to that side.`;
+  }
+
+  let recommendedPosture = safeText(rawScorecard.recommended_posture || rawScorecard.recommended_action);
+  if (binaryContract && !recommendedPosture) {
+    recommendedPosture = "Treat this as a bounded directional read and monitor the flip conditions before acting more aggressively.";
+  }
+
+  if (!primaryCall) {
+    publicationState = "blocked";
+  }
+  if (
+    binaryContract &&
+    publicationState === "published" &&
+    (!safeText(binaryContract.question_side_a) ||
+      !safeText(binaryContract.question_side_b) ||
+      !safeText(binaryContract.winning_side) ||
+      !whyThisSide ||
+      counterSignals.length === 0 ||
+      invalidators.length === 0)
+  ) {
+    publicationState = "limited";
+  }
+
   return {
     primary_call: primaryCall,
+    binary_contract: binaryContract,
     probability_split: probabilitySplit,
     confidence_score: confidenceScore,
     publication_state: publicationState,
@@ -891,6 +1143,8 @@ module.exports = {
   buildDriverObjects,
   normalizeTextList,
   normalizeProbabilitySplit,
+  buildBinaryContract,
+  buildCompatibleProbabilitySplit,
   inferIntentShape,
   inferResolutionFrame,
   extractBinaryFrame,

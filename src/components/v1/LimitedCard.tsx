@@ -11,10 +11,12 @@ type LimitedCardProps = {
 
 export function LimitedCard({ item, onRemix }: LimitedCardProps) {
   const meta = getForecastMetaCopy(item.card);
-  const probabilityLabel = item.probabilitySplit
-    ? `${item.probabilitySplit.primary_label} ${Math.round(item.probabilitySplit.primary_probability * 100)}% · ${item.probabilitySplit.secondary_label} ${Math.round(item.probabilitySplit.secondary_probability * 100)}%`
-    : null;
-  const heroCall = item.primaryCall || item.primaryOutcome;
+  const probabilityLabel = item.binaryContract
+    ? `${item.binaryContract.question_side_a} ${Math.round(item.binaryContract.question_side_a_probability * 100)}% | ${item.binaryContract.question_side_b} ${Math.round(item.binaryContract.question_side_b_probability * 100)}%`
+    : item.probabilitySplit
+      ? `${item.probabilitySplit.primary_label} ${Math.round(item.probabilitySplit.primary_probability * 100)}% | ${item.probabilitySplit.secondary_label} ${Math.round(item.probabilitySplit.secondary_probability * 100)}%`
+      : null;
+  const heroCall = item.binaryContract?.display_call || item.primaryCall || item.primaryOutcome;
 
   return (
     <article className="rounded-[32px] border border-amber-200 bg-[linear-gradient(180deg,#fffdf7_0%,#ffffff_100%)] p-6 shadow-[0_18px_44px_rgba(120,53,15,0.06)]">

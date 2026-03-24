@@ -16,6 +16,8 @@ const {
   mergeQueryPlanWithRouting,
   computeEvidenceQuality,
   finalizeScorecard,
+  buildBinaryContract,
+  buildCompatibleProbabilitySplit,
   buildDriverObjects,
   normalizeTextList,
   clamp01,
@@ -141,6 +143,20 @@ const DOSSIER_RESPONSE_SCHEMA = {
             primary_probability: { type: "number" },
             secondary_label: { type: "string" },
             secondary_probability: { type: "number" },
+          },
+        },
+        binary_contract: {
+          type: "object",
+          properties: {
+            question_side_a: { type: "string" },
+            question_side_b: { type: "string" },
+            question_side_a_probability: { type: "number" },
+            question_side_b_probability: { type: "number" },
+            winning_side: { type: "string" },
+            winning_probability: { type: "number" },
+            band: { type: "string" },
+            display_call: { type: "string" },
+            flip_conditions: { type: "array", items: { type: "string" } },
           },
         },
         confidence_score: { type: "number" },
@@ -429,6 +445,7 @@ function compactScorecardForPrompt(scorecard = {}) {
     publication_state: safeText(scorecard?.publication_state, "limited"),
     primary_call: safeText(scorecard?.primary_call),
     confidence_score: clamp01(scorecard?.confidence_score, 0.5),
+    binary_contract: scorecard?.binary_contract || null,
     probability_split: scorecard?.probability_split || null,
     key_drivers: normalizeTextList(scorecard?.key_drivers, 4),
     counter_signals: normalizeTextList(scorecard?.counter_signals, 4),
@@ -470,6 +487,18 @@ function normalizeDossierStagePayload(payload = {}, options = {}) {
     confidence: clamp01(variable?.signal_quality, 0.5),
     note: safeText(variable?.selection_reason),
   }));
+  const normalizedQuery = options?.normalizedQuery || {};
+  const binaryContract = buildBinaryContract(
+    rawPrediction?.binary_contract || {},
+    normalizedQuery,
+    rawPrediction?.probability_split || null,
+    rawPrediction?.primary_call,
+    {
+      publicationState: "limited",
+      confidenceScore: clamp01(rawPrediction?.confidence_score, 0.58),
+      evidenceQuality: options?.evidenceQuality || {},
+    }
+  );
 
   return {
     structured_dossier:
@@ -483,10 +512,12 @@ function normalizeDossierStagePayload(payload = {}, options = {}) {
           : {},
     raw_prediction: {
       primary_call: safeText(rawPrediction?.primary_call),
-      probability_split:
-        rawPrediction?.probability_split && typeof rawPrediction.probability_split === "object"
+      probability_split: binaryContract
+        ? buildCompatibleProbabilitySplit(binaryContract)
+        : rawPrediction?.probability_split && typeof rawPrediction.probability_split === "object"
           ? rawPrediction.probability_split
           : null,
+      binary_contract: binaryContract,
       confidence_score: clamp01(rawPrediction?.confidence_score, 0.5),
       key_drivers: normalizeTextList(rawPrediction?.key_drivers, 4),
       counter_signals: normalizeTextList(rawPrediction?.counter_signals, 4),
@@ -594,20 +625,34 @@ function buildFallbackDossierPrediction({
 
   let primaryCall = "";
   let probabilitySplit = null;
+  let binaryContract = null;
   let whyThisSide = "";
   let recommendedPosture = "";
 
   if (binaryFrame?.asks_binary_question && primarySide && secondarySide) {
-    const primaryProbability = dominantLean === "down" ? 0.44 : dominantLean === "up" ? 0.56 : 0.52;
-    const secondaryProbability = clamp01(1 - primaryProbability, 0.48);
-    const leaningSide = primaryProbability >= 0.5 ? primarySide : secondarySide;
-    primaryCall = `Crystal currently leans ${leaningSide} on this binary question, but the edge is still sensitive to new evidence.`;
-    probabilitySplit = {
-      primary_label: primarySide,
-      primary_probability: primaryProbability,
-      secondary_label: secondarySide,
-      secondary_probability: secondaryProbability,
-    };
+    const questionSideAProbability = dominantLean === "down" ? 0.44 : dominantLean === "up" ? 0.56 : 0.52;
+    binaryContract = buildBinaryContract(
+      {
+        question_side_a: primarySide,
+        question_side_b: secondarySide,
+        question_side_a_probability: questionSideAProbability,
+        question_side_b_probability: 1 - questionSideAProbability,
+        flip_conditions: invalidators,
+      },
+      {
+        question_side_a: primarySide,
+        question_side_b: secondarySide,
+      },
+      null,
+      dominantLean === "down" ? secondarySide : primarySide,
+      {
+        publicationState: "limited",
+        confidenceScore: clamp01(evidenceQuality?.coverage_score, 0.56),
+        evidenceQuality,
+      }
+    );
+    primaryCall = safeText(binaryContract?.display_call, `Lean ${primarySide} 52/48`);
+    probabilitySplit = buildCompatibleProbabilitySplit(binaryContract);
     whyThisSide = keyDrivers.length
       ? `The current edge comes from ${keyDrivers.slice(0, 2).join(" and ")}.`
       : "The current edge comes from the strongest verified directional signals in the run.";
@@ -649,6 +694,7 @@ function buildFallbackDossierPrediction({
     raw_prediction: {
       primary_call: primaryCall,
       probability_split: probabilitySplit,
+      binary_contract: binaryContract,
       confidence_score: clamp01(evidenceQuality?.coverage_score * 0.55 + evidenceQuality?.freshness_score * 0.25 + (1 - clamp01(evidenceQuality?.conflict_score, 0.25)) * 0.2, 0.58),
       key_drivers: keyDrivers,
       counter_signals: counterSignals,
@@ -663,6 +709,8 @@ function buildFallbackDossierPrediction({
   return normalizeDossierStagePayload(payload, {
     baselineConsensusPack,
     variableSelectionPack,
+    normalizedQuery,
+    evidenceQuality,
   });
 }
 
@@ -670,15 +718,16 @@ function buildFallbackVoicePayload({ queryText, normalizedQuery, scorecard, veri
   const domainConfig = getDomain(normalizedQuery?.primary_domain_id, GENERAL_FORECAST_DOMAIN);
   const drivers = normalizeTextList(scorecard?.key_drivers, 4);
   const invalidators = normalizeTextList(scorecard?.invalidators, 4);
+  const binaryDisplayCall = safeText(scorecard?.binary_contract?.display_call);
   const payload = {
     title:
-      safeText(scorecard?.primary_call).slice(0, 92) ||
+      safeText(binaryDisplayCall || scorecard?.primary_call).slice(0, 92) ||
       safeText(queryText) ||
       safeText(domainConfig?.short_label || "Crystal Forecast"),
     summary:
       safeText(scorecard?.why_this_side) ||
       (drivers.length ? `Crystal is leaning on ${drivers.slice(0, 2).join(" and ")}.` : "Crystal generated a directional read from the verified evidence stack."),
-    verdict: safeText(scorecard?.primary_call),
+    verdict: safeText(binaryDisplayCall || scorecard?.primary_call),
     recommended_action:
       safeText(scorecard?.recommended_posture) ||
       "Use this as a directional read and keep watching the invalidation triggers.",
@@ -991,7 +1040,8 @@ primary_domain_id, intent_shape, resolution_frame, mode, question_side_a, questi
 Rules:
 - Choose a concrete domain whenever possible.
 - Use ${GENERAL_FORECAST_DOMAIN} only as a last resort.
-- Leave question_side_a and question_side_b empty unless the question is clearly binary.
+- If the question is binary, fill question_side_a, question_side_b, event_date, jurisdiction and governing_entity whenever the query implies them.
+- Leave question_side_a and question_side_b empty only when the question is not binary.
 - Use mode {"type":"forecast"}.
 - No markdown. No commentary. No wrapper keys.`;
 }
@@ -1033,7 +1083,8 @@ Rules:
 - Publish a directional thesis when evidence has orientation.
 - Keep structured_dossier compact.
 - raw_prediction must include primary_call, confidence_score, key_drivers, counter_signals, invalidators, historical_anchors, why_this_side, recommended_posture.
-- If the question is binary, include probability_split with explicit side labels.
+- If the question is binary, include probability_split with explicit side labels and binary_contract with question_side_a, question_side_b, winning_side, winning_probability and flip_conditions.
+- Do not leave the winner implicit in the prose.
 - No markdown. No commentary. No wrapper keys.`;
 }
 
@@ -1051,6 +1102,7 @@ Entities: ${entityLabels.join(", ")}
 Call: ${safeText(compactScorecard.primary_call)}
 Publication state: ${safeText(compactScorecard.publication_state, "limited")}
 Confidence: ${clamp01(compactScorecard.confidence_score, 0.5)}
+Binary contract: ${JSON.stringify(compactScorecard.binary_contract || null)}
 Probability split: ${JSON.stringify(compactScorecard.probability_split || null)}
 Drivers: ${compactScorecard.key_drivers.join("; ")}
 Counter signals: ${compactScorecard.counter_signals.join("; ")}
@@ -1064,6 +1116,7 @@ title, summary, verdict, recommended_action.
 
 Rules:
 - State the call first.
+- If the scorecard is binary, keep the compact verdict aligned with binary_contract.display_call.
 - Keep every field short, precise, and product-like.
 - If the state is limited, keep the thesis and put the caution in summary or coverage_notes.
 - No markdown. No commentary. No wrapper keys.`;
@@ -1084,6 +1137,7 @@ function buildFinalCard({
   rolloutBucket = null,
 }) {
   const domainConfig = getDomain(normalizedQuery.primary_domain_id, GENERAL_FORECAST_DOMAIN);
+  const binaryContract = scorecard?.binary_contract || null;
   const probabilitySplit = scorecard?.probability_split || null;
   const scenarioSet = normalizeScenarioSet(
     Array.isArray(scorecard?.scenario_set) ? scorecard.scenario_set : [],
@@ -1126,8 +1180,9 @@ function buildFinalCard({
     risk_band: publicationState === "published" ? "medium" : "high",
     title: safeText(voicePayload?.title, safeText(queryText, "Crystal Forecast")),
     summary: safeText(voicePayload?.summary, safeText(scorecard?.why_this_side, "Crystal generated a directional read.")),
-    verdict: safeText(voicePayload?.verdict, safeText(scorecard?.primary_call, "Crystal generated a directional read.")),
-    primary_call: safeText(scorecard?.primary_call),
+    verdict: safeText(voicePayload?.verdict, safeText(binaryContract?.display_call, safeText(scorecard?.primary_call, "Crystal generated a directional read."))),
+    primary_call: safeText(binaryContract?.display_call, safeText(scorecard?.primary_call)),
+    binary_contract: binaryContract,
     probability_split: probabilitySplit,
     why_this_side: safeText(scorecard?.why_this_side),
     personal_output: safeText(
@@ -1544,6 +1599,8 @@ async function executeForecastRun(context, payload = {}) {
       const dossierPrediction = normalizeDossierStagePayload(dossierPredictionPayload, {
         baselineConsensusPack,
         variableSelectionPack: variable_selection_pack,
+        normalizedQuery,
+        evidenceQuality: verifiedEvidencePack?.evidence_quality || {},
       });
       if (dossierFallbackActivated) {
         dossierPrediction.fallback_used = true;

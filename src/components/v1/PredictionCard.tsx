@@ -27,17 +27,19 @@ export function PredictionCard({
   onShare,
 }: PredictionCardProps) {
   const meta = getForecastMetaCopy(item.card);
-  const probabilityLabel = item.probabilitySplit
-    ? `${item.probabilitySplit.primary_label} ${Math.round(item.probabilitySplit.primary_probability * 100)}% · ${item.probabilitySplit.secondary_label} ${Math.round(item.probabilitySplit.secondary_probability * 100)}%`
-    : null;
-  const heroCall = item.primaryCall || item.primaryOutcome;
+  const probabilityLabel = item.binaryContract
+    ? `${item.binaryContract.question_side_a} ${Math.round(item.binaryContract.question_side_a_probability * 100)}% | ${item.binaryContract.question_side_b} ${Math.round(item.binaryContract.question_side_b_probability * 100)}%`
+    : item.probabilitySplit
+      ? `${item.probabilitySplit.primary_label} ${Math.round(item.probabilitySplit.primary_probability * 100)}% | ${item.probabilitySplit.secondary_label} ${Math.round(item.probabilitySplit.secondary_probability * 100)}%`
+      : null;
+  const heroCall = item.binaryContract?.display_call || item.primaryCall || item.primaryOutcome;
 
   return (
     <article className="rounded-[32px] border border-slate-200 bg-white p-6 shadow-[0_18px_44px_rgba(15,23,42,0.06)]">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-            {item.entity} · {item.domainId} · {item.horizon}
+            {item.entity} | {item.domainId} | {item.horizon}
           </div>
           <h3 className="mt-3 text-2xl font-semibold tracking-[-0.03em] text-slate-950">{item.title}</h3>
         </div>

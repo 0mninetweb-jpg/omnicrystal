@@ -302,8 +302,16 @@ const scorecard = finalizeScorecard(
 );
 
 assert(scorecard.primary_call, 'Scorecard should expose a primary call');
+assert(scorecard.binary_contract, 'Binary scorecard should expose a binary contract');
 assert(scorecard.probability_split, 'Binary scorecard should expose a probability split');
 assert.notEqual(scorecard.publication_state, 'blocked', 'Scorecard should not hard-block a directional read with valid evidence');
+assert.equal(scorecard.binary_contract.winning_side, 'No', 'Winner should be aligned with the higher-probability side');
+assert.equal(scorecard.primary_call, scorecard.binary_contract.display_call, 'Primary call should mirror the canonical binary display call');
+assert(Math.abs(scorecard.binary_contract.question_side_a_probability + scorecard.binary_contract.question_side_b_probability - 1) < 0.001, 'Binary side probabilities should sum to 1');
+assert(scorecard.binary_contract.winning_probability >= 0.52 && scorecard.binary_contract.winning_probability < 0.85, 'Winning probability should be bounded for public output');
+assert.equal(scorecard.probability_split.primary_label, 'No', 'Compatibility probability split should be winner-first');
+assert(scorecard.counter_signals.length > 0, 'Binary scorecards should expose counter-signals');
+assert(scorecard.invalidators.length > 0, 'Binary scorecards should expose flip conditions');
 
 if (failures.length > 0) {
   console.error(`Prediction core benchmark failed with ${failures.length} issues.`);
