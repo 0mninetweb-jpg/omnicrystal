@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
-    "check:prediction-core": "node scripts/check-prediction-core.mjs"
+    "check:prediction-core": "node scripts/check-prediction-core.mjs",
+    "check:crystal-core-json-path": "node scripts/check-crystal-core-json-path.mjs"
   },
   "dependencies": {
     "@google/genai": "^1.29.0",

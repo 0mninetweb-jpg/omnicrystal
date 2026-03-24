@@ -11,18 +11,18 @@ const OPENROUTER_MODELS = {
 };
 
 const GEMINI_MODELS = {
-  query: "gemini-3-flash-preview",
-  forecast: "gemini-3.1-pro-preview",
-  chat: "gemini-3-flash-preview",
-  copy: "gemini-3-flash-preview",
+  query: "gemini-2.5-flash",
+  forecast: "gemini-2.5-flash",
+  chat: "gemini-2.5-flash",
+  copy: "gemini-2.5-flash",
 };
 
 const DEFAULT_MAX_TOKENS = {
-  query: 384,
+  query: 768,
   forecast: 1600,
   chat: 640,
   copy: 1200,
-  repair: 512,
+  repair: 768,
 };
 
 function safeText(value, fallback = "") {
@@ -61,6 +61,17 @@ function getDefaultModels(provider) {
   return provider === "gemini" ? GEMINI_MODELS : OPENROUTER_MODELS;
 }
 
+function resolveModelOverride(provider, overrideValue, fallbackValue) {
+  const override = safeText(overrideValue);
+  if (!override) return fallbackValue;
+
+  if (provider === "gemini" && !override.toLowerCase().startsWith("gemini")) {
+    return fallbackValue;
+  }
+
+  return override;
+}
+
 function resolveModels(provider, options = {}) {
   const defaults = getDefaultModels(provider);
   if (options.useEnvOverrides === false) {
@@ -68,10 +79,10 @@ function resolveModels(provider, options = {}) {
   }
 
   return {
-    query: safeText(process.env.LLM_MODEL_QUERY, defaults.query),
-    forecast: safeText(process.env.LLM_MODEL_FORECAST, defaults.forecast),
-    chat: safeText(process.env.LLM_MODEL_CHAT, defaults.chat),
-    copy: safeText(process.env.LLM_MODEL_COPY, defaults.copy),
+    query: resolveModelOverride(provider, process.env.LLM_MODEL_QUERY, defaults.query),
+    forecast: resolveModelOverride(provider, process.env.LLM_MODEL_FORECAST, defaults.forecast),
+    chat: resolveModelOverride(provider, process.env.LLM_MODEL_CHAT, defaults.chat),
+    copy: resolveModelOverride(provider, process.env.LLM_MODEL_COPY, defaults.copy),
   };
 }
 
@@ -223,7 +234,7 @@ function normalizeProviderException(provider, error) {
   );
 }
 
-async function callGemini(config, { model, messages, expectJson = false, temperature, maxTokens }) {
+async function callGemini(config, { model, messages, expectJson = false, temperature, maxTokens, responseSchema }) {
   ensureConfigured(config);
   const ai = new GoogleGenAI({ apiKey: config.apiKey });
   const systemInstruction = messages
@@ -237,6 +248,9 @@ async function callGemini(config, { model, messages, expectJson = false, tempera
   }
   if (expectJson) {
     requestConfig.responseMimeType = "application/json";
+    if (responseSchema && typeof responseSchema === "object") {
+      requestConfig.responseJsonSchema = responseSchema;
+    }
   }
   if (typeof temperature === "number") {
     requestConfig.temperature = temperature;
@@ -362,45 +376,497 @@ async function callOpenRouter(config, { model, messages, expectJson = false, tem
 }
 
 function stripCodeFence(text) {
-  return safeText(text)
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/\s*```$/i, "")
-    .trim();
+  const trimmed = safeText(text).replace(/^\uFEFF/, "").trim();
+  if (!trimmed) return "";
+
+  const fencedMatch = trimmed.match(/```(?:json|javascript|js)?\s*([\s\S]*?)\s*```/i);
+  if (fencedMatch && safeText(fencedMatch[1])) {
+    return fencedMatch[1].trim();
+  }
+
+  return trimmed.replace(/^`+/, "").replace(/`+$/, "").trim();
 }
 
-function extractJsonCandidate(text) {
-  const trimmed = stripCodeFence(text);
-  if (!trimmed) {
-    throw new Error("Empty JSON response.");
-  }
+function buildExcerpt(text, limit = 240) {
+  const normalized = safeText(text).replace(/\s+/g, " ").trim();
+  if (!normalized) return "";
+  return normalized.length > limit ? `${normalized.slice(0, limit)}...` : normalized;
+}
 
-  try {
-    return JSON.parse(trimmed);
-  } catch (_error) {
-    // Keep trying with extracted object below.
-  }
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
 
-  const candidates = [];
-  const firstObject = trimmed.indexOf("{");
-  const lastObject = trimmed.lastIndexOf("}");
-  if (firstObject >= 0 && lastObject > firstObject) {
-    candidates.push(trimmed.slice(firstObject, lastObject + 1));
+function coerceLooseString(value, fallback = "") {
+  if (typeof value === "string") return safeText(value, fallback);
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (isPlainObject(value)) {
+    return safeText(
+      value.text ||
+        value.type ||
+        value.value ||
+        value.label ||
+        value.name ||
+        value.id ||
+        value.domain_id ||
+        value.entity_id,
+      fallback
+    );
   }
-  const firstArray = trimmed.indexOf("[");
-  const lastArray = trimmed.lastIndexOf("]");
-  if (firstArray >= 0 && lastArray > firstArray) {
-    candidates.push(trimmed.slice(firstArray, lastArray + 1));
-  }
+  return fallback;
+}
 
-  for (const candidate of candidates) {
-    try {
-      return JSON.parse(candidate);
-    } catch (_error) {
-      // Try next candidate.
+function sanitizeStringList(values = []) {
+  return (Array.isArray(values) ? values : [])
+    .map((value) => coerceLooseString(value))
+    .filter(Boolean)
+    .slice(0, 12);
+}
+
+function sanitizeObjectList(values = [], mapper) {
+  return (Array.isArray(values) ? values : [])
+    .map((value, index) => mapper(value, index))
+    .filter(Boolean)
+    .slice(0, 12);
+}
+
+function extractBalancedJsonSnippets(text, limit = 8) {
+  const source = safeText(text);
+  if (!source) return [];
+
+  const snippets = [];
+  let start = -1;
+  const stack = [];
+  let inString = false;
+  let escaped = false;
+
+  const reset = () => {
+    start = -1;
+    stack.length = 0;
+    inString = false;
+    escaped = false;
+  };
+
+  for (let index = 0; index < source.length; index += 1) {
+    const char = source[index];
+
+    if (start === -1) {
+      if (char === "{" || char === "[") {
+        start = index;
+        stack.push(char);
+      }
+      continue;
+    }
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === '"') {
+      inString = true;
+      continue;
+    }
+
+    if (char === "{" || char === "[") {
+      stack.push(char);
+      continue;
+    }
+
+    if (char === "}" || char === "]") {
+      const expected = char === "}" ? "{" : "[";
+      if (stack[stack.length - 1] !== expected) {
+        reset();
+        continue;
+      }
+
+      stack.pop();
+      if (stack.length === 0 && start >= 0) {
+        snippets.push(source.slice(start, index + 1));
+        if (snippets.length >= limit) break;
+        reset();
+      }
     }
   }
 
-  throw new Error("Model returned malformed JSON.");
+  return snippets;
+}
+
+function unwrapStagePayload(payload, jsonStage) {
+  if (!isPlainObject(payload)) return payload;
+
+  const wrapperKeys = {
+    planner: ["query_plan", "plan", "payload", "result"],
+    dossier: ["dossier_prediction", "payload", "result"],
+    verbalizer: ["voice_payload", "card", "payload", "result"],
+  }[safeText(jsonStage).toLowerCase()] || ["payload", "result"];
+
+  for (const key of wrapperKeys) {
+    if (isPlainObject(payload[key])) {
+      return payload[key];
+    }
+  }
+
+  return payload;
+}
+
+function normalizePlannerPayload(payload) {
+  const value = unwrapStagePayload(payload, "planner");
+  if (!isPlainObject(value)) return value;
+
+  const mode = isPlainObject(value.mode) ? value.mode : {};
+  const entities = sanitizeObjectList(value.entities || value.entity_set, (entity, index) => {
+    if (typeof entity === "string") {
+      const label = coerceLooseString(entity);
+      if (!label) return null;
+      return {
+        entity_id: `entity_${index + 1}`,
+        entity_type: "entity",
+        label,
+      };
+    }
+    if (!isPlainObject(entity)) return null;
+    const label = coerceLooseString(entity.label, coerceLooseString(entity.entity_id, index === 0 ? "Entity 1" : `Entity ${index + 1}`));
+    if (!label) return null;
+    return {
+      entity_id: coerceLooseString(entity.entity_id, `entity_${index + 1}`),
+      entity_type: coerceLooseString(entity.entity_type, "entity"),
+      label,
+    };
+  });
+
+  return {
+    ...value,
+    plan_version: coerceLooseString(value.plan_version, "crystal-core-v1"),
+    primary_domain_id: coerceLooseString(value.primary_domain_id, coerceLooseString(value.domain_id)),
+    domain_id: coerceLooseString(value.domain_id, coerceLooseString(value.primary_domain_id)),
+    candidate_domains: sanitizeObjectList(value.candidate_domains, (candidate) => {
+      if (!isPlainObject(candidate)) return null;
+      const domainId = coerceLooseString(candidate.domain_id, coerceLooseString(candidate.id));
+      if (!domainId) return null;
+      const score = Number(candidate.score);
+      return {
+        domain_id: domainId,
+        score: Number.isFinite(score) ? score : 0,
+        reason: coerceLooseString(candidate.reason),
+      };
+    }),
+    intent_shape: coerceLooseString(value.intent_shape),
+    resolution_frame: coerceLooseString(value.resolution_frame),
+    confidence_mode: coerceLooseString(value.confidence_mode, "balanced"),
+    mode: {
+      ...mode,
+      type: coerceLooseString(mode.type, coerceLooseString(value["mode.type"], "forecast")),
+    },
+    entity_set: entities,
+    entities,
+    horizons: sanitizeObjectList(value.horizons, (horizon) => {
+      if (!isPlainObject(horizon)) return null;
+      const horizonId = coerceLooseString(horizon.horizon_id, coerceLooseString(horizon.id));
+      if (!horizonId) return null;
+      return {
+        horizon_id: horizonId,
+        label: coerceLooseString(horizon.label),
+        resolution_date: coerceLooseString(horizon.resolution_date),
+        confidence_window: coerceLooseString(horizon.confidence_window),
+      };
+    }),
+    card_types: sanitizeStringList(value.card_types),
+    question_side_a: coerceLooseString(value.question_side_a),
+    question_side_b: coerceLooseString(value.question_side_b),
+    event_date: coerceLooseString(value.event_date),
+    governing_entity: coerceLooseString(value.governing_entity),
+    jurisdiction: coerceLooseString(value.jurisdiction),
+    supporting_domains: sanitizeStringList(value.supporting_domains),
+    subdomain_map: sanitizeObjectList(value.subdomain_map, (item, index) => {
+      if (!isPlainObject(item)) return null;
+      const label = coerceLooseString(item.label, coerceLooseString(item.id, `subdomain_${index + 1}`));
+      if (!label) return null;
+      return {
+        id: coerceLooseString(item.id, `subdomain_${index + 1}`),
+        label,
+        why_it_matters: coerceLooseString(item.why_it_matters, coerceLooseString(item.reason)),
+      };
+    }),
+  };
+}
+
+function normalizeProbabilitySplit(probabilitySplit) {
+  if (!isPlainObject(probabilitySplit)) return null;
+  const normalized = {
+    primary_label: safeText(probabilitySplit.primary_label),
+    primary_probability: Number(probabilitySplit.primary_probability),
+    secondary_label: safeText(probabilitySplit.secondary_label),
+    secondary_probability: Number(probabilitySplit.secondary_probability),
+  };
+
+  if (!normalized.primary_label && !normalized.secondary_label) {
+    return null;
+  }
+
+  if (!Number.isFinite(normalized.primary_probability)) {
+    delete normalized.primary_probability;
+  }
+  if (!Number.isFinite(normalized.secondary_probability)) {
+    delete normalized.secondary_probability;
+  }
+
+  return normalized;
+}
+
+function normalizeDossierPayload(payload) {
+  const value = unwrapStagePayload(payload, "dossier");
+  if (!isPlainObject(value)) return value;
+
+  const rawPrediction = isPlainObject(value.raw_prediction) ? value.raw_prediction : {};
+
+  return {
+    ...value,
+    structured_dossier: isPlainObject(value.structured_dossier) ? value.structured_dossier : {},
+    feature_bundle: sanitizeObjectList(value.feature_bundle, (feature, index) => {
+      if (!isPlainObject(feature)) return null;
+      const label = safeText(feature.label, `feature_${index + 1}`);
+      return {
+        label,
+        direction: safeText(feature.direction),
+        confidence: Number.isFinite(Number(feature.confidence)) ? Number(feature.confidence) : undefined,
+        note: safeText(feature.note),
+      };
+    }),
+    baseline_consensus_pack: isPlainObject(value.baseline_consensus_pack) ? value.baseline_consensus_pack : {},
+    raw_prediction: {
+      ...rawPrediction,
+      primary_call: safeText(rawPrediction.primary_call),
+      probability_split: normalizeProbabilitySplit(rawPrediction.probability_split),
+      confidence_score: Number.isFinite(Number(rawPrediction.confidence_score)) ? Number(rawPrediction.confidence_score) : undefined,
+      key_drivers: sanitizeStringList(rawPrediction.key_drivers),
+      counter_signals: sanitizeStringList(rawPrediction.counter_signals),
+      invalidators: sanitizeStringList(rawPrediction.invalidators),
+      historical_anchors: sanitizeStringList(rawPrediction.historical_anchors),
+      why_this_side: safeText(rawPrediction.why_this_side),
+      recommended_posture: safeText(rawPrediction.recommended_posture),
+      scenario_set: sanitizeObjectList(rawPrediction.scenario_set, (scenario, index) => {
+        if (!isPlainObject(scenario)) return null;
+        const label = safeText(scenario.label, `scenario_${index + 1}`);
+        return {
+          label,
+          outcome: safeText(scenario.outcome),
+          probability: Number.isFinite(Number(scenario.probability)) ? Number(scenario.probability) : undefined,
+          drivers: sanitizeStringList(scenario.drivers),
+        };
+      }),
+    },
+  };
+}
+
+function normalizeVerbalizerPayload(payload) {
+  const value = unwrapStagePayload(payload, "verbalizer");
+  if (!isPlainObject(value)) return value;
+
+  return {
+    ...value,
+    title: safeText(value.title),
+    summary: safeText(value.summary),
+    verdict: safeText(value.verdict),
+    recommended_action: safeText(value.recommended_action),
+    what_to_watch: sanitizeStringList(value.what_to_watch),
+    how_to_raise_confidence: sanitizeStringList(value.how_to_raise_confidence),
+    coverage_notes: sanitizeStringList(value.coverage_notes),
+  };
+}
+
+function normalizeStagePayload(payload, jsonStage) {
+  switch (safeText(jsonStage).toLowerCase()) {
+    case "planner":
+      return normalizePlannerPayload(payload);
+    case "dossier":
+      return normalizeDossierPayload(payload);
+    case "verbalizer":
+      return normalizeVerbalizerPayload(payload);
+    default:
+      return payload;
+  }
+}
+
+function validateStagePayload(payload, jsonStage) {
+  const stage = safeText(jsonStage).toLowerCase();
+  if (stage === "planner") {
+    const normalized = normalizePlannerPayload(payload);
+    if (!isPlainObject(normalized)) {
+      return { ok: false, reason: "Planner payload must be a JSON object." };
+    }
+    if (
+      !safeText(normalized.primary_domain_id) &&
+      !safeText(normalized.domain_id) &&
+      (!Array.isArray(normalized.candidate_domains) || normalized.candidate_domains.length === 0)
+    ) {
+      return { ok: false, reason: "Planner payload is missing domain routing fields." };
+    }
+    if (!safeText(normalized.intent_shape) && !safeText(normalized.resolution_frame)) {
+      return { ok: false, reason: "Planner payload is missing intent/resolution framing." };
+    }
+    return { ok: true, value: normalized };
+  }
+
+  if (stage === "dossier") {
+    const normalized = normalizeDossierPayload(payload);
+    if (!isPlainObject(normalized)) {
+      return { ok: false, reason: "Dossier payload must be a JSON object." };
+    }
+    if (!isPlainObject(normalized.raw_prediction)) {
+      return { ok: false, reason: "Dossier payload is missing raw_prediction." };
+    }
+    if (
+      !safeText(normalized.raw_prediction.primary_call) &&
+      !normalized.raw_prediction.probability_split &&
+      normalized.raw_prediction.key_drivers.length === 0
+    ) {
+      return { ok: false, reason: "Dossier payload is missing a usable prediction thesis." };
+    }
+    return { ok: true, value: normalized };
+  }
+
+  if (stage === "verbalizer") {
+    const normalized = normalizeVerbalizerPayload(payload);
+    if (!isPlainObject(normalized)) {
+      return { ok: false, reason: "Verbalizer payload must be a JSON object." };
+    }
+    if (
+      !normalized.title &&
+      !normalized.summary &&
+      !normalized.verdict &&
+      !normalized.recommended_action &&
+      normalized.what_to_watch.length === 0
+    ) {
+      return { ok: false, reason: "Verbalizer payload is missing card copy fields." };
+    }
+    return { ok: true, value: normalized };
+  }
+
+  if (!isPlainObject(payload) && !Array.isArray(payload)) {
+    return { ok: false, reason: "JSON payload must be an object or array." };
+  }
+
+  return { ok: true, value: payload };
+}
+
+function getJsonRepairContract(jsonStage) {
+  switch (safeText(jsonStage).toLowerCase()) {
+    case "planner":
+      return `Return one JSON object with:
+- plan_version
+- primary_domain_id
+- domain_id
+- candidate_domains[]
+- intent_shape
+- resolution_frame
+- confidence_mode
+- mode { type }
+- entity_set[]
+- entities[]
+- horizons[]
+- card_types[]
+- question_side_a
+- question_side_b
+- event_date
+- governing_entity
+- jurisdiction
+- supporting_domains[]
+- subdomain_map[]`;
+    case "dossier":
+      return `Return one JSON object with:
+- structured_dossier {}
+- feature_bundle[]
+- baseline_consensus_pack {}
+- raw_prediction {
+  primary_call,
+  probability_split {},
+  confidence_score,
+  key_drivers[],
+  counter_signals[],
+  invalidators[],
+  historical_anchors[],
+  why_this_side,
+  recommended_posture,
+  scenario_set[]
+}`;
+    case "verbalizer":
+      return `Return one JSON object with:
+- title
+- summary
+- verdict
+- recommended_action
+- what_to_watch[]
+- how_to_raise_confidence[]
+- coverage_notes[]`;
+    default:
+      return "Return one valid JSON object or array. Never return a quoted string.";
+  }
+}
+
+function createJsonExtractionError(message, details = {}) {
+  const error = new Error(message);
+  error.details = details;
+  return error;
+}
+
+function extractJsonCandidate(text, options = {}) {
+  const stage = safeText(options.jsonStage, "generic").toLowerCase();
+  const failures = [];
+  const queue = [];
+  const seen = new Set();
+
+  const enqueue = (candidate, source) => {
+    const normalized = stripCodeFence(candidate);
+    if (!normalized || seen.has(normalized)) return;
+    seen.add(normalized);
+    queue.push({ text: normalized, source });
+  };
+
+  const acceptParsedValue = (parsedValue, source) => {
+    if (typeof parsedValue === "string") {
+      enqueue(parsedValue, `${source}:json-string`);
+      failures.push(`${source} parsed as a JSON string instead of a JSON object.`);
+      return null;
+    }
+
+    const validation = validateStagePayload(parsedValue, stage);
+    if (validation.ok) {
+      return validation.value;
+    }
+
+    failures.push(`${source} failed ${stage} validation: ${validation.reason}`);
+    return null;
+  };
+
+  enqueue(text, "response");
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    const parsed = parseJsonPayload(current.text);
+    if (parsed !== null) {
+      const accepted = acceptParsedValue(parsed, current.source);
+      if (accepted) {
+        return accepted;
+      }
+    }
+
+    for (const snippet of extractBalancedJsonSnippets(current.text)) {
+      enqueue(snippet, `${current.source}:balanced-json`);
+    }
+  }
+
+  throw createJsonExtractionError("Model returned malformed JSON.", {
+    jsonStage: stage,
+    excerpt: buildExcerpt(text),
+    failures: failures.slice(0, 8),
+  });
 }
 
 function messagesToPlainText(messages, limit = 12000) {
@@ -454,7 +920,7 @@ function buildFallbackFailureError(primaryConfig, fallbackConfig, primaryError, 
 function buildPrimaryConfig(getGeminiApiKey) {
   const provider = normalizeProvider(process.env.LLM_PROVIDER);
   if (provider === "gemini") {
-    const apiKey = safeText(process.env.LLM_API_KEY) || getSecretValue(getGeminiApiKey);
+    const apiKey = safeText(process.env.GEMINI_API_KEY) || getSecretValue(getGeminiApiKey) || safeText(process.env.LLM_API_KEY);
     return {
       provider,
       role: "primary",
@@ -571,19 +1037,24 @@ function createLlmRuntime({ getGeminiApiKey } = {}) {
     return result.text;
   }
 
-  async function repairJsonResponse(config, { modelKind, originalMessages, responseText }) {
+  async function repairJsonResponse(config, { modelKind, originalMessages, responseText, jsonStage }) {
     const model = config.models[modelKind] || config.models.copy || config.models.forecast;
     const repairMessages = [
       {
         role: "system",
         content:
-          "You repair malformed JSON. Return only valid JSON. Do not add commentary, markdown fences, or extra keys unless needed to make the payload syntactically valid.",
+          `You repair malformed JSON for Crystal. Return only valid JSON with no markdown, no commentary, and no wrapper text.\n${getJsonRepairContract(
+            jsonStage
+          )}`,
       },
       {
         role: "user",
-        content: `Repair this malformed JSON response so it becomes valid JSON.\n\nOriginal request context:\n${messagesToPlainText(
+        content: `Repair this malformed JSON response so it becomes valid JSON for the "${safeText(
+          jsonStage,
+          "generic"
+        )}" stage.\n\nOriginal request context:\n${messagesToPlainText(
           originalMessages
-        )}\n\nMalformed response:\n${responseText}`,
+        )}\n\nMalformed response:\n${responseText}\n\nReturn one JSON object only.`,
       },
     ];
     const repairParams = {
@@ -606,6 +1077,9 @@ function createLlmRuntime({ getGeminiApiKey } = {}) {
     messages = [],
     temperature,
     maxTokens,
+    jsonStage = "",
+    responseSchema = null,
+    preferTextMode = false,
   }) {
     const primaryConfig = getPrimaryConfig();
     const builtMessages = buildMessages({ systemInstruction, prompt, messages });
@@ -613,15 +1087,16 @@ function createLlmRuntime({ getGeminiApiKey } = {}) {
     const response = await callProviderWithFallback(primaryConfig, {
       model: primaryModel,
       messages: builtMessages,
-      expectJson: true,
+      expectJson: !preferTextMode,
       temperature,
       maxTokens,
       modelKind,
       maxTokenKind: modelKind,
+      responseSchema: preferTextMode ? null : responseSchema,
     });
 
     try {
-      return extractJsonCandidate(response.text);
+      return extractJsonCandidate(response.text, { jsonStage });
     } catch (error) {
       const effectiveConfig =
         response.provider === primaryConfig.provider
@@ -637,11 +1112,12 @@ function createLlmRuntime({ getGeminiApiKey } = {}) {
         modelKind,
         originalMessages: builtMessages,
         responseText: response.text,
+        jsonStage,
       });
 
       try {
-        return extractJsonCandidate(repairedText);
-      } catch (_repairError) {
+        return extractJsonCandidate(repairedText, { jsonStage });
+      } catch (repairError) {
         throw createRuntimeError(
           "Unable to generate the forecast right now. The model returned invalid JSON twice.",
           "provider-upstream-error",
@@ -649,7 +1125,13 @@ function createLlmRuntime({ getGeminiApiKey } = {}) {
           {
             provider: effectiveConfig.provider,
             stage: "json-repair",
+            json_stage: safeText(jsonStage, "generic"),
+            model: primaryModel,
             reason: error instanceof Error ? error.message : String(error),
+            raw_excerpt: buildExcerpt(response.text),
+            repair_excerpt: buildExcerpt(repairedText),
+            raw_failures: Array.isArray(error?.details?.failures) ? error.details.failures : [],
+            repair_failures: Array.isArray(repairError?.details?.failures) ? repairError.details.failures : [],
           }
         );
       }
