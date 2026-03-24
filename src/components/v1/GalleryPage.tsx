@@ -125,10 +125,10 @@ export function GalleryPage({ user, onLogin }: GalleryPageProps) {
     return (
       <section className="rounded-[36px] border border-slate-200 bg-white p-8 shadow-[0_18px_44px_rgba(15,23,42,0.05)]">
         <div className="max-w-2xl">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Gallery</div>
+          <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Private Gallery</div>
           <h1 className="mt-4 text-4xl font-semibold tracking-[-0.05em] text-slate-950">Your prediction library lives here.</h1>
           <p className="mt-4 text-base leading-8 text-slate-600">
-            Save cards, revisit versions, search past forecasts, and compare how the read changed over time.
+            Save cards, revisit versions, search past forecasts, and compare how the read changed over time. Public discovery now lives in Forecast Gallery; this space stays personal.
           </p>
           <button
             type="button"
@@ -147,10 +147,10 @@ export function GalleryPage({ user, onLogin }: GalleryPageProps) {
       <section className="rounded-[36px] border border-slate-200 bg-white p-6 shadow-[0_18px_44px_rgba(15,23,42,0.05)] md:p-8">
         <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
           <div>
-            <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Gallery</div>
+            <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Private Gallery</div>
             <h1 className="mt-4 text-4xl font-semibold tracking-[-0.05em] text-slate-950">Saved cards, followed themes, version memory.</h1>
             <p className="mt-4 text-base leading-8 text-slate-600">
-              Search across generated cards, inspect trust and evidence, and compare the current read against earlier versions.
+              Search across your saved forecasts, inspect trust and evidence, and compare the current read against earlier versions without mixing this space up with the public discovery layer.
             </p>
           </div>
           <div className="grid gap-3 md:grid-cols-3">

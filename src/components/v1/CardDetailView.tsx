@@ -1,4 +1,5 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
 import type { GalleryCardRecord, GalleryVersionRecord } from './galleryTypes';
 import { TrustStrip } from './TrustStrip';
 import { EvidenceDrawer } from './EvidenceDrawer';
@@ -38,6 +39,17 @@ export function CardDetailView({ card, versions, onOpenCompare }: CardDetailView
             Compare versions
           </button>
         </div>
+
+        {card.public_slug ? (
+          <div className="mt-4">
+            <Link
+              to={`/forecast-gallery/forecast/${card.public_slug}`}
+              className="inline-flex items-center rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+            >
+              Open public forecast page
+            </Link>
+          </div>
+        ) : null}
 
         <div className="mt-5 rounded-[28px] bg-slate-950 p-5 text-white">
           <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-300">Primary outcome</div>

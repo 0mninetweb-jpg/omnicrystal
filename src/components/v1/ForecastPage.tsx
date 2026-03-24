@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { User } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { db } from '../../firebase';
 import { useAppRuntime } from '../../context/AppRuntimeContext';
 import { useCrystalPlan } from '../../context/CrystalPlanContext';
@@ -17,7 +17,14 @@ import {
 } from '../../lib/forecastV1';
 import { isFeatureEnabled } from '../../lib/featureFlags';
 import { followForecastEntity, isForecastCardSaved, saveForecastCardToLibrary } from '../../lib/cardLibrary';
-import { compileQuery, compileQueryPublic, predict, predictPublic } from '../../services/geminiService';
+import {
+  compileQuery,
+  compileQueryPublic,
+  getForecastRun,
+  getPublicForecastRun,
+  predict,
+  predictPublic,
+} from '../../services/geminiService';
 import type { CardData } from '../../types/crystal';
 import type { ForecastResolvedContext, ForecastStackItem, ForecastUiFilters } from '../../types/forecastV1';
 import { ForecastComposer } from './ForecastComposer';
@@ -72,6 +79,78 @@ export function ForecastPage({ user, onLogin }: ForecastPageProps) {
     const syntheticEvent = { preventDefault() {} } as React.FormEvent<HTMLFormElement>;
     void handleSubmit(syntheticEvent);
   }, [initialQuery]);
+
+  useEffect(() => {
+    const pendingRun = currentCard?.pending_run;
+    if (!pendingRun?.run_id || pendingRun.status !== 'running' || !context) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+
+    const pollRun = async () => {
+      let pollAfterMs = Math.max(750, Number(pendingRun.poll_after_ms) || 2500);
+
+      while (!cancelled) {
+        await sleep(pollAfterMs);
+        if (cancelled) return;
+
+        try {
+          const response =
+            pendingRun.visibility === 'public' || !user?.uid
+              ? pendingRun.access_token
+                ? await getPublicForecastRun(pendingRun.run_id, pendingRun.access_token)
+                : null
+              : await getForecastRun(pendingRun.run_id);
+
+          if (cancelled || !response) {
+            return;
+          }
+
+          const run = response.run || null;
+          const nextCard = response.card || null;
+
+          if (nextCard) {
+            const nextContext = resolveForecastContext(context.query, run?.query_plan || context.queryPlan, filters, nextCard);
+            setItems(buildForecastStack(nextCard, nextContext));
+            setCurrentCard(nextCard);
+            setContext(nextContext);
+
+            if (!nextCard.pending_run || nextCard.pending_run.status !== 'running') {
+              return;
+            }
+
+            pollAfterMs = Math.max(750, Number(nextCard.pending_run.poll_after_ms) || 2500);
+            continue;
+          }
+
+          if (run?.status === 'failed' || run?.status === 'canceled') {
+            const failureContext = resolveForecastContext(context.query, run?.query_plan || context.queryPlan, filters);
+            const failureMessage =
+              typeof run?.error_message === 'string' && run.error_message.trim()
+                ? run.error_message
+                : 'Crystal could not complete the deep forecast run.';
+            setItems(normalizeForecastFailure(new Error(failureMessage), failureContext));
+            setCurrentCard(null);
+            setContext(failureContext);
+            return;
+          }
+
+          pollAfterMs = Math.max(750, Number(run?.pending_poll_after_ms) || pollAfterMs);
+        } catch (_error) {
+          pollAfterMs = Math.min(pollAfterMs + 1000, 6000);
+        }
+      }
+    };
+
+    void pollRun();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [context, currentCard, filters, user?.uid]);
 
   const handleLockedOption = (label: string, recommendedPlan: 'plus' | 'pro') => {
     if (!isAuthenticated) {
@@ -208,7 +287,9 @@ export function ForecastPage({ user, onLogin }: ForecastPageProps) {
   };
 
   const handleShare = async () => {
-    const targetUrl = `${window.location.origin}/forecast?q=${encodeURIComponent(query)}`;
+    const targetUrl = currentCard?.public_slug
+      ? `${window.location.origin}/forecast-gallery/forecast/${currentCard.public_slug}`
+      : `${window.location.origin}/forecast?q=${encodeURIComponent(query)}`;
     if (navigator.share) {
       await navigator.share({ title: 'Crystal forecast', text: query, url: targetUrl });
       return;
@@ -259,6 +340,23 @@ export function ForecastPage({ user, onLogin }: ForecastPageProps) {
           <div className="mt-3 text-sm leading-7 text-slate-700">
             {actionSpec.label} · {actionSpec.requiredPlan === 'free' ? 'available now' : `requires ${actionSpec.requiredPlan}`}
           </div>
+        </div>
+      </section>
+
+      <section className="rounded-[32px] border border-slate-200 bg-white p-6 shadow-[0_18px_44px_rgba(15,23,42,0.05)]">
+        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+          <div className="max-w-2xl">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Forecast Gallery</div>
+            <p className="mt-3 text-sm leading-7 text-slate-600">
+              Browse real public forecast cards generated by Crystal, then come back here to ask your own forecast or remix a live call.
+            </p>
+          </div>
+          <Link
+            to="/forecast-gallery"
+            className="inline-flex items-center justify-center rounded-full bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800"
+          >
+            Open Forecast Gallery
+          </Link>
         </div>
       </section>
 

@@ -21,6 +21,13 @@ import { isFeatureEnabled } from './lib/featureFlags';
 import { ForecastPage } from './components/v1/ForecastPage';
 import { WorldSimPage } from './components/v1/WorldSimPage';
 import { GalleryPage } from './components/v1/GalleryPage';
+import {
+  ForecastGalleryBestCallsPage,
+  ForecastGalleryEntityPage,
+  ForecastGalleryPage,
+  ForecastGalleryTopicPage,
+  PublicForecastPage,
+} from './components/v1/ForecastGalleryPage';
 import { PrimaryShell } from './components/v1/PrimaryShell';
 
 const Nextletter = lazy(async () => ({ default: (await import('./components/Nextletter')).Nextletter }));
@@ -70,6 +77,7 @@ function sanitizeRoutePath(path?: string | null) {
   if (normalized === '/app/profile') return '/settings';
   if (normalized === '/app/nextletter') return '/beta/nextletter';
   if (normalized === '/app/watchlist') return '/beta/watchlist';
+  if (normalized === '/sim') return '/beta/world-sim';
 
   return normalized;
 }
@@ -197,7 +205,7 @@ function AboutPage() {
     <UtilitySurface
       kicker="About"
       title="Crystal is not a generic chatbot."
-      body="Crystal is a decision-intelligence product built to forecast broad domains over time. The v1 simplification reduces surface complexity, not engine ambition: Forecast for the main flow, World Sim for structured scenario work, Gallery for memory and version history."
+      body="Crystal is a decision-intelligence product built to forecast broad domains over time. The public product is now structured around Forecast, Forecast Gallery, and Gallery. World Sim remains available as an internal beta layer, while MiroFish stays inside the engine as optional simulation enrichment."
     />
   );
 }
@@ -327,6 +335,7 @@ function AppRouter() {
   const betaNextletterEnabled = isFeatureEnabled('beta_nextletter');
   const betaWatchlistEnabled = isFeatureEnabled('beta_watchlist');
   const internalCoverageEnabled = isFeatureEnabled('internal_coverage');
+  const forecastGalleryBestCallsEnabled = isFeatureEnabled('forecast_gallery_best_calls');
   const v1ShellEnabled = isFeatureEnabled('v1_shell');
 
   return (
@@ -334,8 +343,32 @@ function AppRouter() {
       <Routes>
         <Route path="/" element={<Navigate to={v1ShellEnabled ? '/forecast' : '/forecast'} replace />} />
         <Route path="/forecast" element={shell(<ForecastPage user={user} onLogin={() => void handleLogin('/forecast')} />)} />
-        <Route path="/sim" element={shell(<WorldSimPage user={user} onLogin={() => void handleLogin('/sim')} />)} />
+        <Route
+          path="/forecast-gallery"
+          element={shell(<ForecastGalleryPage user={user} onLogin={() => void handleLogin('/forecast-gallery')} />)}
+        />
+        <Route
+          path="/forecast-gallery/forecast/:slug"
+          element={shell(<PublicForecastPage user={user} onLogin={() => void handleLogin(location.pathname)} />)}
+        />
+        <Route
+          path="/forecast-gallery/entity/:entitySlug"
+          element={shell(<ForecastGalleryEntityPage user={user} onLogin={() => void handleLogin(location.pathname)} />)}
+        />
+        <Route
+          path="/forecast-gallery/topic/:topicSlug"
+          element={shell(<ForecastGalleryTopicPage user={user} onLogin={() => void handleLogin(location.pathname)} />)}
+        />
+        <Route
+          path="/forecast-gallery/best-calls"
+          element={
+            forecastGalleryBestCallsEnabled
+              ? shell(<ForecastGalleryBestCallsPage user={user} onLogin={() => void handleLogin(location.pathname)} />)
+              : <Navigate to="/forecast-gallery" replace />
+          }
+        />
         <Route path="/gallery" element={shell(<GalleryPage user={user} onLogin={() => void handleLogin('/gallery')} />)} />
+        <Route path="/sim" element={<Navigate to="/beta/world-sim" replace />} />
         <Route path="/signin" element={shell(<SigninPrompt onLogin={() => void handleLogin(readPendingRoute() || '/forecast')} />)} />
         <Route path="/pricing" element={shell(<PricingPage onLogin={() => void handleLogin('/pricing')} />)} />
         <Route path="/about" element={shell(<AboutPage />)} />
@@ -357,6 +390,19 @@ function AppRouter() {
         <Route path="/app/watchlist" element={<Navigate to="/beta/watchlist" replace />} />
 
         <Route
+          path="/beta/world-sim"
+          element={shell(
+            protectedRoute(
+              <BetaSurface
+                title="World Sim stays available as a beta/internal layer."
+                body="World Sim is no longer part of the public primary navigation. It remains accessible here for deeper scenario work while Forecast and Forecast Gallery carry the main product surface."
+              >
+                <WorldSimPage user={user} onLogin={() => void handleLogin('/beta/world-sim')} />
+              </BetaSurface>
+            )
+          )}
+        />
+        <Route
           path="/beta/nextletter"
           element={
             betaNextletterEnabled
@@ -365,7 +411,7 @@ function AppRouter() {
                     <Suspense fallback={<ViewLoader />}>
                       <BetaSurface
                         title="Nextletter stays alive, but outside the primary product surface."
-                        body="This module is preserved behind a beta route while Forecast, World Sim, and Gallery become the public v1 entry points."
+                        body="This module is preserved behind a beta route while Forecast, Forecast Gallery, and Gallery become the public v1 entry points."
                       >
                         <Nextletter
                           user={user}

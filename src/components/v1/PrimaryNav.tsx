@@ -1,13 +1,13 @@
 import React from 'react';
 import { NavLink, Link } from 'react-router-dom';
-import { BarChart3, Compass, FolderArchive, LogOut, Sparkles } from 'lucide-react';
+import { BarChart3, FolderArchive, LayoutGrid, LogOut, Sparkles } from 'lucide-react';
 import { useAppShell } from '../../context/AppShellContext';
 import { useAppRuntime } from '../../context/AppRuntimeContext';
 import { cn } from '../../lib/ui';
 
 const PRIMARY_ITEMS = [
   { to: '/forecast', label: 'Forecast', icon: Sparkles },
-  { to: '/sim', label: 'World Sim', icon: Compass },
+  { to: '/forecast-gallery', label: 'Forecast Gallery', icon: LayoutGrid },
   { to: '/gallery', label: 'Gallery', icon: FolderArchive },
 ] as const;
 
@@ -124,7 +124,7 @@ export function PrimaryNav({ isAuthenticated, onLogin, onLogout }: PrimaryNavPro
                 to={to}
                 className={({ isActive }) =>
                   cn(
-                    'flex flex-col items-center justify-center rounded-2xl px-3 py-2 text-[11px] font-semibold transition',
+                    'flex min-h-[56px] flex-col items-center justify-center rounded-2xl px-3 py-2 text-[11px] font-semibold leading-tight transition',
                     isActive ? 'bg-slate-950 text-white' : 'text-slate-600'
                   )
                 }
