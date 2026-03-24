@@ -523,10 +523,174 @@ function normalizeVerbalizerStagePayload(payload = {}, options = {}) {
     how_to_raise_confidence: normalizeTextList(payload?.how_to_raise_confidence, 4).length
       ? normalizeTextList(payload?.how_to_raise_confidence, 4)
       : fallbackConfidence,
-    coverage_notes: normalizeTextList(payload?.coverage_notes, 4).length
-      ? normalizeTextList(payload?.coverage_notes, 4)
-      : fallbackCoverage,
+      coverage_notes: normalizeTextList(payload?.coverage_notes, 4).length
+        ? normalizeTextList(payload?.coverage_notes, 4)
+        : fallbackCoverage,
+    };
+}
+
+function extractHistoricalAnchorLines(text, maxItems = 4) {
+  const normalized = safeText(text);
+  if (!normalized) return [];
+
+  return uniqueStrings(
+    normalized
+      .split(/\n+|(?<=[.!?])\s+/)
+      .map((item) => safeText(item).replace(/^[\-\d.)\s]+/, ""))
+      .filter(Boolean)
+  ).slice(0, maxItems);
+}
+
+function summarizeDirectionalLean(liveSignals = []) {
+  const summary = { up: 0, down: 0, flat: 0 };
+  for (const signal of Array.isArray(liveSignals) ? liveSignals : []) {
+    const lean = safeText(signal?.lean, "flat").toLowerCase();
+    if (lean === "up" || lean === "bullish" || lean === "positive") {
+      summary.up += 1;
+    } else if (lean === "down" || lean === "bearish" || lean === "negative") {
+      summary.down += 1;
+    } else {
+      summary.flat += 1;
+    }
+  }
+
+  if (summary.up > summary.down) return "up";
+  if (summary.down > summary.up) return "down";
+  return "flat";
+}
+
+function buildFallbackDossierPrediction({
+  queryText,
+  normalizedQuery,
+  variableSelectionPack,
+  verifiedEvidencePack,
+  baselineConsensusPack,
+}) {
+  const domainConfig = getDomain(normalizedQuery?.primary_domain_id, GENERAL_FORECAST_DOMAIN);
+  const evidenceQuality = verifiedEvidencePack?.evidence_quality || computeEvidenceQuality(verifiedEvidencePack, domainConfig, "extended");
+  const selectedVariables = compactVariablesForPrompt(variableSelectionPack?.selected_variables);
+  const liveSignals = compactSignalsForPrompt(verifiedEvidencePack?.live_signals);
+  const conflictMap = compactConflictMapForPrompt(verifiedEvidencePack?.conflict_map);
+  const historicalAnchors = extractHistoricalAnchorLines(verifiedEvidencePack?.historical_baseline_20y, 4);
+  const keyDrivers = uniqueStrings(
+    liveSignals.map((signal) => signal.label).concat(selectedVariables.map((variable) => variable.label))
+  ).slice(0, 4);
+  const counterSignals = uniqueStrings(
+    conflictMap
+      .map((conflict) => safeText(conflict?.issue || conflict?.note))
+      .concat(Array.isArray(verifiedEvidencePack?.missingness_map) ? verifiedEvidencePack.missingness_map : [])
+  ).slice(0, 4);
+  const invalidators = uniqueStrings(
+    counterSignals.concat(
+      liveSignals
+        .filter((signal) => safeText(signal?.lean).toLowerCase() === "down")
+        .map((signal) => `Watch for deterioration in ${signal.label.toLowerCase()}.`)
+    )
+  ).slice(0, 4);
+  const dominantLean = summarizeDirectionalLean(liveSignals);
+  const binaryFrame = normalizedQuery?.binary_frame || {};
+  const primarySide = safeText(binaryFrame?.question_side_a, "Primary");
+  const secondarySide = safeText(binaryFrame?.question_side_b, "Alternative");
+
+  let primaryCall = "";
+  let probabilitySplit = null;
+  let whyThisSide = "";
+  let recommendedPosture = "";
+
+  if (binaryFrame?.asks_binary_question && primarySide && secondarySide) {
+    const primaryProbability = dominantLean === "down" ? 0.44 : dominantLean === "up" ? 0.56 : 0.52;
+    const secondaryProbability = clamp01(1 - primaryProbability, 0.48);
+    const leaningSide = primaryProbability >= 0.5 ? primarySide : secondarySide;
+    primaryCall = `Crystal currently leans ${leaningSide} on this binary question, but the edge is still sensitive to new evidence.`;
+    probabilitySplit = {
+      primary_label: primarySide,
+      primary_probability: primaryProbability,
+      secondary_label: secondarySide,
+      secondary_probability: secondaryProbability,
+    };
+    whyThisSide = keyDrivers.length
+      ? `The current edge comes from ${keyDrivers.slice(0, 2).join(" and ")}.`
+      : "The current edge comes from the strongest verified directional signals in the run.";
+    recommendedPosture = "Treat this as a directional read and monitor the flip conditions before acting on it.";
+  } else {
+    const leanPhrase =
+      dominantLean === "up"
+        ? "tilted upward"
+        : dominantLean === "down"
+          ? "tilted downward"
+          : "range-bound with mixed conviction";
+    primaryCall = `${safeText(domainConfig?.short_label || domainConfig?.title, "This forecast")} is ${leanPhrase} over the selected horizon, based on the strongest verified signals in the run.`;
+    whyThisSide = keyDrivers.length
+      ? `The read is anchored by ${keyDrivers.slice(0, 3).join(", ")}.`
+      : "The read is anchored by the strongest verified signals and the 20-year baseline.";
+    recommendedPosture = "Use this as a directional planning read and keep watching the invalidation triggers.";
+  }
+
+  const payload = {
+    structured_dossier: {
+      query_normalized: safeText(queryText),
+      domain_map: uniqueStrings([safeText(normalizedQuery?.primary_domain_id)].concat((normalizedQuery?.candidate_domains || []).map((item) => safeText(item?.domain_id)))).slice(0, 4),
+      outcome_target: primaryCall,
+      horizon: safeText(normalizedQuery?.horizon?.horizon_id || normalizedQuery?.horizons?.[0]?.horizon_id, "auto"),
+      selected_variables: selectedVariables.map((variable) => variable.label).filter(Boolean).slice(0, 6),
+      ranked_drivers: keyDrivers,
+      macro_context: normalizeTextList(Array.isArray(baselineConsensusPack?.consensus_prediction) ? baselineConsensusPack.consensus_prediction : [safeText(baselineConsensusPack?.consensus_prediction)], 3),
+      case_specific_context: liveSignals.map((signal) => `${signal.label}: ${signal.summary}`).slice(0, 4),
+      uncertainty_map: counterSignals,
+      data_quality_map: Array.isArray(verifiedEvidencePack?.missingness_map) ? verifiedEvidencePack.missingness_map.slice(0, 4) : [],
+    },
+    feature_bundle: selectedVariables.map((variable) => ({
+      label: safeText(variable?.label),
+      direction: dominantLean === "flat" ? "mixed" : dominantLean,
+      confidence: clamp01(variable?.signal_quality, 0.5),
+      note: safeText(variable?.selection_reason, "Selected by the contextual variable selector."),
+    })),
+    baseline_consensus_pack: baselineConsensusPack || {},
+    raw_prediction: {
+      primary_call: primaryCall,
+      probability_split: probabilitySplit,
+      confidence_score: clamp01(evidenceQuality?.coverage_score * 0.55 + evidenceQuality?.freshness_score * 0.25 + (1 - clamp01(evidenceQuality?.conflict_score, 0.25)) * 0.2, 0.58),
+      key_drivers: keyDrivers,
+      counter_signals: counterSignals,
+      invalidators,
+      historical_anchors: historicalAnchors,
+      why_this_side: whyThisSide,
+      recommended_posture: recommendedPosture,
+      scenario_set: [],
+    },
   };
+
+  return normalizeDossierStagePayload(payload, {
+    baselineConsensusPack,
+    variableSelectionPack,
+  });
+}
+
+function buildFallbackVoicePayload({ queryText, normalizedQuery, scorecard, verifiedEvidencePack }) {
+  const domainConfig = getDomain(normalizedQuery?.primary_domain_id, GENERAL_FORECAST_DOMAIN);
+  const drivers = normalizeTextList(scorecard?.key_drivers, 4);
+  const invalidators = normalizeTextList(scorecard?.invalidators, 4);
+  const payload = {
+    title:
+      safeText(scorecard?.primary_call).slice(0, 92) ||
+      safeText(queryText) ||
+      safeText(domainConfig?.short_label || "Crystal Forecast"),
+    summary:
+      safeText(scorecard?.why_this_side) ||
+      (drivers.length ? `Crystal is leaning on ${drivers.slice(0, 2).join(" and ")}.` : "Crystal generated a directional read from the verified evidence stack."),
+    verdict: safeText(scorecard?.primary_call),
+    recommended_action:
+      safeText(scorecard?.recommended_posture) ||
+      "Use this as a directional read and keep watching the invalidation triggers.",
+    what_to_watch: invalidators,
+    how_to_raise_confidence: Array.isArray(verifiedEvidencePack?.missingness_map) ? verifiedEvidencePack.missingness_map.slice(0, 4) : [],
+    coverage_notes: normalizeTextList(scorecard?.publication_basis?.notes, 4),
+  };
+
+  return normalizeVerbalizerStagePayload(payload, {
+    scorecard,
+    verifiedEvidencePack,
+  });
 }
 
 async function fetchSearchSignals(ai, queryText, normalizedQuery, variableSelectionPack = {}) {
@@ -1336,33 +1500,55 @@ async function executeForecastRun(context, payload = {}) {
     });
     await writeArtifact(db, admin, runId, "baseline_consensus_pack", baselineConsensusPack);
 
-    await writeRunPatch(db, admin, runId, {
-      current_stage: "dossier_prediction_agent",
-    });
-    await ensureRunActive(db, runId);
-    const dossierPredictionPayload = await withRetry(() =>
-      llmRuntime.generateJson({
-        modelKind: "forecast",
-        temperature: 0.1,
-        systemInstruction:
-          "You are Crystal's Dossier and Prediction Agent. Return exactly one JSON object. Stay concrete, directional, and grounded in the supplied evidence.",
-        prompt: buildDossierPredictionPrompt({
+      await writeRunPatch(db, admin, runId, {
+        current_stage: "dossier_prediction_agent",
+      });
+      await ensureRunActive(db, runId);
+      let dossierPredictionPayload;
+      let dossierFallbackActivated = false;
+      try {
+        dossierPredictionPayload = await withRetry(() =>
+          llmRuntime.generateJson({
+            modelKind: "forecast",
+            temperature: 0.1,
+            systemInstruction:
+              "You are Crystal's Dossier and Prediction Agent. Return exactly one JSON object. Stay concrete, directional, and grounded in the supplied evidence.",
+            prompt: buildDossierPredictionPrompt({
+              queryText,
+              normalizedQuery,
+              variableSelectionPack: variable_selection_pack,
+              verifiedEvidencePack,
+              baselineConsensusPack,
+            }),
+            maxTokens: JSON_STAGE_MAX_TOKENS.dossier,
+            jsonStage: "dossier",
+            preferTextMode: true,
+          })
+        );
+      } catch (error) {
+        dossierFallbackActivated = true;
+        dossierPredictionPayload = buildFallbackDossierPrediction({
           queryText,
           normalizedQuery,
           variableSelectionPack: variable_selection_pack,
           verifiedEvidencePack,
           baselineConsensusPack,
-        }),
-        maxTokens: JSON_STAGE_MAX_TOKENS.dossier,
-        jsonStage: "dossier",
-        preferTextMode: true,
-      })
-    );
-    const dossierPrediction = normalizeDossierStagePayload(dossierPredictionPayload, {
-      baselineConsensusPack,
-      variableSelectionPack: variable_selection_pack,
-    });
-    await writeArtifact(db, admin, runId, "dossier_prediction_agent", dossierPrediction);
+        });
+        await writeArtifact(db, admin, runId, "dossier_prediction_fallback", {
+          activated: true,
+          message: error instanceof Error ? error.message : "Dossier generation failed.",
+          code: safeText(error?.code, "dossier-fallback"),
+          details: error?.details || null,
+        });
+      }
+      const dossierPrediction = normalizeDossierStagePayload(dossierPredictionPayload, {
+        baselineConsensusPack,
+        variableSelectionPack: variable_selection_pack,
+      });
+      if (dossierFallbackActivated) {
+        dossierPrediction.fallback_used = true;
+      }
+      await writeArtifact(db, admin, runId, "dossier_prediction_agent", dossierPrediction);
 
     await writeRunPatch(db, admin, runId, {
       current_stage: "simulation_decision_gate",
@@ -1438,34 +1624,55 @@ async function executeForecastRun(context, payload = {}) {
     await writeArtifact(db, admin, runId, "calibration_snapshot", calibrationSnapshot);
     await writeArtifact(db, admin, runId, "fusion_scorecard", finalizedScorecard);
 
-    await writeRunPatch(db, admin, runId, {
-      current_stage: "card_generation",
-      resolution_target: resolutionTarget,
-      evaluation_eligible: evaluationEligible,
-      resolution_status: evaluationEligible ? "pending" : "skipped",
-    });
-    const voicePayloadRaw = await withRetry(() =>
-      llmRuntime.generateJson({
-        modelKind: "forecast",
-        temperature: 0.15,
-        systemInstruction:
-          "You write Crystal prediction cards. Return exactly one JSON object. Put the call first, keep the tone precise, and never hide the thesis behind vague uncertainty copy.",
-        prompt: buildForecastVerbalizationPrompt({
+      await writeRunPatch(db, admin, runId, {
+        current_stage: "card_generation",
+        resolution_target: resolutionTarget,
+        evaluation_eligible: evaluationEligible,
+        resolution_status: evaluationEligible ? "pending" : "skipped",
+      });
+      let voicePayloadRaw;
+      let voiceFallbackActivated = false;
+      try {
+        voicePayloadRaw = await withRetry(() =>
+          llmRuntime.generateJson({
+            modelKind: "forecast",
+            temperature: 0.15,
+            systemInstruction:
+              "You write Crystal prediction cards. Return exactly one JSON object. Put the call first, keep the tone precise, and never hide the thesis behind vague uncertainty copy.",
+            prompt: buildForecastVerbalizationPrompt({
+              queryText,
+              normalizedQuery,
+              verifiedEvidencePack,
+              scorecard: finalizedScorecard,
+            }),
+            maxTokens: JSON_STAGE_MAX_TOKENS.verbalizer,
+            jsonStage: "verbalizer",
+            preferTextMode: true,
+          })
+        );
+      } catch (error) {
+        voiceFallbackActivated = true;
+        voicePayloadRaw = buildFallbackVoicePayload({
           queryText,
           normalizedQuery,
-          verifiedEvidencePack,
           scorecard: finalizedScorecard,
-        }),
-        maxTokens: JSON_STAGE_MAX_TOKENS.verbalizer,
-        jsonStage: "verbalizer",
-        preferTextMode: true,
-      })
-    );
-    const voicePayload = normalizeVerbalizerStagePayload(voicePayloadRaw, {
-      scorecard: finalizedScorecard,
-      verifiedEvidencePack,
-    });
-    await writeArtifact(db, admin, runId, "voice_payload", voicePayload);
+          verifiedEvidencePack,
+        });
+        await writeArtifact(db, admin, runId, "voice_payload_fallback", {
+          activated: true,
+          message: error instanceof Error ? error.message : "Voice payload generation failed.",
+          code: safeText(error?.code, "voice-fallback"),
+          details: error?.details || null,
+        });
+      }
+      const voicePayload = normalizeVerbalizerStagePayload(voicePayloadRaw, {
+        scorecard: finalizedScorecard,
+        verifiedEvidencePack,
+      });
+      if (voiceFallbackActivated) {
+        voicePayload.fallback_used = true;
+      }
+      await writeArtifact(db, admin, runId, "voice_payload", voicePayload);
 
     const card = buildFinalCard({
       runId,
