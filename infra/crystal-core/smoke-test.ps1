@@ -18,9 +18,16 @@ function Get-GcloudExecutable {
 
 $gcloud = Get-GcloudExecutable
 $audience = $ServiceUrl.TrimEnd("/")
-$token = (& $gcloud auth print-identity-token "--audiences=$audience" | Select-Object -First 1).Trim()
+try {
+  $token = (& $gcloud auth print-identity-token "--audiences=$audience" 2>$null | Select-Object -First 1).Trim()
+} catch {
+  $token = ""
+}
 if (-not $token) {
-  throw "Impossibile ottenere identity token per il servizio Cloud Run."
+  $token = (& $gcloud auth print-access-token 2>$null | Select-Object -First 1).Trim()
+}
+if (-not $token) {
+  throw "Impossibile ottenere un token per il servizio Cloud Run. Usa un service account oppure assegna run.invoker all'account attivo."
 }
 
 $headers = @{

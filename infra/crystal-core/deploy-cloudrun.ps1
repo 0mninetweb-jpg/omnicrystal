@@ -9,6 +9,15 @@ param(
   [string]$FunctionsInvokerServiceAccountEmail = "",
   [string]$MirofishBaseUrl = "",
   [string]$MirofishApiKey = "",
+  [string]$LlmProvider = "",
+  [string]$LlmBaseUrl = "",
+  [string]$LlmApiKey = "",
+  [string]$LlmModelQuery = "",
+  [string]$LlmModelForecast = "",
+  [string]$LlmModelChat = "",
+  [string]$LlmModelCopy = "",
+  [string]$OpenrouterSiteUrl = "https://omnicrystal.web.app",
+  [string]$OpenrouterAppTitle = "Crystal",
   [int]$MinInstances = 1,
   [int]$MaxInstances = 5,
   [int]$Concurrency = 4
@@ -35,6 +44,22 @@ function Invoke-GcloudChecked {
   }
 }
 
+function New-EnvYamlFile {
+  param(
+    [string]$Path,
+    [hashtable]$Entries
+  )
+
+  $lines = foreach ($key in $Entries.Keys) {
+    $value = [string]$Entries[$key]
+    if ([string]::IsNullOrWhiteSpace($value)) { continue }
+    $escaped = $value.Replace('"', '\"')
+    "${key}: `"$escaped`""
+  }
+
+  Set-Content -Path $Path -Value $lines -Encoding ascii
+}
+
 $gcloud = Get-GcloudExecutable
 $repoRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path))
 $imageUri = "$Region-docker.pkg.dev/$ProjectId/cloud-run-source-deploy/$ImageName"
@@ -57,16 +82,37 @@ if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($queueExists)) {
   Invoke-GcloudChecked tasks queues create $TaskQueueName --location $Region --project $ProjectId
 }
 
-Invoke-GcloudChecked builds submit $repoRoot --tag $imageUri --file "$repoRoot\crystal-core\Dockerfile" --project $ProjectId
+$cloudBuildConfigPath = Join-Path $env:TEMP "crystal-core-cloudbuild.yaml"
+@"
+steps:
+- name: 'gcr.io/cloud-builders/docker'
+  args: ['build', '-f', 'crystal-core/Dockerfile', '-t', '$imageUri', '.']
+images:
+- '$imageUri'
+"@ | Set-Content -Path $cloudBuildConfigPath -Encoding ascii
 
-$envVars = @(
-  "MIROFISH_BASE_URL=$MirofishBaseUrl"
-  "MIROFISH_API_KEY=$MirofishApiKey"
-  "CRYSTAL_CORE_TASK_QUEUE=$TaskQueueName"
-  "CRYSTAL_CORE_TASK_LOCATION=$Region"
-  "CRYSTAL_CORE_RUNNER_SERVICE_ACCOUNT_EMAIL=$RunnerServiceAccountEmail"
-  "CRYSTAL_CORE_REGION=$Region"
-) -join ","
+Invoke-GcloudChecked builds submit $repoRoot --config $cloudBuildConfigPath --project $ProjectId
+
+$serviceEnvEntries = @{
+  "MIROFISH_BASE_URL" = $MirofishBaseUrl
+  "MIROFISH_API_KEY" = $MirofishApiKey
+  "CRYSTAL_CORE_TASK_QUEUE" = $TaskQueueName
+  "CRYSTAL_CORE_TASK_LOCATION" = $Region
+  "CRYSTAL_CORE_RUNNER_SERVICE_ACCOUNT_EMAIL" = $RunnerServiceAccountEmail
+  "CRYSTAL_CORE_REGION" = $Region
+  "LLM_PROVIDER" = $LlmProvider
+  "LLM_BASE_URL" = $LlmBaseUrl
+  "LLM_API_KEY" = $LlmApiKey
+  "LLM_MODEL_QUERY" = $LlmModelQuery
+  "LLM_MODEL_FORECAST" = $LlmModelForecast
+  "LLM_MODEL_CHAT" = $LlmModelChat
+  "LLM_MODEL_COPY" = $LlmModelCopy
+  "OPENROUTER_SITE_URL" = $OpenrouterSiteUrl
+  "OPENROUTER_APP_TITLE" = $OpenrouterAppTitle
+}
+
+$serviceEnvFilePath = Join-Path $env:TEMP "crystal-core-service-env.yaml"
+New-EnvYamlFile -Path $serviceEnvFilePath -Entries $serviceEnvEntries
 
 Invoke-GcloudChecked run deploy $ServiceName `
   --image $imageUri `
@@ -81,21 +127,16 @@ Invoke-GcloudChecked run deploy $ServiceName `
   --concurrency $Concurrency `
   --min-instances $MinInstances `
   --max-instances $MaxInstances `
-  --set-env-vars $envVars `
+  --env-vars-file $serviceEnvFilePath `
   --set-secrets GEMINI_API_KEY=GEMINI_API_KEY:latest
 
 $serviceUrl = (& $gcloud run services describe $ServiceName --region $Region --project $ProjectId --format "value(status.url)" | Select-Object -First 1).Trim()
 
-$serviceEnvVars = @(
-  "MIROFISH_BASE_URL=$MirofishBaseUrl"
-  "MIROFISH_API_KEY=$MirofishApiKey"
-  "CRYSTAL_CORE_TASK_QUEUE=$TaskQueueName"
-  "CRYSTAL_CORE_TASK_LOCATION=$Region"
-  "CRYSTAL_CORE_RUNNER_SERVICE_ACCOUNT_EMAIL=$RunnerServiceAccountEmail"
-  "CRYSTAL_CORE_REGION=$Region"
-  "CRYSTAL_CORE_SERVICE_URL=$serviceUrl"
-  "CRYSTAL_CORE_EXECUTOR_AUDIENCE=$serviceUrl"
-) -join ","
+$serviceEnvEntries["CRYSTAL_CORE_SERVICE_URL"] = $serviceUrl
+$serviceEnvEntries["CRYSTAL_CORE_EXECUTOR_AUDIENCE"] = $serviceUrl
+
+$serviceEnvFileWithUrlPath = Join-Path $env:TEMP "crystal-core-service-env-with-url.yaml"
+New-EnvYamlFile -Path $serviceEnvFileWithUrlPath -Entries $serviceEnvEntries
 
 Invoke-GcloudChecked run deploy $ServiceName `
   --image $imageUri `
@@ -110,8 +151,28 @@ Invoke-GcloudChecked run deploy $ServiceName `
   --concurrency $Concurrency `
   --min-instances $MinInstances `
   --max-instances $MaxInstances `
-  --set-env-vars $serviceEnvVars `
+  --env-vars-file $serviceEnvFileWithUrlPath `
   --set-secrets GEMINI_API_KEY=GEMINI_API_KEY:latest
+
+$jobEnvEntries = @{
+  "MIROFISH_BASE_URL" = $MirofishBaseUrl
+  "MIROFISH_API_KEY" = $MirofishApiKey
+  "CRYSTAL_CORE_REGION" = $Region
+  "CRYSTAL_CORE_SERVICE_URL" = $serviceUrl
+  "CRYSTAL_CORE_EXECUTOR_AUDIENCE" = $serviceUrl
+  "LLM_PROVIDER" = $LlmProvider
+  "LLM_BASE_URL" = $LlmBaseUrl
+  "LLM_API_KEY" = $LlmApiKey
+  "LLM_MODEL_QUERY" = $LlmModelQuery
+  "LLM_MODEL_FORECAST" = $LlmModelForecast
+  "LLM_MODEL_CHAT" = $LlmModelChat
+  "LLM_MODEL_COPY" = $LlmModelCopy
+  "OPENROUTER_SITE_URL" = $OpenrouterSiteUrl
+  "OPENROUTER_APP_TITLE" = $OpenrouterAppTitle
+}
+
+$jobEnvFilePath = Join-Path $env:TEMP "crystal-core-job-env.yaml"
+New-EnvYamlFile -Path $jobEnvFilePath -Entries $jobEnvEntries
 
 Invoke-GcloudChecked run jobs deploy $JobName `
   --image $imageUri `
@@ -124,7 +185,7 @@ Invoke-GcloudChecked run jobs deploy $JobName `
   --parallelism 1 `
   --command node `
   --args worker.js `
-  --set-env-vars "CRYSTAL_CORE_REGION=$Region,CRYSTAL_CORE_SERVICE_URL=$serviceUrl,CRYSTAL_CORE_EXECUTOR_AUDIENCE=$serviceUrl" `
+  --env-vars-file $jobEnvFilePath `
   --set-secrets GEMINI_API_KEY=GEMINI_API_KEY:latest
 
 Invoke-GcloudChecked run services add-iam-policy-binding $ServiceName `

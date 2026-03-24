@@ -22,3 +22,19 @@ This folder contains the operational assets for the `crystal-core` rollout:
 4. Deploy Firebase Functions and Firestore Rules
 5. Start with `CRYSTAL_CORE_ROLLOUT_PERCENT=0` and `CRYSTAL_CORE_GUEST_ROLLOUT_PERCENT=0`
 6. Raise rollout manually only after the evaluation reports stay healthy
+
+## Runtime config parity
+
+`crystal-core` needs the same LLM runtime settings as Firebase Functions when it is expected to behave the same way in production. In practice, mirror these values into the Cloud Run deploy:
+
+- `LLM_PROVIDER`
+- `LLM_BASE_URL`
+- `LLM_API_KEY` when using OpenRouter as primary
+- `LLM_MODEL_QUERY`
+- `LLM_MODEL_FORECAST`
+- `LLM_MODEL_CHAT`
+- `LLM_MODEL_COPY`
+- `OPENROUTER_SITE_URL`
+- `OPENROUTER_APP_TITLE`
+
+`GEMINI_API_KEY` still comes from Secret Manager and remains the fallback or primary key when `LLM_PROVIDER=gemini`.
