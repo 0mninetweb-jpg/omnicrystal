@@ -72,12 +72,14 @@ Invoke-GcloudChecked config set project $ProjectId
 Invoke-GcloudChecked services enable run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com cloudtasks.googleapis.com cloudscheduler.googleapis.com --project $ProjectId --quiet
 
 $repoName = "cloud-run-source-deploy"
-$repoExists = (& $gcloud artifacts repositories describe $repoName --location $Region --project $ProjectId --format "value(name)" 2>$null | Select-Object -First 1).Trim()
+$repoDescribeOutput = & $gcloud artifacts repositories describe $repoName --location $Region --project $ProjectId --format "value(name)" --quiet 2>$null
+$repoExists = (($repoDescribeOutput | Select-Object -First 1) | Out-String).Trim()
 if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($repoExists)) {
   Invoke-GcloudChecked artifacts repositories create $repoName --repository-format docker --location $Region --project $ProjectId
 }
 
-$queueExists = (& $gcloud tasks queues describe $TaskQueueName --location $Region --project $ProjectId --format "value(name)" 2>$null | Select-Object -First 1).Trim()
+$queueDescribeOutput = & $gcloud tasks queues describe $TaskQueueName --location $Region --project $ProjectId --format "value(name)" --quiet 2>$null
+$queueExists = (($queueDescribeOutput | Select-Object -First 1) | Out-String).Trim()
 if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($queueExists)) {
   Invoke-GcloudChecked tasks queues create $TaskQueueName --location $Region --project $ProjectId
 }

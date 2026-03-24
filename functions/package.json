@@ -11,6 +11,7 @@
     "firebase-functions": "^6.6.0",
     "google-auth-library": "^9.15.1",
     "google-trends-api": "^4.9.2",
-    "stripe": "^18.3.0"
+    "stripe": "^18.3.0",
+    "yahoo-finance2": "^3.13.2"
   }
 }
