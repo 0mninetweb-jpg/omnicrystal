@@ -44,6 +44,21 @@ function Invoke-GcloudChecked {
   }
 }
 
+function Get-GcloudOptionalValue {
+  param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Args)
+  $previousPreference = $ErrorActionPreference
+  try {
+    $ErrorActionPreference = "Continue"
+    $output = & $gcloud @Args 2>$null
+    if ($LASTEXITCODE -ne 0) {
+      return ""
+    }
+    return (($output | Select-Object -First 1) | Out-String).Trim()
+  } finally {
+    $ErrorActionPreference = $previousPreference
+  }
+}
+
 function New-EnvYamlFile {
   param(
     [string]$Path,
@@ -72,15 +87,13 @@ Invoke-GcloudChecked config set project $ProjectId
 Invoke-GcloudChecked services enable run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com cloudtasks.googleapis.com cloudscheduler.googleapis.com --project $ProjectId --quiet
 
 $repoName = "cloud-run-source-deploy"
-$repoDescribeOutput = & $gcloud artifacts repositories describe $repoName --location $Region --project $ProjectId --format "value(name)" --quiet 2>$null
-$repoExists = (($repoDescribeOutput | Select-Object -First 1) | Out-String).Trim()
-if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($repoExists)) {
+$repoExists = Get-GcloudOptionalValue artifacts repositories describe $repoName --location $Region --project $ProjectId --format "value(name)" --quiet
+if ([string]::IsNullOrWhiteSpace($repoExists)) {
   Invoke-GcloudChecked artifacts repositories create $repoName --repository-format docker --location $Region --project $ProjectId
 }
 
-$queueDescribeOutput = & $gcloud tasks queues describe $TaskQueueName --location $Region --project $ProjectId --format "value(name)" --quiet 2>$null
-$queueExists = (($queueDescribeOutput | Select-Object -First 1) | Out-String).Trim()
-if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($queueExists)) {
+$queueExists = Get-GcloudOptionalValue tasks queues describe $TaskQueueName --location $Region --project $ProjectId --format "value(name)" --quiet
+if ([string]::IsNullOrWhiteSpace($queueExists)) {
   Invoke-GcloudChecked tasks queues create $TaskQueueName --location $Region --project $ProjectId
 }
 

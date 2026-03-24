@@ -24,6 +24,13 @@ try {
   $token = ""
 }
 if (-not $token) {
+  try {
+    $token = (& $gcloud auth print-identity-token 2>$null | Select-Object -First 1).Trim()
+  } catch {
+    $token = ""
+  }
+}
+if (-not $token) {
   $token = (& $gcloud auth print-access-token 2>$null | Select-Object -First 1).Trim()
 }
 if (-not $token) {
