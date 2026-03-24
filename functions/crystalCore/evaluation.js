@@ -561,6 +561,119 @@ async function listRecentRuns(db, sinceDate, limit = 400) {
     });
 }
 
+function getParityKey(runDoc = {}) {
+  const explicit = safeText(runDoc?.query_hash);
+  if (explicit) return explicit;
+  return createResolutionHash({
+    query_text: safeText(runDoc?.query_text).toLowerCase(),
+    domain_id: safeText(runDoc?.query_plan?.primary_domain_id || runDoc?.result_card?.domain),
+    question_side_a: safeText(runDoc?.result_card?.binary_contract?.question_side_a),
+    question_side_b: safeText(runDoc?.result_card?.binary_contract?.question_side_b),
+  });
+}
+
+function getTransportBucket(runtimeTransport = "") {
+  const normalized = safeText(runtimeTransport).toLowerCase();
+  if (normalized.startsWith("remote")) return "remote";
+  if (normalized.startsWith("legacy")) return "legacy";
+  if (normalized.startsWith("local_fallback")) return "local_core";
+  if (normalized.startsWith("local_core")) return "local_core";
+  return "other";
+}
+
+function getComparableBinaryRuns(recentRuns = []) {
+  return recentRuns.filter((runDoc) => {
+    const targetType = safeText(runDoc?.resolution_target?.target_type);
+    return targetType === "binary_outcome" || Boolean(runDoc?.result_card?.binary_contract);
+  });
+}
+
+function median(numbers = []) {
+  if (!numbers.length) return null;
+  const sorted = [...numbers].sort((left, right) => left - right);
+  const midpoint = Math.floor(sorted.length / 2);
+  if (sorted.length % 2 === 0) {
+    return Number(((sorted[midpoint - 1] + sorted[midpoint]) / 2).toFixed(4));
+  }
+  return Number(sorted[midpoint].toFixed(4));
+}
+
+function buildBinaryParitySummary(recentRuns = []) {
+  const binaryRuns = getComparableBinaryRuns(recentRuns);
+  const missingBinaryContractRate =
+    binaryRuns.length > 0 ? binaryRuns.filter((runDoc) => !runDoc?.result_card?.binary_contract).length / binaryRuns.length : null;
+
+  const grouped = new Map();
+  for (const runDoc of binaryRuns.filter((item) => item?.result_card?.binary_contract)) {
+    const parityKey = getParityKey(runDoc);
+    const bucket = getTransportBucket(runDoc?.runtime_transport);
+    if (!grouped.has(parityKey)) {
+      grouped.set(parityKey, { remote: null, local_core: null });
+    }
+    if (bucket !== "remote" && bucket !== "local_core") {
+      continue;
+    }
+
+    const current = grouped.get(parityKey);
+    const completedAt = getRunCompletedDate(runDoc) || new Date(0);
+    const existingCompletedAt = current[bucket] ? getRunCompletedDate(current[bucket]) || new Date(0) : new Date(0);
+    if (!current[bucket] || completedAt >= existingCompletedAt) {
+      current[bucket] = runDoc;
+    }
+  }
+
+  const comparablePairs = [];
+  for (const [parityKey, pair] of grouped.entries()) {
+    if (pair.remote && pair.local_core) {
+      const remoteCard = pair.remote.result_card?.binary_contract || {};
+      const localCard = pair.local_core.result_card?.binary_contract || {};
+      const probabilityDelta = Math.abs(
+        clamp01(remoteCard.winning_probability, 0.5) - clamp01(localCard.winning_probability, 0.5)
+      );
+      comparablePairs.push({
+        parity_key: parityKey,
+        query_text: safeText(pair.remote.query_text, safeText(pair.local_core.query_text)),
+        remote_transport: safeText(pair.remote.runtime_transport),
+        local_transport: safeText(pair.local_core.runtime_transport),
+        remote_winner: safeText(remoteCard.winning_side),
+        local_winner: safeText(localCard.winning_side),
+        remote_band: safeText(remoteCard.band),
+        local_band: safeText(localCard.band),
+        remote_publication_state: safeText(pair.remote.result_card?.card_state),
+        local_publication_state: safeText(pair.local_core.result_card?.card_state),
+        probability_delta: Number(probabilityDelta.toFixed(4)),
+      });
+    }
+  }
+
+  const winnerMismatchRate =
+    comparablePairs.length > 0
+      ? comparablePairs.filter((pair) => safeText(pair.remote_winner) !== safeText(pair.local_winner)).length / comparablePairs.length
+      : null;
+  const bandMismatchRate =
+    comparablePairs.length > 0
+      ? comparablePairs.filter((pair) => safeText(pair.remote_band) !== safeText(pair.local_band)).length / comparablePairs.length
+      : null;
+  const publicationStateMismatchRate =
+    comparablePairs.length > 0
+      ? comparablePairs.filter((pair) => safeText(pair.remote_publication_state) !== safeText(pair.local_publication_state)).length / comparablePairs.length
+      : null;
+  const probabilityDeltas = comparablePairs.map((pair) => pair.probability_delta).filter((value) => Number.isFinite(value));
+
+  return {
+    binary_runs_scanned: binaryRuns.length,
+    comparable_pairs: comparablePairs.length,
+    missing_binary_contract_rate: missingBinaryContractRate == null ? null : Number(missingBinaryContractRate.toFixed(4)),
+    winner_mismatch_rate: winnerMismatchRate == null ? null : Number(winnerMismatchRate.toFixed(4)),
+    band_mismatch_rate: bandMismatchRate == null ? null : Number(bandMismatchRate.toFixed(4)),
+    publication_state_mismatch_rate:
+      publicationStateMismatchRate == null ? null : Number(publicationStateMismatchRate.toFixed(4)),
+    median_probability_delta: median(probabilityDeltas),
+    max_probability_delta: probabilityDeltas.length ? Number(Math.max(...probabilityDeltas).toFixed(4)) : null,
+    regressions: comparablePairs.sort((left, right) => right.probability_delta - left.probability_delta).slice(0, 10),
+  };
+}
+
 function computeBinaryMetrics(samples = []) {
   if (!samples.length) {
     return {
@@ -682,12 +795,23 @@ async function runEvaluationSweep(context, options = {}) {
   };
 }
 
-function buildRolloutRecommendation({ remoteErrorRate = null, remotePendingRate = null, deterministicCallRate = null, a0GeneralRate = null }) {
+function buildRolloutRecommendation({
+  remoteErrorRate = null,
+  remotePendingRate = null,
+  deterministicCallRate = null,
+  a0GeneralRate = null,
+  parityWinnerMismatchRate = null,
+  parityMedianProbabilityDelta = null,
+  missingBinaryContractRate = null,
+}) {
   const blockers = [];
   if (remoteErrorRate != null && remoteErrorRate >= 0.02) blockers.push("remote_error_rate");
   if (remotePendingRate != null && remotePendingRate >= 0.08) blockers.push("pending_rate");
   if (deterministicCallRate != null && deterministicCallRate < 0.85) blockers.push("deterministic_call_rate");
   if (a0GeneralRate != null && a0GeneralRate >= 0.1) blockers.push("general_fallback_rate");
+  if (parityWinnerMismatchRate != null && parityWinnerMismatchRate >= 0.05) blockers.push("binary_winner_parity");
+  if (parityMedianProbabilityDelta != null && parityMedianProbabilityDelta >= 0.08) blockers.push("binary_probability_parity");
+  if (missingBinaryContractRate != null && missingBinaryContractRate > 0) blockers.push("missing_binary_contract");
 
   return {
     blockers,
@@ -733,12 +857,16 @@ async function generateEvaluationReport(context, options = {}) {
     recentRuns.length > 0
       ? recentRuns.filter((runDoc) => safeText(runDoc?.query_plan?.primary_domain_id || runDoc?.result_card?.domain) === "A.0.general.general_forecast").length / recentRuns.length
       : null;
+  const binaryParitySummary = buildBinaryParitySummary(recentRuns);
 
   const rolloutRecommendation = buildRolloutRecommendation({
     remoteErrorRate: remoteErrors,
     remotePendingRate: remotePending,
     deterministicCallRate,
     a0GeneralRate: generalRate,
+    parityWinnerMismatchRate: binaryParitySummary.winner_mismatch_rate,
+    parityMedianProbabilityDelta: binaryParitySummary.median_probability_delta,
+    missingBinaryContractRate: binaryParitySummary.missing_binary_contract_rate,
   });
 
   const summaryLines = [
@@ -750,6 +878,9 @@ async function generateEvaluationReport(context, options = {}) {
     `Remote pending pressure: ${remotePending == null ? "n/a" : `${Math.round(remotePending * 100)}%`}`,
     `Deterministic call rate: ${deterministicCallRate == null ? "n/a" : `${Math.round(deterministicCallRate * 100)}%`}`,
     `A.0.general rate: ${generalRate == null ? "n/a" : `${Math.round(generalRate * 100)}%`}`,
+    `Binary parity comparable pairs: ${binaryParitySummary.comparable_pairs}`,
+    `Binary winner mismatch: ${binaryParitySummary.winner_mismatch_rate == null ? "n/a" : `${Math.round(binaryParitySummary.winner_mismatch_rate * 100)}%`}`,
+    `Binary median probability delta: ${binaryParitySummary.median_probability_delta == null ? "n/a" : `${Math.round(binaryParitySummary.median_probability_delta * 100)} pts`}`,
     "",
     `Recommendation: ${rolloutRecommendation.next_step}`,
   ];
@@ -767,6 +898,7 @@ async function generateEvaluationReport(context, options = {}) {
       remote_pending_rate: remotePending,
       deterministic_call_rate: deterministicCallRate,
       general_fallback_rate: generalRate,
+      binary_parity: binaryParitySummary,
     },
     domain_summaries: domainSummaries.slice(0, 25),
     regressions: rolloutRecommendation.blockers,
@@ -775,6 +907,17 @@ async function generateEvaluationReport(context, options = {}) {
     updated_at: admin.firestore.FieldValue.serverTimestamp(),
   };
   await db.collection("evaluation_reports").doc(reportId).set(reportPayload, { merge: true });
+  await db.collection("binary_parity_reports").doc(reportId).set(
+    {
+      report_id: reportId,
+      report_type: reportType,
+      window_start: sinceDate.toISOString(),
+      window_end: nowIso(),
+      summary: binaryParitySummary,
+      updated_at: admin.firestore.FieldValue.serverTimestamp(),
+    },
+    { merge: true }
+  );
 
   return {
     mode: "report",
@@ -805,6 +948,7 @@ module.exports = {
   ACTIVE_CALIBRATION_MAX_AGE_DAYS,
   ACTIVE_CALIBRATION_SAMPLE_SIZE,
   buildResolutionTarget,
+  buildBinaryParitySummary,
   applyCalibrationToScorecard,
   loadActiveCalibration,
   runResolutionSweep,

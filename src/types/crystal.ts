@@ -228,7 +228,7 @@ export interface CardData {
   };
   resolution_target?: ResolutionTarget;
   evaluation_eligible?: boolean;
-  runtime_transport?: 'local' | 'remote' | 'local_fallback';
+  runtime_transport?: 'remote' | 'local_core' | 'local_fallback' | 'legacy_emergency' | 'local';
   rollout_bucket?: string;
   calibration_snapshot?: CalibrationSnapshot;
   core_version?: string;

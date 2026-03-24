@@ -124,13 +124,13 @@ export function PrimaryNav({ isAuthenticated, onLogin, onLogout }: PrimaryNavPro
                 to={to}
                 className={({ isActive }) =>
                   cn(
-                    'flex min-h-[56px] flex-col items-center justify-center rounded-2xl px-3 py-2 text-[11px] font-semibold leading-tight transition',
+                    'flex min-h-[60px] flex-col items-center justify-center rounded-2xl px-2 py-2 text-[10px] font-semibold leading-[1.1] transition',
                     isActive ? 'bg-slate-950 text-white' : 'text-slate-600'
                   )
                 }
               >
                 <Icon className="mb-1 h-4 w-4" />
-                {label}
+                <span className="max-w-[72px] whitespace-normal text-center">{label}</span>
               </NavLink>
             ))}
           </div>

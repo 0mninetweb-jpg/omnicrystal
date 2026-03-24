@@ -1459,6 +1459,10 @@ function isCrystalCoreRemoteEnabled() {
   return Boolean(getCrystalCoreBaseUrl());
 }
 
+function isLegacyEmergencyFallbackEnabled() {
+  return readBooleanValue(process.env.CRYSTAL_LEGACY_EMERGENCY_FALLBACK, true);
+}
+
 function getCrystalCoreGoogleAuth() {
   if (!crystalCoreGoogleAuth) {
     crystalCoreGoogleAuth = new GoogleAuth({
@@ -1649,7 +1653,7 @@ function sanitizeForecastRunForApi(runDoc = {}) {
     engine: safeText(runDoc?.engine, "extended"),
     plan: safeText(runDoc?.plan, "free"),
     error_message: safeText(runDoc?.error_message),
-    runtime_transport: safeText(runDoc?.runtime_transport, "local"),
+    runtime_transport: safeText(runDoc?.runtime_transport, "local_core"),
     rollout_bucket: safeText(runDoc?.rollout_bucket),
     evaluation_eligible: Boolean(runDoc?.evaluation_eligible),
     resolution_status: safeText(runDoc?.resolution_status),
@@ -1675,7 +1679,7 @@ async function createForecastRunRecord({
   routeOrigin = "predict",
   engine = "extended",
   plan = "free",
-  runtimeTransport = "local",
+  runtimeTransport = "local_core",
   rolloutBucket = null,
 }) {
   const payload = {
@@ -1687,11 +1691,12 @@ async function createForecastRunRecord({
     source_view: safeText(sourceView, "search"),
     route_origin: safeText(routeOrigin, "predict"),
     query_text: safeText(queryText),
+    query_hash: createCardCacheKey(queryText, queryPlan || {}, engine),
     query_plan: sanitizeFirestoreValue(queryPlan || null),
     user_context: sanitizeFirestoreValue(userContext || null),
     engine: safeText(engine, "extended"),
     plan: safeText(plan, "free"),
-    runtime_transport: safeText(runtimeTransport, "local"),
+    runtime_transport: safeText(runtimeTransport, "local_core"),
     rollout_bucket: rolloutBucket ? safeText(rolloutBucket) : null,
     pending_poll_after_ms: 2500,
     core_runtime: CRYSTAL_CORE_VERSION,
@@ -1725,6 +1730,46 @@ async function completePublishedRunCardIfNeeded(runDoc, sourceView = "search", u
     {
       result_card: sanitizeFirestoreValue(publishedCard),
       publicized_at: admin.firestore.FieldValue.serverTimestamp(),
+      updated_at: admin.firestore.FieldValue.serverTimestamp(),
+    },
+    { merge: true }
+  );
+
+  return publishedCard;
+}
+
+async function completeLegacyEmergencyFallbackRun({
+  runId,
+  queryText,
+  queryPlan = {},
+  card,
+  sourceView = "search",
+  uid = null,
+  reason = "local_core_failed",
+}) {
+  const emergencyCard = {
+    ...(card || {}),
+    runtime_transport: "legacy_emergency",
+    transport_fallback_reason: safeText(reason, "local_core_failed"),
+    _source: safeText(card?._source, "legacy-emergency"),
+  };
+
+  const publishedCard = await maybePublishForecastArtifacts({
+    queryText,
+    queryPlan,
+    card: emergencyCard,
+    sourceView,
+    uid,
+  });
+
+  await db.collection("forecast_runs").doc(runId).set(
+    {
+      status: "completed",
+      current_stage: "legacy_emergency",
+      runtime_transport: "legacy_emergency",
+      transport_fallback_reason: safeText(reason, "local_core_failed"),
+      result_card: sanitizeFirestoreValue(publishedCard),
+      completed_at: admin.firestore.FieldValue.serverTimestamp(),
       updated_at: admin.firestore.FieldValue.serverTimestamp(),
     },
     { merge: true }
@@ -1785,7 +1830,7 @@ async function startCrystalEdgePrediction({
   routeOrigin = "predict",
   engine = "extended",
   plan = "free",
-  transport = "local",
+  transport = "local_core",
   rolloutBucket = null,
 }) {
   await createForecastRunRecord({
@@ -1800,7 +1845,7 @@ async function startCrystalEdgePrediction({
     routeOrigin,
     engine,
     plan,
-    runtimeTransport: transport,
+    runtimeTransport: transport === "remote" ? "remote" : "local_core",
     rolloutBucket,
   });
 
@@ -1877,7 +1922,7 @@ async function startCrystalEdgePrediction({
     routeOrigin,
     engine,
     plan,
-    runtimeTransport: transport === "remote" ? "local_fallback" : "local",
+    runtimeTransport: transport === "remote" ? "local_fallback" : "local_core",
     rolloutBucket,
   });
 
@@ -3311,17 +3356,23 @@ exports.api = onRequest(
           return;
         } catch (edgeError) {
           console.warn("Crystal edge guest run failed, falling back to legacy predict.", edgeError?.message || edgeError);
+          if (!isLegacyEmergencyFallbackEnabled()) {
+            throw edgeError;
+          }
           const card = await predict(body.query || "", body.queryPlan || {}, null, {
             engine: "standard",
             action: "search_standard",
             cost: 0,
             plan: "free",
           });
-          const publishedCard = await maybePublishForecastArtifacts({
+          const publishedCard = await completeLegacyEmergencyFallbackRun({
+            runId,
             queryText: body.query || "",
             queryPlan: body.queryPlan || {},
             card,
             sourceView: "forecast-gallery-guest",
+            uid: null,
+            reason: edgeError instanceof Error ? edgeError.message : "local_core_failed",
           });
           respondJson(res, 200, publishedCard);
           return;
@@ -3595,6 +3646,9 @@ exports.api = onRequest(
           return;
         } catch (edgeError) {
           console.warn("Crystal edge authenticated run failed, falling back to legacy predict.", edgeError?.message || edgeError);
+          if (!isLegacyEmergencyFallbackEnabled()) {
+            throw edgeError;
+          }
         }
 
         try {
@@ -3621,12 +3675,14 @@ exports.api = onRequest(
             sourceRef: sourceView,
             card: baseCard,
           });
-          const publishedCard = await maybePublishForecastArtifacts({
+          const publishedCard = await completeLegacyEmergencyFallbackRun({
+            runId,
             queryText,
             queryPlan,
             card,
             sourceView,
             uid: decodedUser.uid,
+            reason: "local_core_failed",
           });
           respondJson(res, 200, publishedCard);
           return;

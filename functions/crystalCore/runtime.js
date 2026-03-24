@@ -1,6 +1,7 @@
 const crypto = require("node:crypto");
 const googleTrends = require("google-trends-api");
 const { GoogleGenAI, Type } = require("@google/genai");
+const yahooFinance = require("yahoo-finance2").default;
 
 const { createLlmRuntime } = require("../llmRuntime");
 const {
@@ -322,6 +323,322 @@ async function fetchTrendSignal(queryText, queryPlan = {}, domainConfig = {}) {
   } catch (_error) {
     return null;
   }
+}
+
+function normalizeSignalText(value = "") {
+  return safeText(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
+function keywordTokensFromQuery(queryText = "", normalizedQuery = {}) {
+  const raw = [
+    queryText,
+    safeText(normalizedQuery?.jurisdiction),
+    safeText(normalizedQuery?.governing_entity),
+    ...((Array.isArray(normalizedQuery?.entities) ? normalizedQuery.entities : [])
+      .map((entity) => safeText(entity?.label))
+      .filter(Boolean)),
+  ]
+    .join(" ")
+    .split(/[^a-zA-Z0-9]+/)
+    .map((token) => normalizeSignalText(token))
+    .filter((token) => token.length >= 4);
+
+  return [...new Set(raw)].slice(0, 8);
+}
+
+function isPolicyLikeQuery(normalizedQuery = {}, domainConfig = {}) {
+  const corpus = normalizeSignalText(
+    [normalizedQuery?.primary_domain_id, normalizedQuery?.resolution_frame, normalizedQuery?.original_query, domainConfig?.domain_id]
+      .filter(Boolean)
+      .join(" ")
+  );
+  return /governance|policy|referendum|election|government|public_timeline|geopolit/.test(corpus);
+}
+
+function isMarketLikeQuery(normalizedQuery = {}, domainConfig = {}) {
+  const corpus = normalizeSignalText(
+    [normalizedQuery?.primary_domain_id, normalizedQuery?.resolution_frame, normalizedQuery?.original_query, domainConfig?.domain_id]
+      .filter(Boolean)
+      .join(" ")
+  );
+  return /market|asset|macro|bitcoin|crypto|gold|oil|nasdaq|sp500|housing|inflation|rates|economy/.test(corpus);
+}
+
+async function fetchText(url) {
+  const response = await fetch(url, {
+    headers: {
+      "user-agent": "CrystalCore/1.0",
+      accept: "application/json,text/xml,application/rss+xml,application/xml,text/plain;q=0.8,*/*;q=0.2",
+    },
+  });
+  if (!response.ok) {
+    throw new Error(`Upstream request failed with status ${response.status}`);
+  }
+  return response.text();
+}
+
+function pickMarketSymbol(queryText = "", normalizedQuery = {}) {
+  const corpus = normalizeSignalText([queryText, normalizedQuery?.original_query].filter(Boolean).join(" "));
+  if (/\bbitcoin|btc\b/.test(corpus)) return { symbol: "BTC-USD", label: "Bitcoin" };
+  if (/\bethereum|eth\b/.test(corpus)) return { symbol: "ETH-USD", label: "Ethereum" };
+  if (/\bgold\b/.test(corpus)) return { symbol: "GC=F", label: "Gold futures" };
+  if (/\boil|brent|crude\b/.test(corpus)) return { symbol: "CL=F", label: "Crude oil futures" };
+  if (/\bnasdaq|tech stocks\b/.test(corpus)) return { symbol: "^IXIC", label: "Nasdaq Composite" };
+  if (/\bs&p|sp500|s&p 500\b/.test(corpus)) return { symbol: "^GSPC", label: "S&P 500" };
+  if (/\beurusd|eurusd|euro dollar\b/.test(corpus)) return { symbol: "EURUSD=X", label: "EUR/USD" };
+  return null;
+}
+
+async function fetchYahooMarketSignal(queryText, normalizedQuery = {}) {
+  const target = pickMarketSymbol(queryText, normalizedQuery);
+  if (!target) return null;
+
+  try {
+    const chart = await yahooFinance.chart(target.symbol, {
+      period1: new Date(Date.now() - 45 * 24 * 60 * 60 * 1000),
+      interval: "1d",
+    });
+    const closes = Array.isArray(chart?.quotes)
+      ? chart.quotes.map((point) => Number(point?.close)).filter((value) => Number.isFinite(value))
+      : [];
+    if (closes.length < 8) return null;
+
+    const recent = closes.slice(-5);
+    const previous = closes.slice(-10, -5);
+    const latest = recent[recent.length - 1];
+    const prior = previous.length > 0 ? previous[previous.length - 1] : closes[0];
+    const delta = prior ? (latest - prior) / prior : 0;
+    const lean = delta > 0.02 ? "up" : delta < -0.02 ? "down" : "flat";
+    const high = Math.max(...recent);
+    const low = Math.min(...recent);
+
+    return {
+      signals: [
+        {
+          source_id: "yahoo_finance",
+          label: `${target.label} price regime`,
+          summary: `${target.label} is ${lean === "up" ? "pushing higher" : lean === "down" ? "under pressure" : "holding a range"} over the latest 5-session window, trading between ${low.toFixed(2)} and ${high.toFixed(2)}.`,
+          lean,
+          freshness_score: 0.88,
+          trust_score: 0.84,
+        },
+      ],
+      source_trust_map: [
+        {
+          source_id: "yahoo_finance",
+          trust_score: 0.84,
+          note: `${target.label} chart data over the latest 45 days.`,
+        },
+      ],
+      conflict_map: [],
+    };
+  } catch (_error) {
+    return null;
+  }
+}
+
+function pickFredSeries(queryText = "", normalizedQuery = {}) {
+  const corpus = normalizeSignalText([queryText, normalizedQuery?.original_query].filter(Boolean).join(" "));
+  if (/\binflation|cpi|price pressure\b/.test(corpus)) return { seriesId: "CPIAUCSL", label: "US CPI" };
+  if (/\bunemployment|labor market|jobs\b/.test(corpus)) return { seriesId: "UNRATE", label: "US unemployment rate" };
+  if (/\brate|rates|fed funds|interest rate\b/.test(corpus)) return { seriesId: "FEDFUNDS", label: "Fed funds rate" };
+  if (/\bgdp|growth|recession|economy\b/.test(corpus)) return { seriesId: "GDP", label: "US GDP" };
+  return null;
+}
+
+async function fetchFredMacroSignal(fetchJson, queryText, normalizedQuery = {}) {
+  const apiKey = safeText(process.env.FRED_API_KEY);
+  const series = pickFredSeries(queryText, normalizedQuery);
+  if (!apiKey || !series) return null;
+
+  try {
+    const payload = await fetchJson(
+      `https://api.stlouisfed.org/fred/series/observations?series_id=${encodeURIComponent(series.seriesId)}&api_key=${encodeURIComponent(
+        apiKey
+      )}&file_type=json&sort_order=desc&limit=4`
+    );
+    const observations = Array.isArray(payload?.observations)
+      ? payload.observations
+          .map((item) => Number(item?.value))
+          .filter((value) => Number.isFinite(value))
+      : [];
+    if (observations.length < 2) return null;
+
+    const latest = observations[0];
+    const previous = observations[1];
+    const delta = latest - previous;
+    const lean = delta > 0 ? "up" : delta < 0 ? "down" : "flat";
+
+    return {
+      signals: [
+        {
+          source_id: "fred_api",
+          label: `${series.label} macro pulse`,
+          summary: `${series.label} moved from ${previous.toFixed(2)} to ${latest.toFixed(2)} in the latest observation window.`,
+          lean,
+          freshness_score: 0.76,
+          trust_score: 0.82,
+        },
+      ],
+      source_trust_map: [
+        {
+          source_id: "fred_api",
+          trust_score: 0.82,
+          note: `${series.label} via FRED.`,
+        },
+      ],
+      conflict_map: [],
+    };
+  } catch (_error) {
+    return null;
+  }
+}
+
+async function fetchWikidataEntitySignal(fetchJson, normalizedQuery = {}) {
+  const label = getPrimaryEntityLabel(normalizedQuery);
+  if (!label) return null;
+
+  try {
+    const payload = await fetchJson(
+      `https://www.wikidata.org/w/api.php?action=wbsearchentities&format=json&language=en&type=item&limit=1&search=${encodeURIComponent(
+        label
+      )}`
+    );
+    const match = Array.isArray(payload?.search) ? payload.search[0] : null;
+    if (!match?.id) return null;
+
+    return {
+      signals: [
+        {
+          source_id: "wikidata",
+          label: "Entity resolution",
+          summary: `Primary entity resolved as ${safeText(match.label, label)} (${safeText(match.id)}). ${safeText(match.description, "Entity metadata is available for grounding.")}`,
+          lean: "flat",
+          freshness_score: 0.52,
+          trust_score: 0.78,
+        },
+      ],
+      source_trust_map: [
+        {
+          source_id: "wikidata",
+          trust_score: 0.78,
+          note: `Resolved ${safeText(match.label, label)} to ${safeText(match.id)}.`,
+        },
+      ],
+      conflict_map: [],
+    };
+  } catch (_error) {
+    return null;
+  }
+}
+
+async function fetchGdeltAttentionSignal(fetchJson, queryText, normalizedQuery = {}) {
+  const tokens = keywordTokensFromQuery(queryText, normalizedQuery);
+  if (!tokens.length) return null;
+  const query = tokens.slice(0, 4).join(" AND ");
+
+  try {
+    const payload = await fetchJson(
+      `https://api.gdeltproject.org/api/v2/doc/doc?query=${encodeURIComponent(query)}&mode=ArtList&maxrecords=6&format=json&sort=DateDesc`
+    );
+    const articles = Array.isArray(payload?.articles) ? payload.articles : [];
+    if (!articles.length) return null;
+    const topTitles = articles.slice(0, 2).map((article) => safeText(article?.title)).filter(Boolean);
+
+    return {
+      signals: [
+        {
+          source_id: "gdelt",
+          label: "Attention and event flow",
+          summary: `Recent policy/event attention is active across ${articles.length} recent articles. ${topTitles.length ? `Latest references include ${topTitles.join(" / ")}.` : ""}`.trim(),
+          lean: articles.length >= 4 ? "up" : "flat",
+          freshness_score: 0.82,
+          trust_score: 0.66,
+        },
+      ],
+      source_trust_map: [
+        {
+          source_id: "gdelt",
+          trust_score: 0.66,
+          note: "Recent attention flow from the GDELT document API.",
+        },
+      ],
+      conflict_map: [],
+    };
+  } catch (_error) {
+    return null;
+  }
+}
+
+const RSS_ALLOWLIST = [
+  { source_id: "rss_allowlist", label: "Reuters World", url: "https://feeds.reuters.com/Reuters/worldNews" },
+  { source_id: "rss_allowlist", label: "Reuters Business", url: "https://feeds.reuters.com/reuters/businessNews" },
+];
+
+function extractRssItems(xmlText = "") {
+  const itemPattern = /<item>([\s\S]*?)<\/item>/gi;
+  const titlePattern = /<title>([\s\S]*?)<\/title>/i;
+  const descriptionPattern = /<description>([\s\S]*?)<\/description>/i;
+  const items = [];
+  let match = null;
+  while ((match = itemPattern.exec(xmlText))) {
+    const chunk = match[1] || "";
+    const title = safeText((titlePattern.exec(chunk)?.[1] || "").replace(/<!\[CDATA\[|\]\]>/g, "").replace(/<[^>]+>/g, " "));
+    const description = safeText(
+      (descriptionPattern.exec(chunk)?.[1] || "").replace(/<!\[CDATA\[|\]\]>/g, "").replace(/<[^>]+>/g, " ")
+    );
+    if (title) {
+      items.push({ title, description });
+    }
+  }
+  return items;
+}
+
+async function fetchAllowlistedRssSignal(queryText, normalizedQuery = {}) {
+  const keywords = keywordTokensFromQuery(queryText, normalizedQuery);
+  if (!keywords.length) return null;
+
+  for (const feed of RSS_ALLOWLIST) {
+    try {
+      const xml = await fetchText(feed.url);
+      const items = extractRssItems(xml);
+      const matches = items.filter((item) => {
+        const corpus = normalizeSignalText(`${item.title} ${item.description}`);
+        return keywords.some((keyword) => corpus.includes(keyword));
+      });
+      if (!matches.length) {
+        continue;
+      }
+
+      return {
+        signals: [
+          {
+            source_id: feed.source_id,
+            label: `${feed.label} signal`,
+            summary: `${matches.length} allowlisted RSS items match the current query context. Lead item: ${matches[0].title}.`,
+            lean: matches.length >= 3 ? "up" : "flat",
+            freshness_score: 0.74,
+            trust_score: 0.62,
+          },
+        ],
+        source_trust_map: [
+          {
+            source_id: feed.source_id,
+            trust_score: 0.62,
+            note: `${feed.label} RSS allowlist match.`,
+          },
+        ],
+        conflict_map: [],
+      };
+    } catch (_error) {
+      continue;
+    }
+  }
+
+  return null;
 }
 
 async function get20YearHistoricalContext({ db, llmRuntime, admin, runId, domain, locationFocus, analyticalFocus }) {
@@ -861,7 +1178,7 @@ Rules:
   };
 }
 
-function buildSourceTrustMap(searchPayload = {}, liveSignals = []) {
+function buildSourceTrustMap(searchPayload = {}, liveSignals = [], connectorTrustMap = []) {
   const fromSearch = Array.isArray(searchPayload.source_trust_map) ? searchPayload.source_trust_map : [];
   const fromSignals = (Array.isArray(liveSignals) ? liveSignals : [])
     .map((signal) => ({
@@ -872,7 +1189,7 @@ function buildSourceTrustMap(searchPayload = {}, liveSignals = []) {
     .filter((item) => item.source_id);
 
   const bySource = new Map();
-  [...fromSearch, ...fromSignals].forEach((item) => {
+  [...fromSearch, ...fromSignals, ...(Array.isArray(connectorTrustMap) ? connectorTrustMap : [])].forEach((item) => {
     if (!item.source_id) return;
     const existing = bySource.get(item.source_id);
     if (!existing || item.trust_score > existing.trust_score) {
@@ -1133,7 +1450,7 @@ function buildFinalCard({
   calibrationSnapshot = null,
   resolutionTarget = null,
   evaluationEligible = false,
-  runtimeTransport = "local",
+  runtimeTransport = "local_core",
   rolloutBucket = null,
 }) {
   const domainConfig = getDomain(normalizedQuery.primary_domain_id, GENERAL_FORECAST_DOMAIN);
@@ -1227,7 +1544,7 @@ function buildFinalCard({
     world_sim: simulationDigest || undefined,
     resolution_target: resolutionTarget || undefined,
     evaluation_eligible: Boolean(evaluationEligible),
-    runtime_transport: safeText(runtimeTransport, "local"),
+    runtime_transport: safeText(runtimeTransport, "local_core"),
     rollout_bucket: rolloutBucket ? safeText(rolloutBucket) : undefined,
     calibration_snapshot: calibrationSnapshot || undefined,
     core_version: CRYSTAL_CORE_VERSION,
@@ -1373,6 +1690,25 @@ async function buildVerifiedEvidencePack(context, { runId, queryText, normalized
   const searchPayload = await fetchSearchSignals(ai, queryText, normalizedQuery, variableSelectionPack);
   liveSignals.push(...searchPayload.signals);
 
+  const connectorPacks = (
+    await Promise.all(
+      [
+        isPolicyLikeQuery(normalizedQuery, domainConfig) ? fetchWikidataEntitySignal(fetchJson, normalizedQuery) : null,
+        isPolicyLikeQuery(normalizedQuery, domainConfig) ? fetchGdeltAttentionSignal(fetchJson, queryText, normalizedQuery) : null,
+        isPolicyLikeQuery(normalizedQuery, domainConfig) ? fetchAllowlistedRssSignal(queryText, normalizedQuery) : null,
+        isMarketLikeQuery(normalizedQuery, domainConfig) ? fetchYahooMarketSignal(queryText, normalizedQuery) : null,
+        isMarketLikeQuery(normalizedQuery, domainConfig) ? fetchFredMacroSignal(fetchJson, queryText, normalizedQuery) : null,
+      ].map((task) => Promise.resolve(task).catch(() => null))
+    )
+  ).filter(Boolean);
+
+  const connectorSignals = connectorPacks.flatMap((pack) => (Array.isArray(pack?.signals) ? pack.signals : []));
+  const connectorTrustMap = connectorPacks.flatMap((pack) =>
+    Array.isArray(pack?.source_trust_map) ? pack.source_trust_map : []
+  );
+  const connectorConflicts = connectorPacks.flatMap((pack) => (Array.isArray(pack?.conflict_map) ? pack.conflict_map : []));
+  liveSignals.push(...connectorSignals);
+
   let predictionMarketFrame = null;
   if (normalizedQuery?.binary_frame?.asks_binary_question) {
     try {
@@ -1406,8 +1742,21 @@ async function buildVerifiedEvidencePack(context, { runId, queryText, normalized
     }
   }
 
-  const sourceTrustMap = buildSourceTrustMap(searchPayload, liveSignals);
-  const conflictMap = Array.isArray(searchPayload.conflict_map) ? searchPayload.conflict_map.slice(0, 4) : [];
+  const sourceTrustMap = buildSourceTrustMap(searchPayload, liveSignals, connectorTrustMap);
+  const conflictMap = uniqueStrings(
+    []
+      .concat(Array.isArray(searchPayload.conflict_map) ? searchPayload.conflict_map.map((item) => JSON.stringify(item)) : [])
+      .concat(connectorConflicts.map((item) => JSON.stringify(item)))
+  )
+    .map((item) => {
+      try {
+        return JSON.parse(item);
+      } catch (_error) {
+        return null;
+      }
+    })
+    .filter(Boolean)
+    .slice(0, 4);
   const missingnessMap = buildMissingnessMap({
     baseline: mainBaseline,
     liveSignals,
@@ -1490,7 +1839,7 @@ async function executeForecastRun(context, payload = {}) {
   const visibility = payload.visibility === "public" ? "public" : "private";
   const engine = safeText(payload.engine, "extended");
   const plan = safeText(payload.plan, "free");
-  const runtimeTransport = safeText(payload.runtimeTransport, "local");
+  const runtimeTransport = safeText(payload.runtimeTransport, "local_core");
   const rolloutBucket = safeText(payload.rolloutBucket);
 
   await writeRunPatch(db, admin, runId, {
