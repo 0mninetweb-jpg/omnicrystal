@@ -520,7 +520,7 @@ async function runResolutionSweep(context, options = {}) {
         0.5
       ),
       card_state: safeText(runDoc?.result_card?.card_state, "limited"),
-      runtime_transport: safeText(runDoc?.runtime_transport, "local"),
+      runtime_transport: safeText(runDoc?.runtime_transport, "local_core"),
       rollout_bucket: safeText(runDoc?.rollout_bucket),
       core_version: safeText(runDoc?.core_version || runDoc?.core_runtime),
       scored: target.target_type === "binary_outcome",

@@ -20,11 +20,62 @@ const runtime = createCrystalCoreRuntime({
 const app = express();
 const ACTIVE_RUNS = new Map();
 const tasksClient = new CloudTasksClient();
+const EXECUTION_LEASE_MS = 2 * 60 * 1000;
 
 app.use(express.json({ limit: "2mb" }));
 
 function safeText(value, fallback = "") {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
+function toInteger(value, fallback = 0) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.trunc(parsed) : fallback;
+}
+
+function serverTimestamp() {
+  return admin.firestore.FieldValue.serverTimestamp();
+}
+
+function deleteField() {
+  return admin.firestore.FieldValue.delete();
+}
+
+function futureTimestamp(ms) {
+  return admin.firestore.Timestamp.fromMillis(Date.now() + Math.max(1, ms));
+}
+
+function getTaskExecutionMetadata(req) {
+  return {
+    taskName: safeText(req.get("X-CloudTasks-TaskName")),
+    retryCount: Math.max(0, toInteger(req.get("X-CloudTasks-TaskRetryCount"), 0)),
+    taskDeliveryCount: Math.max(0, toInteger(req.get("X-CloudTasks-TaskExecutionCount"), 0)),
+  };
+}
+
+function buildRunSeedPatch(runId, payload = {}) {
+  const queryText = safeText(payload.queryText, safeText(payload.query));
+  const queryPlan = payload.queryPlan && typeof payload.queryPlan === "object" ? payload.queryPlan : null;
+  const visibility = payload.visibility === "public" ? "public" : "private";
+  return {
+    run_id: runId,
+    status: "created",
+    current_stage: "created",
+    visibility,
+    access_token: safeText(payload.publicAccessToken) || null,
+    uid: payload.uid || null,
+    source_view: safeText(payload.sourceView, "search"),
+    route_origin: safeText(payload.routeOrigin, "predict"),
+    query_text: queryText,
+    query_plan: queryPlan,
+    user_context: payload.userContext || null,
+    engine: safeText(payload.engine, "extended"),
+    plan: safeText(payload.plan, "free"),
+    runtime_transport: safeText(payload.runtimeTransport, "remote"),
+    rollout_bucket: safeText(payload.rolloutBucket) || null,
+    created_at: serverTimestamp(),
+    updated_at: serverTimestamp(),
+  };
 }
 
 function serializeApiValue(value) {
@@ -68,10 +119,17 @@ function sanitizeRun(runDoc = {}) {
     engine: safeText(runDoc.engine, "extended"),
     plan: safeText(runDoc.plan, "free"),
     error_message: safeText(runDoc.error_message),
-    runtime_transport: safeText(runDoc.runtime_transport, "local"),
+    runtime_transport: safeText(runDoc.runtime_transport, "remote"),
     rollout_bucket: safeText(runDoc.rollout_bucket),
     evaluation_eligible: Boolean(runDoc.evaluation_eligible),
     resolution_status: safeText(runDoc.resolution_status),
+    attempt_count: Math.max(0, toInteger(runDoc.attempt_count, 0)),
+    task_delivery_count: Math.max(0, toInteger(runDoc.task_delivery_count, 0)),
+    last_error_code: safeText(runDoc.last_error_code),
+    last_error_message: safeText(runDoc.last_error_message),
+    last_error_stage: safeText(runDoc.last_error_stage),
+    last_provider: safeText(runDoc.last_provider),
+    execution_state: safeText(runDoc.execution_state),
     created_at: serializeApiValue(runDoc.created_at),
     started_at: serializeApiValue(runDoc.started_at),
     updated_at: serializeApiValue(runDoc.updated_at),
@@ -85,6 +143,151 @@ function sanitizeRun(runDoc = {}) {
 async function readRun(runId) {
   const snapshot = await db.collection("forecast_runs").doc(runId).get();
   return snapshot.exists ? snapshot.data() || null : null;
+}
+
+async function prepareRunForEnqueue(runId, payload = {}, existingRun = null) {
+  const docRef = db.collection("forecast_runs").doc(runId);
+  const seedPatch = buildRunSeedPatch(runId, payload);
+  if (!existingRun) {
+    await docRef.set(seedPatch, { merge: true });
+    return { ...seedPatch };
+  }
+
+  const mergePatch = {};
+  if (!safeText(existingRun.query_text) && safeText(seedPatch.query_text)) {
+    mergePatch.query_text = seedPatch.query_text;
+  }
+  if ((!existingRun.query_plan || typeof existingRun.query_plan !== "object") && seedPatch.query_plan) {
+    mergePatch.query_plan = seedPatch.query_plan;
+  }
+  if (!safeText(existingRun.source_view) && safeText(seedPatch.source_view)) {
+    mergePatch.source_view = seedPatch.source_view;
+  }
+  if (!safeText(existingRun.route_origin) && safeText(seedPatch.route_origin)) {
+    mergePatch.route_origin = seedPatch.route_origin;
+  }
+  if (!safeText(existingRun.runtime_transport) && safeText(seedPatch.runtime_transport)) {
+    mergePatch.runtime_transport = seedPatch.runtime_transport;
+  }
+  if (!safeText(existingRun.engine) && safeText(seedPatch.engine)) {
+    mergePatch.engine = seedPatch.engine;
+  }
+  if (!safeText(existingRun.plan) && safeText(seedPatch.plan)) {
+    mergePatch.plan = seedPatch.plan;
+  }
+  if (!existingRun.created_at) {
+    mergePatch.created_at = seedPatch.created_at;
+  }
+  if (Object.keys(mergePatch).length > 0) {
+    mergePatch.updated_at = serverTimestamp();
+    await docRef.set(mergePatch, { merge: true });
+  }
+  return { ...existingRun, ...mergePatch };
+}
+
+async function claimRunExecution(runId, req) {
+  const docRef = db.collection("forecast_runs").doc(runId);
+  const taskMeta = getTaskExecutionMetadata(req);
+  return db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(docRef);
+    if (!snapshot.exists) {
+      return { status: "not_found" };
+    }
+    const runDoc = snapshot.data() || {};
+    const status = safeText(runDoc.status, "created");
+    if (["completed", "failed", "canceled"].includes(status)) {
+      return { status: "terminal", runDoc };
+    }
+
+    const leaseExpiresAt =
+      typeof runDoc.execution_lock_expires_at?.toMillis === "function" ? runDoc.execution_lock_expires_at.toMillis() : 0;
+    if (safeText(runDoc.execution_state) === "running" && leaseExpiresAt > Date.now()) {
+      return { status: "already_running", runDoc };
+    }
+
+    const attemptCount = Math.max(0, toInteger(runDoc.attempt_count, 0)) + 1;
+    transaction.set(
+      docRef,
+      {
+        status: status === "created" || status === "queued" ? "running" : status,
+        execution_state: "running",
+        execution_lock_expires_at: futureTimestamp(EXECUTION_LEASE_MS),
+        attempt_count: attemptCount,
+        task_delivery_count: Math.max(Math.max(0, toInteger(runDoc.task_delivery_count, 0)), taskMeta.taskDeliveryCount),
+        queue_task_name: taskMeta.taskName || safeText(runDoc.queue_task_name) || null,
+        last_attempt_at: serverTimestamp(),
+        updated_at: serverTimestamp(),
+      },
+      { merge: true }
+    );
+
+    return {
+      status: "claimed",
+      runDoc: {
+        ...runDoc,
+        status: status === "created" || status === "queued" ? "running" : status,
+        execution_state: "running",
+        attempt_count: attemptCount,
+        task_delivery_count: Math.max(Math.max(0, toInteger(runDoc.task_delivery_count, 0)), taskMeta.taskDeliveryCount),
+        queue_task_name: taskMeta.taskName || safeText(runDoc.queue_task_name) || null,
+      },
+      taskMeta,
+    };
+  });
+}
+
+async function releaseRunExecution(runId, patch = {}) {
+  await db.collection("forecast_runs").doc(runId).set(
+    {
+      execution_state: "idle",
+      execution_lock_expires_at: deleteField(),
+      updated_at: serverTimestamp(),
+      ...patch,
+    },
+    { merge: true }
+  );
+}
+
+function normalizeRunError(error, fallbackStage = "") {
+  const message = error instanceof Error ? error.message : String(error || "Crystal core execution failed.");
+  const details = error && typeof error === "object" ? error.details || {} : {};
+  return {
+    code: safeText(error?.code, "crystal-core-run-failed"),
+    message: safeText(message, "Crystal core execution failed."),
+    stage: safeText(error?.stage, safeText(details?.stage, fallbackStage)),
+    provider: safeText(error?.provider, safeText(details?.provider)),
+  };
+}
+
+async function markRunTerminalFailure(runId, error, metadata = {}) {
+  const normalized = normalizeRunError(error, safeText(metadata.stage, "execution"));
+  await db.collection("forecast_runs").doc(runId).set(
+    {
+      status: "failed",
+      current_stage: "failed",
+      completed_at: serverTimestamp(),
+      updated_at: serverTimestamp(),
+      error_message: normalized.message,
+      error_code: normalized.code,
+      last_error_code: normalized.code,
+      last_error_message: normalized.message,
+      last_error_stage: normalized.stage || null,
+      last_provider: normalized.provider || null,
+      last_attempt_at: serverTimestamp(),
+      execution_state: "idle",
+      execution_lock_expires_at: deleteField(),
+      task_delivery_count:
+        metadata.taskDeliveryCount === undefined
+          ? undefined
+          : Math.max(0, toInteger(metadata.taskDeliveryCount, 0)),
+      attempt_count:
+        metadata.attemptCount === undefined
+          ? undefined
+          : Math.max(0, toInteger(metadata.attemptCount, 0)),
+    },
+    { merge: true }
+  );
+  return normalized;
 }
 
 function getProjectId() {
@@ -165,7 +368,7 @@ async function enqueueForecastRun(req, runDoc = {}) {
       routeOrigin: safeText(runDoc.route_origin, "predict"),
       engine: safeText(runDoc.engine, "extended"),
       plan: safeText(runDoc.plan, "free"),
-      runtimeTransport: safeText(runDoc.runtime_transport, "local"),
+      runtimeTransport: safeText(runDoc.runtime_transport, "remote"),
       rolloutBucket: safeText(runDoc.rollout_bucket),
     });
     return {
@@ -277,12 +480,9 @@ app.post("/v1/runs", async (req, res) => {
       return;
     }
 
-    const existingRun = (await readRun(runId)) || {
-      run_id: runId,
-      status: "created",
-      current_stage: "created",
-    };
-    await enqueueForecastRun(req, existingRun);
+    const existingRun = await readRun(runId);
+    const preparedRun = await prepareRunForEnqueue(runId, payload, existingRun);
+    await enqueueForecastRun(req, preparedRun);
 
     const waitMs = Math.min(Math.max(Number(payload.waitMs) || 8000, 0), 15000);
     const runDoc = await waitForRun(runId, waitMs);
@@ -329,8 +529,8 @@ app.post("/v1/internal/execute/:runId", async (req, res) => {
     return;
   }
 
-  const runDoc = await readRun(runId);
-  if (!runDoc) {
+  const claim = await claimRunExecution(runId, req);
+  if (claim.status === "not_found") {
     res.status(404).json({
       ok: false,
       error: "Run not found.",
@@ -338,14 +538,25 @@ app.post("/v1/internal/execute/:runId", async (req, res) => {
     return;
   }
 
-  if (["completed", "failed", "canceled"].includes(safeText(runDoc.status))) {
+  if (claim.status === "terminal") {
     res.json({
       ok: true,
-      status: safeText(runDoc.status),
+      status: safeText(claim.runDoc?.status),
       run_id: runId,
     });
     return;
   }
+
+  if (claim.status === "already_running") {
+    res.json({
+      ok: true,
+      status: "running",
+      run_id: runId,
+    });
+    return;
+  }
+
+  const runDoc = claim.runDoc || (await readRun(runId));
 
   try {
     await launchRunInProcess({
@@ -363,15 +574,36 @@ app.post("/v1/internal/execute/:runId", async (req, res) => {
       runtimeTransport: safeText(runDoc.runtime_transport, "remote"),
       rolloutBucket: safeText(runDoc.rollout_bucket),
     });
+    await releaseRunExecution(runId);
+    const finalRun = await readRun(runId);
     res.json({
       ok: true,
-      status: "completed",
+      status: safeText(finalRun?.status, "completed"),
       run_id: runId,
     });
   } catch (error) {
-    res.status(500).json({
+    const currentRun = await readRun(runId);
+    const isTerminal = ["completed", "failed", "canceled"].includes(safeText(currentRun?.status));
+    const normalized = isTerminal
+      ? normalizeRunError(error, safeText(currentRun?.current_stage, "execution"))
+      : await markRunTerminalFailure(runId, error, {
+          stage: safeText(currentRun?.current_stage, "execution"),
+          attemptCount: claim.runDoc?.attempt_count,
+          taskDeliveryCount: claim.taskMeta?.taskDeliveryCount,
+        });
+    if (isTerminal) {
+      await releaseRunExecution(runId, {
+        last_error_code: normalized.code,
+        last_error_message: normalized.message,
+        last_error_stage: normalized.stage || null,
+        last_provider: normalized.provider || null,
+        last_attempt_at: serverTimestamp(),
+      });
+    }
+    res.json({
       ok: false,
-      error: error instanceof Error ? error.message : "Run execution failed.",
+      status: "failed",
+      error: normalized.message,
       run_id: runId,
     });
   }

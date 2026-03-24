@@ -7,7 +7,7 @@ const { defineSecret } = require("firebase-functions/params");
 const { GoogleAuth } = require("google-auth-library");
 const googleTrends = require("google-trends-api");
 const Stripe = require("stripe");
-const { createLlmRuntime } = require("./llmRuntime");
+const { createLlmRuntime, isRetryableRuntimeError } = require("./llmRuntime");
 const {
   createManualWorldSimJob,
   createMatrixSimulationJob,
@@ -1396,20 +1396,64 @@ async function fetchJson(url, options = {}) {
 }
 
 async function withRetry(fn, retries = 2, delayMs = 2000) {
-  try {
-    return await fn();
-  } catch (error) {
-    const code = typeof error?.code === "string" ? error.code : "";
-    const message = error instanceof Error ? error.message : String(error);
-    const isQuotaError =
-      code === "provider-rate-limited" ||
-      message.includes("429") ||
-      message.includes("RESOURCE_EXHAUSTED");
-    if (isQuotaError && retries > 0) {
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
-      return withRetry(fn, retries - 1, delayMs * 2);
+  const options =
+    typeof retries === "object" && retries !== null
+      ? retries
+      : {
+          retries,
+          baseDelayMs: delayMs,
+        };
+  const attempts = Math.max(0, Number(options.retries ?? 2) || 0);
+  const baseDelayMs = Math.max(150, Number(options.baseDelayMs ?? delayMs ?? 2000) || 2000);
+  const maxDelayMs = Math.max(baseDelayMs, Number(options.maxDelayMs ?? baseDelayMs * 4) || baseDelayMs * 4);
+  const jitterRatio = Math.max(0, Math.min(0.5, Number(options.jitterRatio ?? 0.2) || 0.2));
+  const timeoutMs = Number(options.timeoutMs);
+  const stage = safeText(options.stage, "retryable_operation");
+  const onRetry = typeof options.onRetry === "function" ? options.onRetry : null;
+  const isRetryable = typeof options.isRetryable === "function" ? options.isRetryable : isRetryableRuntimeError;
+
+  let attempt = 0;
+  while (true) {
+    try {
+      if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
+        let timer = null;
+        try {
+          return await Promise.race([
+            Promise.resolve().then(() => fn()),
+            new Promise((_, reject) => {
+              timer = setTimeout(() => {
+                const error = new Error(`Operation timed out during ${stage} after ${timeoutMs}ms.`);
+                error.code = "stage-timeout";
+                error.status = 503;
+                error.details = { stage, timeout_ms: timeoutMs };
+                reject(error);
+              }, timeoutMs);
+            }),
+          ]);
+        } finally {
+          if (timer) clearTimeout(timer);
+        }
+      }
+      return await fn();
+    } catch (error) {
+      const canRetry = attempt < attempts && isRetryable(error);
+      if (!canRetry) {
+        throw error;
+      }
+      const backoffBase = Math.min(maxDelayMs, Math.round(baseDelayMs * Math.pow(2, attempt)));
+      const jitter = Math.round(backoffBase * jitterRatio * Math.random());
+      const waitMs = backoffBase + jitter;
+      attempt += 1;
+      if (onRetry) {
+        await onRetry({
+          attempt,
+          waitMs,
+          stage,
+          error,
+        });
+      }
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
     }
-    throw error;
   }
 }
 
@@ -1657,6 +1701,13 @@ function sanitizeForecastRunForApi(runDoc = {}) {
     rollout_bucket: safeText(runDoc?.rollout_bucket),
     evaluation_eligible: Boolean(runDoc?.evaluation_eligible),
     resolution_status: safeText(runDoc?.resolution_status),
+    attempt_count: Math.max(0, Number(runDoc?.attempt_count || 0) || 0),
+    task_delivery_count: Math.max(0, Number(runDoc?.task_delivery_count || 0) || 0),
+    last_error_code: safeText(runDoc?.last_error_code),
+    last_error_message: safeText(runDoc?.last_error_message),
+    last_error_stage: safeText(runDoc?.last_error_stage),
+    last_provider: safeText(runDoc?.last_provider),
+    execution_state: safeText(runDoc?.execution_state),
     created_at: serializeApiValue(runDoc?.created_at),
     started_at: serializeApiValue(runDoc?.started_at),
     updated_at: serializeApiValue(runDoc?.updated_at),
@@ -1981,6 +2032,57 @@ async function getCrystalCoreHealth() {
     transport: "local",
     rollout: await getRuntimeRolloutConfig(),
     ...localHealth,
+  };
+}
+
+function mergeRuntimeSourceHealth(baseSummary = {}, crystalCoreHealth = {}) {
+  const implementedIds = new Set(
+    Array.isArray(crystalCoreHealth?.implemented_sources)
+      ? crystalCoreHealth.implemented_sources.map((item) => safeText(item)).filter(Boolean)
+      : []
+  );
+  if (!implementedIds.size) {
+    return baseSummary;
+  }
+
+  const runtimeTitles = {
+    google_trends: "Google Trends",
+    yahoo_finance: "Yahoo Finance",
+  };
+  const connectors = Array.isArray(baseSummary?.connectors)
+    ? baseSummary.connectors.map((connector) => {
+        const sourceId = safeText(connector?.source_id);
+        if (!implementedIds.has(sourceId)) {
+          return connector;
+        }
+        return {
+          ...connector,
+          implementation_status: "implemented",
+        };
+      })
+    : [];
+  const knownSourceIds = new Set(connectors.map((connector) => safeText(connector?.source_id)).filter(Boolean));
+  for (const sourceId of implementedIds) {
+    if (knownSourceIds.has(sourceId)) {
+      continue;
+    }
+    connectors.push({
+      source_id: sourceId,
+      title: runtimeTitles[sourceId] || sourceId,
+      category: "runtime",
+      implementation_status: "implemented",
+      status: "runtime_only",
+    });
+  }
+  const implementedSources = connectors.filter((connector) => safeText(connector?.implementation_status) === "implemented").length;
+  const registryOnlySources = connectors.filter((connector) => safeText(connector?.implementation_status) !== "implemented").length;
+
+  return {
+    ...baseSummary,
+    approvedSources: connectors.length,
+    implementedSources,
+    registryOnlySources,
+    connectors,
   };
 }
 
@@ -3216,7 +3318,7 @@ exports.api = onRequest(
           const worldSimHealth = await getWorldSimRuntimeHealth({ fetchJson });
           const sportsHealth = getSportsRuntimeHealth();
           const coverageSnapshot = getCoverageSnapshot();
-          const sourceHealth = getSourceHealthSummary();
+          const sourceHealth = mergeRuntimeSourceHealth(getSourceHealthSummary(), crystalCoreHealth);
           respondJson(res, 200, {
             ok: true,
             timestamp: new Date().toISOString(),

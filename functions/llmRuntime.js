@@ -24,6 +24,12 @@ const DEFAULT_MAX_TOKENS = {
   copy: 1200,
   repair: 768,
 };
+const RETRYABLE_RUNTIME_ERROR_CODES = new Set([
+  "provider-rate-limited",
+  "provider-upstream-error",
+  "provider-fallback-failed",
+  "forecast-runtime-not-configured",
+]);
 
 function safeText(value, fallback = "") {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
@@ -201,6 +207,27 @@ function serializeError(error) {
   };
 }
 
+function isRetryableRuntimeError(error) {
+  const code = safeText(error?.code);
+  if (RETRYABLE_RUNTIME_ERROR_CODES.has(code)) {
+    return true;
+  }
+
+  const status = Number(error?.status);
+  if (Number.isFinite(status) && status >= 500) {
+    return true;
+  }
+
+  const message = safeText(error instanceof Error ? error.message : String(error)).toLowerCase();
+  return (
+    message.includes("resource_exhausted") ||
+    message.includes("rate limited") ||
+    message.includes("temporarily unavailable") ||
+    message.includes("unexpected end of json input") ||
+    message.includes("unavailable")
+  );
+}
+
 function normalizeProviderException(provider, error) {
   if (error?.code && error?.status) {
     return error;
@@ -209,10 +236,36 @@ function normalizeProviderException(provider, error) {
   const message = error instanceof Error ? error.message : String(error);
   const normalized = message.toLowerCase();
 
-  if (normalized.includes("resource_exhausted") || normalized.includes("quota")) {
+  if (
+    normalized.includes("resource_exhausted") ||
+    normalized.includes("quota") ||
+    normalized.includes("rate limit") ||
+    normalized.includes("too many requests")
+  ) {
     return createRuntimeError(
       `Forecast temporarily unavailable. ${provider === "gemini" ? "Gemini" : "The provider"} is rate limited right now.`,
       "provider-rate-limited",
+      503,
+      {
+        provider,
+        upstreamMessage: message,
+      },
+      error
+    );
+  }
+
+  if (
+    normalized.includes("unexpected end of json input") ||
+    normalized.includes("unavailable") ||
+    normalized.includes("temporarily unavailable") ||
+    normalized.includes("\"status\":\"unavailable\"") ||
+    normalized.includes("\"code\":503") ||
+    normalized.includes("status code 503") ||
+    normalized.includes("internal server error")
+  ) {
+    return createRuntimeError(
+      "Unable to generate the forecast right now. Please retry in a moment.",
+      "provider-upstream-error",
       503,
       {
         provider,
@@ -361,7 +414,12 @@ async function callOpenRouter(config, { model, messages, expectJson = false, tem
     throw buildOpenRouterError(response, message);
   }
 
-  const data = await response.json();
+  let data;
+  try {
+    data = await response.json();
+  } catch (error) {
+    throw normalizeProviderException(config.provider, error);
+  }
   const text = data?.choices
     ?.map((choice) => contentToString(choice?.message?.content))
     .filter(Boolean)
@@ -1213,4 +1271,5 @@ function createLlmRuntime({ getGeminiApiKey } = {}) {
 
 module.exports = {
   createLlmRuntime,
+  isRetryableRuntimeError,
 };

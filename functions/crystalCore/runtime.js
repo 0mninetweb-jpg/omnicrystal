@@ -3,7 +3,7 @@ const googleTrends = require("google-trends-api");
 const { GoogleGenAI, Type } = require("@google/genai");
 const yahooFinance = require("yahoo-finance2").default;
 
-const { createLlmRuntime } = require("../llmRuntime");
+const { createLlmRuntime, isRetryableRuntimeError } = require("../llmRuntime");
 const {
   GENERAL_FORECAST_DOMAIN,
   CATALOG_VERSION_ID,
@@ -45,6 +45,21 @@ const JSON_STAGE_MAX_TOKENS = {
   dossier: 1400,
   verbalizer: 900,
 };
+const EXECUTION_BUDGET_MS = 90 * 1000;
+const STAGE_RETRY_POLICY = {
+  planner: { retries: 2, baseDelayMs: 1200, timeoutMs: 18 * 1000 },
+  dossier: { retries: 2, baseDelayMs: 1500, timeoutMs: 24 * 1000 },
+  verbalizer: { retries: 2, baseDelayMs: 1200, timeoutMs: 18 * 1000 },
+};
+const RUNTIME_IMPLEMENTED_SOURCE_IDS = [
+  "open_meteo",
+  "polymarket_public",
+  "wikidata",
+  "gdelt",
+  "rss_allowlist",
+  "google_trends",
+  "yahoo_finance",
+];
 const PLANNER_RESPONSE_SCHEMA = {
   type: "object",
   properties: {
@@ -215,6 +230,74 @@ function truncateTextForPrompt(value, maxLength = 900) {
 
 function serverTimestamp(admin) {
   return admin?.firestore?.FieldValue?.serverTimestamp ? admin.firestore.FieldValue.serverTimestamp() : nowIso();
+}
+
+function deleteSentinel(admin) {
+  return admin?.firestore?.FieldValue?.delete ? admin.firestore.FieldValue.delete() : null;
+}
+
+function createStageTimeoutError(stage, timeoutMs) {
+  const error = new Error(`Crystal core timed out during ${safeText(stage, "stage")} after ${timeoutMs}ms.`);
+  error.code = "stage-timeout";
+  error.status = 503;
+  error.details = {
+    stage: safeText(stage, "stage"),
+    timeout_ms: timeoutMs,
+  };
+  return error;
+}
+
+function getImplementedSourceIds() {
+  const ids = new Set(RUNTIME_IMPLEMENTED_SOURCE_IDS);
+  if (safeText(process.env.FRED_API_KEY)) {
+    ids.add("fred_api");
+  }
+  return Array.from(ids);
+}
+
+function buildRuntimeGroundingSummary() {
+  return uniqueStrings([
+    "historical-cache",
+    "google-trends",
+    "polymarket",
+    "wikidata",
+    "gdelt",
+    "rss_allowlist",
+    "yahoo_finance",
+    safeText(process.env.FRED_API_KEY) ? "fred_api" : "",
+  ]).filter(Boolean);
+}
+
+function logCoreEvent(event, payload = {}) {
+  console.log("crystal-core-event", {
+    event: safeText(event, "unknown"),
+    timestamp: nowIso(),
+    ...payload,
+  });
+}
+
+async function runWithStageTimeout(fn, timeoutMs, stage) {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    return fn();
+  }
+
+  let timer = null;
+  try {
+    return await Promise.race([
+      Promise.resolve().then(() => fn()),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(createStageTimeoutError(stage, timeoutMs)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+function ensureExecutionBudget(deadlineAt, stage) {
+  if (Date.now() > deadlineAt) {
+    throw createStageTimeoutError(stage || "execution_budget", EXECUTION_BUDGET_MS);
+  }
 }
 
 async function writeRunPatch(db, admin, runId, patch = {}) {
@@ -1808,10 +1891,10 @@ async function buildVerifiedEvidencePack(context, { runId, queryText, normalized
   return verifiedEvidencePack;
 }
 
-async function compileQueryEdge(context, queryText) {
+async function compileQueryEdge(context, queryText, options = {}) {
   const { llmRuntime, withRetry } = context;
   const routingHints = buildRoutingHints(queryText);
-  const payload = await withRetry(() =>
+  const generatePlannerPayload = () =>
     llmRuntime.generateJson({
       modelKind: "query",
       temperature: 0,
@@ -1821,8 +1904,15 @@ async function compileQueryEdge(context, queryText) {
       maxTokens: JSON_STAGE_MAX_TOKENS.planner,
       jsonStage: "planner",
       preferTextMode: true,
-    })
-  );
+    });
+  const payload =
+    options.disableRetry === true
+      ? await runWithStageTimeout(generatePlannerPayload, STAGE_RETRY_POLICY.planner.timeoutMs, "planner")
+      : await withRetry(generatePlannerPayload, {
+          ...STAGE_RETRY_POLICY.planner,
+          label: "planner",
+          stage: "planner",
+        });
 
   return normalizePlannerStagePayload(payload, {
     fallbackDomain: routingHints.primaryDomainId || GENERAL_FORECAST_DOMAIN,
@@ -1841,6 +1931,8 @@ async function executeForecastRun(context, payload = {}) {
   const plan = safeText(payload.plan, "free");
   const runtimeTransport = safeText(payload.runtimeTransport, "local_core");
   const rolloutBucket = safeText(payload.rolloutBucket);
+  const runDeadlineAt = Date.now() + EXECUTION_BUDGET_MS;
+  const clearField = deleteSentinel(admin);
 
   await writeRunPatch(db, admin, runId, {
     run_id: runId,
@@ -1860,6 +1952,10 @@ async function executeForecastRun(context, payload = {}) {
     rollout_bucket: rolloutBucket || null,
     core_version: CRYSTAL_CORE_VERSION,
     core_runtime: CRYSTAL_CORE_VERSION,
+    last_error_code: clearField,
+    last_error_message: clearField,
+    last_error_stage: clearField,
+    last_provider: clearField,
   });
   await writeArtifact(db, admin, runId, "orchestrator_plan", {
     depth_mode: "deep",
@@ -1867,12 +1963,40 @@ async function executeForecastRun(context, payload = {}) {
     plan,
     source_view: safeText(payload.sourceView, "search"),
   });
+  logCoreEvent("run_started", {
+    runId,
+    transport: runtimeTransport,
+    engine,
+    plan,
+    query: queryText.slice(0, 140),
+  });
 
   try {
     let normalizedQuery = payload.queryPlan && typeof payload.queryPlan === "object" ? payload.queryPlan : null;
     if (!normalizedQuery || !safeText(normalizedQuery.primary_domain_id || normalizedQuery.domain_id || normalizedQuery.domain)) {
       await ensureRunActive(db, runId);
-      normalizedQuery = await compileQueryEdge(context, queryText);
+      ensureExecutionBudget(runDeadlineAt, "query_domain_agent");
+      const queryStageStartedAt = Date.now();
+      normalizedQuery = await withRetry(() => compileQueryEdge(context, queryText, { disableRetry: true }), {
+        ...STAGE_RETRY_POLICY.planner,
+        label: "planner",
+        stage: "query_domain_agent",
+        onRetry: ({ attempt, error, nextDelayMs }) => {
+          logCoreEvent("stage_retry", {
+            runId,
+            stage: "query_domain_agent",
+            attempt,
+            next_delay_ms: nextDelayMs,
+            error_code: safeText(error?.code),
+            provider: safeText(error?.details?.provider),
+          });
+        },
+      });
+      logCoreEvent("stage_completed", {
+        runId,
+        stage: "query_domain_agent",
+        duration_ms: Date.now() - queryStageStartedAt,
+      });
     }
 
     await writeRunPatch(db, admin, runId, {
@@ -1891,12 +2015,20 @@ async function executeForecastRun(context, payload = {}) {
     await writeArtifact(db, admin, runId, "variable_selection_pack", variable_selection_pack);
 
     await ensureRunActive(db, runId);
+    ensureExecutionBudget(runDeadlineAt, "evidence_verification_agent");
+    const evidenceStageStartedAt = Date.now();
     const verifiedEvidencePack = await buildVerifiedEvidencePack(context, {
       runId,
       queryText,
       normalizedQuery,
       variableSelectionPack: variable_selection_pack,
       engine,
+    });
+    logCoreEvent("stage_completed", {
+      runId,
+      stage: "evidence_verification_agent",
+      duration_ms: Date.now() - evidenceStageStartedAt,
+      source_count: Number(verifiedEvidencePack?.evidence_quality?.source_count || 0),
     });
     const baselineConsensusPack = buildBaselineConsensusPack({
       verifiedEvidencePack,
@@ -1908,27 +2040,55 @@ async function executeForecastRun(context, payload = {}) {
         current_stage: "dossier_prediction_agent",
       });
       await ensureRunActive(db, runId);
+      ensureExecutionBudget(runDeadlineAt, "dossier_prediction_agent");
       let dossierPredictionPayload;
       let dossierFallbackActivated = false;
       try {
-        dossierPredictionPayload = await withRetry(() =>
-          llmRuntime.generateJson({
-            modelKind: "forecast",
-            temperature: 0.1,
-            systemInstruction:
-              "You are Crystal's Dossier and Prediction Agent. Return exactly one JSON object. Stay concrete, directional, and grounded in the supplied evidence.",
-            prompt: buildDossierPredictionPrompt({
-              queryText,
-              normalizedQuery,
-              variableSelectionPack: variable_selection_pack,
-              verifiedEvidencePack,
-              baselineConsensusPack,
-            }),
-            maxTokens: JSON_STAGE_MAX_TOKENS.dossier,
-            jsonStage: "dossier",
-            preferTextMode: true,
-          })
+        const dossierStageStartedAt = Date.now();
+        dossierPredictionPayload = await withRetry(
+          () =>
+            runWithStageTimeout(
+              () =>
+                llmRuntime.generateJson({
+                  modelKind: "forecast",
+                  temperature: 0.1,
+                  systemInstruction:
+                    "You are Crystal's Dossier and Prediction Agent. Return exactly one JSON object. Stay concrete, directional, and grounded in the supplied evidence.",
+                  prompt: buildDossierPredictionPrompt({
+                    queryText,
+                    normalizedQuery,
+                    variableSelectionPack: variable_selection_pack,
+                    verifiedEvidencePack,
+                    baselineConsensusPack,
+                  }),
+                  maxTokens: JSON_STAGE_MAX_TOKENS.dossier,
+                  jsonStage: "dossier",
+                  preferTextMode: true,
+                }),
+              STAGE_RETRY_POLICY.dossier.timeoutMs,
+              "dossier"
+            ),
+          {
+            ...STAGE_RETRY_POLICY.dossier,
+            label: "dossier",
+            stage: "dossier_prediction_agent",
+            onRetry: ({ attempt, error, nextDelayMs }) => {
+              logCoreEvent("stage_retry", {
+                runId,
+                stage: "dossier_prediction_agent",
+                attempt,
+                next_delay_ms: nextDelayMs,
+                error_code: safeText(error?.code),
+                provider: safeText(error?.details?.provider),
+              });
+            },
+          }
         );
+        logCoreEvent("stage_completed", {
+          runId,
+          stage: "dossier_prediction_agent",
+          duration_ms: Date.now() - dossierStageStartedAt,
+        });
       } catch (error) {
         dossierFallbackActivated = true;
         dossierPredictionPayload = buildFallbackDossierPrediction({
@@ -1970,6 +2130,8 @@ async function executeForecastRun(context, payload = {}) {
     let simulationContract = buildMiroFishOutputContract(null, simulationGate);
     if (simulationGate.enabled) {
       await ensureRunActive(db, runId);
+      ensureExecutionBudget(runDeadlineAt, "simulation_decision_gate");
+      const simulationStageStartedAt = Date.now();
       simulationDigest = await getWorldSimDigest({
         ai: context.ai,
         db,
@@ -1986,6 +2148,12 @@ async function executeForecastRun(context, payload = {}) {
       });
       simulationContract = buildMiroFishOutputContract(simulationDigest, simulationGate);
       await writeArtifact(db, admin, runId, "mirofish_output_contract", simulationContract);
+      logCoreEvent("stage_completed", {
+        runId,
+        stage: "simulation_decision_gate",
+        duration_ms: Date.now() - simulationStageStartedAt,
+        simulation_status: safeText(simulationContract?.simulation_status, "completed"),
+      });
     }
 
     const rawPrediction = applySimulationFusion(dossierPrediction?.raw_prediction || {}, simulationContract);
@@ -2039,23 +2207,51 @@ async function executeForecastRun(context, payload = {}) {
       let voicePayloadRaw;
       let voiceFallbackActivated = false;
       try {
-        voicePayloadRaw = await withRetry(() =>
-          llmRuntime.generateJson({
-            modelKind: "forecast",
-            temperature: 0.15,
-            systemInstruction:
-              "You write Crystal prediction cards. Return exactly one JSON object. Put the call first, keep the tone precise, and never hide the thesis behind vague uncertainty copy.",
-            prompt: buildForecastVerbalizationPrompt({
-              queryText,
-              normalizedQuery,
-              verifiedEvidencePack,
-              scorecard: finalizedScorecard,
-            }),
-            maxTokens: JSON_STAGE_MAX_TOKENS.verbalizer,
-            jsonStage: "verbalizer",
-            preferTextMode: true,
-          })
+        ensureExecutionBudget(runDeadlineAt, "card_generation");
+        const verbalizerStageStartedAt = Date.now();
+        voicePayloadRaw = await withRetry(
+          () =>
+            runWithStageTimeout(
+              () =>
+                llmRuntime.generateJson({
+                  modelKind: "forecast",
+                  temperature: 0.15,
+                  systemInstruction:
+                    "You write Crystal prediction cards. Return exactly one JSON object. Put the call first, keep the tone precise, and never hide the thesis behind vague uncertainty copy.",
+                  prompt: buildForecastVerbalizationPrompt({
+                    queryText,
+                    normalizedQuery,
+                    verifiedEvidencePack,
+                    scorecard: finalizedScorecard,
+                  }),
+                  maxTokens: JSON_STAGE_MAX_TOKENS.verbalizer,
+                  jsonStage: "verbalizer",
+                  preferTextMode: true,
+                }),
+              STAGE_RETRY_POLICY.verbalizer.timeoutMs,
+              "verbalizer"
+            ),
+          {
+            ...STAGE_RETRY_POLICY.verbalizer,
+            label: "verbalizer",
+            stage: "card_generation",
+            onRetry: ({ attempt, error, nextDelayMs }) => {
+              logCoreEvent("stage_retry", {
+                runId,
+                stage: "card_generation",
+                attempt,
+                next_delay_ms: nextDelayMs,
+                error_code: safeText(error?.code),
+                provider: safeText(error?.details?.provider),
+              });
+            },
+          }
         );
+        logCoreEvent("stage_completed", {
+          runId,
+          stage: "card_generation",
+          duration_ms: Date.now() - verbalizerStageStartedAt,
+        });
       } catch (error) {
         voiceFallbackActivated = true;
         voicePayloadRaw = buildFallbackVoicePayload({
@@ -2107,6 +2303,16 @@ async function executeForecastRun(context, payload = {}) {
       runtime_transport: runtimeTransport,
       rollout_bucket: rolloutBucket || null,
       core_version: CRYSTAL_CORE_VERSION,
+      last_error_code: clearField,
+      last_error_message: clearField,
+      last_error_stage: clearField,
+      last_provider: clearField,
+    });
+    logCoreEvent("run_completed", {
+      runId,
+      transport: runtimeTransport,
+      publication_state: safeText(card?.card_state),
+      domain: safeText(card?.domain),
     });
 
     return {
@@ -2122,6 +2328,22 @@ async function executeForecastRun(context, payload = {}) {
       completed_at: serverTimestamp(admin),
       error_message: error instanceof Error ? error.message : "Crystal core failed.",
       error_code: safeText(error?.code, "crystal-core-error"),
+      last_error_code: safeText(error?.code, "crystal-core-error"),
+      last_error_message: error instanceof Error ? error.message : "Crystal core failed.",
+      last_error_stage: safeText(error?.details?.stage || error?.details?.json_stage || error?.stage, "unknown"),
+      last_provider: safeText(
+        error?.details?.provider || error?.details?.primaryProvider || error?.details?.fallbackProvider,
+        ""
+      ),
+      last_attempt_at: serverTimestamp(admin),
+    });
+    logCoreEvent("run_failed", {
+      runId,
+      transport: runtimeTransport,
+      error_code: safeText(error?.code, "crystal-core-error"),
+      error_stage: safeText(error?.details?.stage || error?.details?.json_stage || error?.stage, "unknown"),
+      provider: safeText(error?.details?.provider || error?.details?.primaryProvider || error?.details?.fallbackProvider),
+      message: error instanceof Error ? error.message : String(error),
     });
     throw error;
   }
@@ -2135,14 +2357,63 @@ function createCrystalCoreRuntime(config = {}) {
     });
   const withRetry =
     config.withRetry ||
-    (async function retry(fn, retries = 2, delayMs = 1200) {
-      try {
-        return await fn();
-      } catch (error) {
-        if (retries <= 0) throw error;
-        await new Promise((resolve) => setTimeout(resolve, delayMs));
-        return retry(fn, retries - 1, delayMs);
+    (async function retry(fn, optionsOrRetries = 2, delayMs = 1200) {
+      const options =
+        typeof optionsOrRetries === "object" && optionsOrRetries !== null
+          ? {
+              retries: Number.isFinite(Number(optionsOrRetries.retries)) ? Number(optionsOrRetries.retries) : 2,
+              baseDelayMs: Number.isFinite(Number(optionsOrRetries.baseDelayMs))
+                ? Number(optionsOrRetries.baseDelayMs)
+                : delayMs,
+              maxDelayMs: Number.isFinite(Number(optionsOrRetries.maxDelayMs))
+                ? Number(optionsOrRetries.maxDelayMs)
+                : 10_000,
+              jitterRatio:
+                Number.isFinite(Number(optionsOrRetries.jitterRatio)) && Number(optionsOrRetries.jitterRatio) >= 0
+                  ? Number(optionsOrRetries.jitterRatio)
+                  : 0.25,
+              timeoutMs: Number.isFinite(Number(optionsOrRetries.timeoutMs))
+                ? Number(optionsOrRetries.timeoutMs)
+                : null,
+              stage: safeText(optionsOrRetries.stage || optionsOrRetries.label || "runtime"),
+              onRetry: typeof optionsOrRetries.onRetry === "function" ? optionsOrRetries.onRetry : null,
+              isRetryable:
+                typeof optionsOrRetries.isRetryable === "function"
+                  ? optionsOrRetries.isRetryable
+                  : isRetryableRuntimeError,
+            }
+          : {
+              retries: Number.isFinite(Number(optionsOrRetries)) ? Number(optionsOrRetries) : 2,
+              baseDelayMs: delayMs,
+              maxDelayMs: 10_000,
+              jitterRatio: 0.25,
+              timeoutMs: null,
+              stage: "runtime",
+              onRetry: null,
+              isRetryable: isRetryableRuntimeError,
+            };
+
+      for (let attempt = 1; attempt <= options.retries + 1; attempt += 1) {
+        try {
+          return await runWithStageTimeout(fn, options.timeoutMs, options.stage);
+        } catch (error) {
+          const shouldRetry = attempt <= options.retries && options.isRetryable(error);
+          if (!shouldRetry) {
+            throw error;
+          }
+
+          const exponentialDelay = Math.min(options.maxDelayMs, options.baseDelayMs * 2 ** (attempt - 1));
+          const jitterWindow = Math.max(0, Math.round(exponentialDelay * options.jitterRatio));
+          const jitter = jitterWindow > 0 ? Math.floor(Math.random() * (jitterWindow + 1)) : 0;
+          const nextDelayMs = exponentialDelay + jitter;
+          if (options.onRetry) {
+            await options.onRetry({ attempt, error, nextDelayMs, stage: options.stage });
+          }
+          await new Promise((resolve) => setTimeout(resolve, nextDelayMs));
+        }
       }
+
+      throw new Error("Crystal core retry loop exhausted unexpectedly.");
     });
   const fetchJson =
     config.fetchJson ||
@@ -2198,6 +2469,8 @@ function createCrystalCoreRuntime(config = {}) {
           "EventNewsAdapter",
           "SourceReliabilityAdapter",
         ],
+        implemented_sources: getImplementedSourceIds(),
+        grounding: buildRuntimeGroundingSummary(),
       };
     },
   };
