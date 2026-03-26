@@ -36,6 +36,9 @@ type ForecastPageProps = {
   onLogin: () => void;
 };
 
+const FORECAST_RUN_TIMEOUT_MS = 45000;
+const FORECAST_RUN_MAX_POLL_MS = 6000;
+
 export function ForecastPage({ user, onLogin }: ForecastPageProps) {
   const runtime = useAppRuntime();
   const { canUseFeature, openUpgrade, runMeteredAction } = useCrystalPlan();
@@ -87,13 +90,27 @@ export function ForecastPage({ user, onLogin }: ForecastPageProps) {
     }
 
     let cancelled = false;
+    const startedAt = Date.now();
 
     const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+
+    const failPendingRun = (message: string, run?: { query_plan?: unknown } | null) => {
+      if (cancelled) return;
+      const failureContext = resolveForecastContext(context.query, run?.query_plan || context.queryPlan, filters);
+      setItems(normalizeForecastFailure(new Error(message), failureContext));
+      setCurrentCard(null);
+      setContext(failureContext);
+    };
 
     const pollRun = async () => {
       let pollAfterMs = Math.max(750, Number(pendingRun.poll_after_ms) || 2500);
 
       while (!cancelled) {
+        if (Date.now() - startedAt >= FORECAST_RUN_TIMEOUT_MS) {
+          failPendingRun('Crystal is taking longer than expected, so this deep run was held instead of spinning forever.');
+          return;
+        }
+
         await sleep(pollAfterMs);
         if (cancelled) return;
 
@@ -105,7 +122,12 @@ export function ForecastPage({ user, onLogin }: ForecastPageProps) {
                 : null
               : await getForecastRun(pendingRun.run_id);
 
-          if (cancelled || !response) {
+          if (cancelled) {
+            return;
+          }
+
+          if (!response) {
+            failPendingRun('Crystal could not resume this deep forecast run. Retry in a moment.');
             return;
           }
 
@@ -122,25 +144,26 @@ export function ForecastPage({ user, onLogin }: ForecastPageProps) {
               return;
             }
 
-            pollAfterMs = Math.max(750, Number(nextCard.pending_run.poll_after_ms) || 2500);
+            pollAfterMs = Math.min(Math.max(750, Number(nextCard.pending_run.poll_after_ms) || 2500), FORECAST_RUN_MAX_POLL_MS);
             continue;
           }
 
           if (run?.status === 'failed' || run?.status === 'canceled') {
-            const failureContext = resolveForecastContext(context.query, run?.query_plan || context.queryPlan, filters);
             const failureMessage =
               typeof run?.error_message === 'string' && run.error_message.trim()
                 ? run.error_message
                 : 'Crystal could not complete the deep forecast run.';
-            setItems(normalizeForecastFailure(new Error(failureMessage), failureContext));
-            setCurrentCard(null);
-            setContext(failureContext);
+            failPendingRun(failureMessage, run);
             return;
           }
 
-          pollAfterMs = Math.max(750, Number(run?.pending_poll_after_ms) || pollAfterMs);
+          pollAfterMs = Math.min(Math.max(750, Number(run?.pending_poll_after_ms) || pollAfterMs), FORECAST_RUN_MAX_POLL_MS);
         } catch (_error) {
-          pollAfterMs = Math.min(pollAfterMs + 1000, 6000);
+          if (Date.now() - startedAt >= FORECAST_RUN_TIMEOUT_MS) {
+            failPendingRun('Crystal is still waiting on the remote runtime. Retry in a moment instead of waiting on a stalled spinner.');
+            return;
+          }
+          pollAfterMs = Math.min(pollAfterMs + 1000, FORECAST_RUN_MAX_POLL_MS);
         }
       }
     };
@@ -361,18 +384,45 @@ export function ForecastPage({ user, onLogin }: ForecastPageProps) {
       </section>
 
       {items.length > 0 ? (
-        <ResultStack
-          items={items}
-          isAuthenticated={isAuthenticated}
-          isSaved={isSaved}
-          isSaving={isSaving}
-          isFollowing={isFollowing}
-          onSave={handleSave}
-          onFollow={handleFollow}
-          onRemix={handleRemix}
-          onShare={() => void handleShare()}
-          onLogin={onLogin}
-        />
+        <>
+          <ResultStack
+            items={items}
+            isAuthenticated={isAuthenticated}
+            isSaved={isSaved}
+            isSaving={isSaving}
+            isFollowing={isFollowing}
+            onSave={handleSave}
+            onFollow={handleFollow}
+            onRemix={handleRemix}
+            onShare={() => void handleShare()}
+            onLogin={onLogin}
+          />
+          {currentCard && context ? (
+            <section className="rounded-[32px] border border-slate-200 bg-white p-6 shadow-[0_18px_44px_rgba(15,23,42,0.05)]">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Keep this forecast alive</div>
+              <div className="mt-4 grid gap-4 md:grid-cols-3">
+                <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-4">
+                  <div className="text-sm font-semibold text-slate-950">Save</div>
+                  <p className="mt-2 text-sm leading-7 text-slate-600">
+                    Save stores this exact card in Gallery so the call, trust layer, and evidence stay easy to revisit.
+                  </p>
+                </div>
+                <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-4">
+                  <div className="text-sm font-semibold text-slate-950">Follow</div>
+                  <p className="mt-2 text-sm leading-7 text-slate-600">
+                    Follow keeps the entity or theme on your watchlist so the next meaningful update has somewhere to land.
+                  </p>
+                </div>
+                <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-4">
+                  <div className="text-sm font-semibold text-slate-950">Proof</div>
+                  <p className="mt-2 text-sm leading-7 text-slate-600">
+                    Public forecast pages are the shareable proof layer. Gallery is the private memory and version history.
+                  </p>
+                </div>
+              </div>
+            </section>
+          ) : null}
+        </>
       ) : (
         <section className="rounded-[32px] border border-dashed border-slate-300 bg-white/70 p-8 text-sm leading-7 text-slate-600">
           Submit one question and Crystal will return a finite stack of cards instead of a transcript. Published, limited, and coverage-gap outcomes all resolve through the same rendering policy.

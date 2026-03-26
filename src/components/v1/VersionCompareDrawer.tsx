@@ -27,6 +27,11 @@ export function VersionCompareDrawer({ current, previous, onClose }: VersionComp
           </button>
         </div>
 
+        <p className="mt-4 text-sm leading-7 text-slate-600">
+          Use this drawer as proof, not decoration: it should make it obvious when Crystal changed the call, the confidence,
+          or the driver set.
+        </p>
+
         <div className="mt-6 grid gap-5 md:grid-cols-2">
           <section className="rounded-[28px] border border-slate-200 bg-slate-50 p-5">
             <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Current</div>

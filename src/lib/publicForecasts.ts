@@ -28,6 +28,24 @@ export interface PublicForecastRecord extends CardData {
   updatedAt?: unknown;
 }
 
+export type PublicForecastLoadSource = 'live' | 'cache';
+
+export type PublicForecastCollectionResult = {
+  records: PublicForecastRecord[];
+  source: PublicForecastLoadSource;
+  warning: string | null;
+};
+
+export type PublicForecastPageDataResult = {
+  record: PublicForecastRecord | null;
+  related: PublicForecastRecord[];
+  source: PublicForecastLoadSource;
+  warning: string | null;
+};
+
+const PUBLIC_FORECAST_CACHE_KEY = 'crystal-public-forecasts-cache-v1';
+const PUBLIC_FORECAST_TIMEOUT_MS = 12000;
+
 function mapSnapshotToPublicForecast(snapshot: { id: string; data: () => Record<string, unknown> }): PublicForecastRecord {
   return {
     id: snapshot.id,
@@ -35,17 +53,144 @@ function mapSnapshotToPublicForecast(snapshot: { id: string; data: () => Record<
   };
 }
 
+function createPublicForecastTimeoutError(message: string) {
+  const error = new Error(message) as Error & { code?: string };
+  error.code = 'public-forecast-timeout';
+  return error;
+}
+
+function buildCacheWarning() {
+  return 'Showing cached public forecasts while the live proof layer catches up.';
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string) {
+  return new Promise<T>((resolve, reject) => {
+    const timer = window.setTimeout(() => reject(createPublicForecastTimeoutError(message)), timeoutMs);
+    promise
+      .then((value) => {
+        window.clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((error) => {
+        window.clearTimeout(timer);
+        reject(error);
+      });
+  });
+}
+
+function readCachedPublicForecasts() {
+  if (typeof window === 'undefined') return [] as PublicForecastRecord[];
+  try {
+    const raw = window.localStorage.getItem(PUBLIC_FORECAST_CACHE_KEY);
+    if (!raw) return [] as PublicForecastRecord[];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as PublicForecastRecord[]) : [];
+  } catch (_error) {
+    return [] as PublicForecastRecord[];
+  }
+}
+
+function writeCachedPublicForecasts(records: PublicForecastRecord[]) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(PUBLIC_FORECAST_CACHE_KEY, JSON.stringify(records));
+  } catch (_error) {
+    // Ignore cache persistence issues and keep the live path primary.
+  }
+}
+
+function findForecastRecordBySlug(records: PublicForecastRecord[], slug: string) {
+  return records.find((record) => (record.public_slug || record.id) === slug) || null;
+}
+
 export async function fetchPublicForecasts() {
   const snapshot = await getDocs(collection(db, 'public_forecasts'));
   return snapshot.docs.map(mapSnapshotToPublicForecast);
 }
 
-export async function fetchPublicForecastBySlug(slug: string) {
-  const snapshot = await getDoc(doc(db, 'public_forecasts', slug));
+export async function fetchPublicForecastBySlug(slug: string, timeoutMs = PUBLIC_FORECAST_TIMEOUT_MS) {
+  const snapshot = await withTimeout(
+    getDoc(doc(db, 'public_forecasts', slug)),
+    timeoutMs,
+    'Crystal timed out while loading the public forecast page.'
+  );
   if (!snapshot.exists()) return null;
   return {
     id: snapshot.id,
     ...(snapshot.data() as Omit<PublicForecastRecord, 'id'>),
+  };
+}
+
+export async function fetchPublicForecastCollection(timeoutMs = PUBLIC_FORECAST_TIMEOUT_MS): Promise<PublicForecastCollectionResult> {
+  const cachedRecords = readCachedPublicForecasts();
+
+  try {
+    const snapshot = await withTimeout(
+      getDocs(collection(db, 'public_forecasts')),
+      timeoutMs,
+      'Crystal timed out while loading the public forecast gallery.'
+    );
+    const records = snapshot.docs.map(mapSnapshotToPublicForecast);
+    writeCachedPublicForecasts(records);
+    return {
+      records,
+      source: 'live',
+      warning: null,
+    };
+  } catch (error) {
+    if (cachedRecords.length > 0) {
+      return {
+        records: cachedRecords,
+        source: 'cache',
+        warning: buildCacheWarning(),
+      };
+    }
+    throw error;
+  }
+}
+
+export async function fetchPublicForecastPageData(
+  slug: string,
+  timeoutMs = PUBLIC_FORECAST_TIMEOUT_MS
+): Promise<PublicForecastPageDataResult> {
+  const collectionResult = await fetchPublicForecastCollection(timeoutMs);
+  let record = findForecastRecordBySlug(collectionResult.records, slug);
+  let warning = collectionResult.warning;
+  let source = collectionResult.source;
+
+  try {
+    const directRecord = await fetchPublicForecastBySlug(slug, timeoutMs);
+    if (directRecord) {
+      record = directRecord;
+      if (collectionResult.source === 'live') {
+        source = 'live';
+      }
+    }
+  } catch (_error) {
+    if (!record && collectionResult.records.length === 0) {
+      throw _error;
+    }
+    warning = warning || buildCacheWarning();
+  }
+
+  const related = record
+    ? [...collectionResult.records]
+        .filter(
+          (candidate) =>
+            candidate.id !== record.id &&
+            (candidate.entity_slug === record.entity_slug || candidate.topic_slug === record.topic_slug)
+        )
+        .sort(
+          (left, right) => toSortNumber(right.published_at || right.updatedAt) - toSortNumber(left.published_at || left.updatedAt)
+        )
+        .slice(0, 3)
+    : [];
+
+  return {
+    record,
+    related,
+    source,
+    warning,
   };
 }
 

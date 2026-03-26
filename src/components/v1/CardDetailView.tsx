@@ -51,6 +51,11 @@ export function CardDetailView({ card, versions, onOpenCompare }: CardDetailView
           </div>
         ) : null}
 
+        <div className="mt-5 rounded-[24px] border border-slate-200 bg-slate-50 p-4 text-sm leading-7 text-slate-600">
+          Gallery is the private memory layer for this forecast. Save keeps the current card, the public page stays shareable,
+          and version history shows what changed over time.
+        </div>
+
         <div className="mt-5 rounded-[28px] bg-slate-950 p-5 text-white">
           <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-300">Primary outcome</div>
           <div className="mt-3 text-xl font-semibold tracking-[-0.03em]">{card.verdict || card.summary}</div>
@@ -69,7 +74,14 @@ export function CardDetailView({ card, versions, onOpenCompare }: CardDetailView
       </article>
 
       <article className="rounded-[32px] border border-slate-200 bg-white p-6 shadow-[0_18px_44px_rgba(15,23,42,0.05)]">
-        <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Version history</div>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Version history</div>
+          <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">{versions.length} saved versions</div>
+        </div>
+        <p className="mt-3 text-sm leading-7 text-slate-600">
+          This is the proof trail for the forecast. Compare versions when you want to see whether the call, confidence, or
+          drivers actually changed.
+        </p>
         <div className="mt-4 space-y-3">
           {versions.map((version) => (
             <div key={version.id} className="rounded-[24px] border border-slate-200 bg-slate-50 p-4">

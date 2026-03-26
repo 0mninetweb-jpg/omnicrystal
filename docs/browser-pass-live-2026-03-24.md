@@ -59,3 +59,9 @@
 - Re-run the signed-in visual pass with a browser context that can actually reuse the authenticated session.
 - Re-check `/forecast` and public forecast detail after the next visual QA cycle.
 - Keep using `Forecast Gallery` as the clearest live surface; it is visually the strongest of the checked routes in this cycle.
+
+## Week 4 Prep on 2026-03-26
+- `/forecast` no longer relies on unbounded polling: the page now bails out into a readable hold state if a deep run stalls instead of leaving a centered spinner forever.
+- Public forecast surfaces now use timed fetches plus local cache fallback, so `Forecast Gallery` and public forecast detail can degrade to a readable state instead of sitting on loading skeletons indefinitely.
+- The signed-in pass is still not certifiable from this terminal-only workflow. Week 4 therefore requires a manual Edge non-headless pass on the live local profile, with captures stored in `C:\Users\Fiorenza\OneDrive\Desktop\Codex\qa-captures\week4`.
+- Until that pass is complete, the operational recommendation stays unchanged: **hold at `0/0`**.

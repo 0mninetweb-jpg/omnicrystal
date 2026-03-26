@@ -12,7 +12,7 @@ export function SavedCardGrid({ cards, selectedId, onSelect }: SavedCardGridProp
   if (cards.length === 0) {
     return (
       <div className="rounded-[32px] border border-dashed border-slate-300 bg-white/70 p-8 text-sm leading-7 text-slate-600">
-        No cards yet. Save a forecast to build your Gallery.
+        No cards yet. Save a forecast to build a private, versioned memory in Gallery.
       </div>
     );
   }

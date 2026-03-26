@@ -4,8 +4,8 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ArrowRight, Bell, Bookmark, Loader2, LogIn, Share2, Sparkles } from 'lucide-react';
 import { buildForecastStack } from '../../lib/forecastV1';
 import {
-  fetchPublicForecastBySlug,
-  fetchPublicForecasts,
+  fetchPublicForecastCollection,
+  fetchPublicForecastPageData,
   formatPublicForecastDate,
   getPublicForecastState,
   rankTrendingForecasts,
@@ -144,6 +144,16 @@ function ForecastGalleryLoadingState({ title = 'Loading public forecasts...' }: 
   );
 }
 
+function LoadStatusNotice({ message }: { message: string | null }) {
+  if (!message) return null;
+
+  return (
+    <section className="rounded-[28px] border border-amber-200 bg-amber-50 px-5 py-4 text-sm leading-7 text-amber-900 shadow-[0_18px_44px_rgba(15,23,42,0.04)]">
+      {message}
+    </section>
+  );
+}
+
 function PublicForecastLoadingState() {
   return (
     <div className="space-y-6">
@@ -199,14 +209,21 @@ function ExploreLinks({
 function usePublicForecasts() {
   const [records, setRecords] = useState<PublicForecastRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [warning, setWarning] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
 
-    void fetchPublicForecasts()
-      .then((nextRecords) => {
+    void fetchPublicForecastCollection()
+      .then(({ records: nextRecords, warning: nextWarning }) => {
         if (!active) return;
         setRecords(nextRecords.filter((record) => getPublicForecastState(record) !== 'coverage_gap'));
+        setWarning(nextWarning);
+      })
+      .catch((error) => {
+        if (!active) return;
+        setRecords([]);
+        setWarning(error instanceof Error ? error.message : 'Crystal could not load the public proof layer right now.');
       })
       .finally(() => {
         if (active) {
@@ -219,11 +236,11 @@ function usePublicForecasts() {
     };
   }, []);
 
-  return { records, isLoading };
+  return { records, isLoading, warning };
 }
 
 export function ForecastGalleryPage({ user }: ForecastGallerySharedProps) {
-  const { records, isLoading } = usePublicForecasts();
+  const { records, isLoading, warning } = usePublicForecasts();
 
   const latestCalls = useMemo(() => sortByPublished(records).slice(0, 6), [records]);
   const trending = useMemo(() => rankTrendingForecasts(records).slice(0, 3), [records]);
@@ -307,9 +324,13 @@ export function ForecastGalleryPage({ user }: ForecastGallerySharedProps) {
       {isLoading ? (
         <ForecastGalleryLoadingState />
       ) : records.length === 0 ? (
-        <EmptyForecastGalleryState />
+        <>
+          <LoadStatusNotice message={warning} />
+          <EmptyForecastGalleryState />
+        </>
       ) : (
         <>
+          <LoadStatusNotice message={warning} />
           <DiscoverySection
             title="Trending Forecasts"
             body="The cards with the strongest mix of recentness, confidence, and public relevance."
@@ -337,7 +358,7 @@ export function ForecastGalleryPage({ user }: ForecastGallerySharedProps) {
 
 export function ForecastGalleryEntityPage({ user }: ForecastGallerySharedProps) {
   const { entitySlug = '' } = useParams();
-  const { records, isLoading } = usePublicForecasts();
+  const { records, isLoading, warning } = usePublicForecasts();
   const matches = useMemo(
     () => sortByPublished(records.filter((record) => (record.entity_slug || 'general') === entitySlug)),
     [entitySlug, records]
@@ -357,13 +378,19 @@ export function ForecastGalleryEntityPage({ user }: ForecastGallerySharedProps) 
       {isLoading ? (
         <ForecastGalleryLoadingState title="Loading entity page..." />
       ) : matches.length === 0 ? (
-        <EmptyForecastGalleryState />
+        <>
+          <LoadStatusNotice message={warning} />
+          <EmptyForecastGalleryState />
+        </>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {matches.map((record) => (
-            <PublicForecastLinkCard key={record.id} record={record} />
-          ))}
-        </div>
+        <>
+          <LoadStatusNotice message={warning} />
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {matches.map((record) => (
+              <PublicForecastLinkCard key={record.id} record={record} />
+            ))}
+          </div>
+        </>
       )}
 
       <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_18px_44px_rgba(15,23,42,0.05)]">
@@ -379,7 +406,7 @@ export function ForecastGalleryEntityPage({ user }: ForecastGallerySharedProps) 
 
 export function ForecastGalleryTopicPage({ user }: ForecastGallerySharedProps) {
   const { topicSlug = '' } = useParams();
-  const { records, isLoading } = usePublicForecasts();
+  const { records, isLoading, warning } = usePublicForecasts();
   const matches = useMemo(
     () => sortByPublished(records.filter((record) => (record.topic_slug || 'forecast') === topicSlug)),
     [records, topicSlug]
@@ -399,20 +426,26 @@ export function ForecastGalleryTopicPage({ user }: ForecastGallerySharedProps) {
       {isLoading ? (
         <ForecastGalleryLoadingState title="Loading topic page..." />
       ) : matches.length === 0 ? (
-        <EmptyForecastGalleryState />
+        <>
+          <LoadStatusNotice message={warning} />
+          <EmptyForecastGalleryState />
+        </>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {matches.map((record) => (
-            <PublicForecastLinkCard key={record.id} record={record} />
-          ))}
-        </div>
+        <>
+          <LoadStatusNotice message={warning} />
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {matches.map((record) => (
+              <PublicForecastLinkCard key={record.id} record={record} />
+            ))}
+          </div>
+        </>
       )}
     </div>
   );
 }
 
 export function ForecastGalleryBestCallsPage({ user }: ForecastGallerySharedProps) {
-  const { records, isLoading } = usePublicForecasts();
+  const { records, isLoading, warning } = usePublicForecasts();
   const bestCalls = useMemo(() => sortBestCalls(records).slice(0, 12), [records]);
 
   return (
@@ -428,11 +461,14 @@ export function ForecastGalleryBestCallsPage({ user }: ForecastGallerySharedProp
       {isLoading ? (
         <ForecastGalleryLoadingState title="Loading best calls..." />
       ) : (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {bestCalls.map((record) => (
-            <PublicForecastLinkCard key={record.id} record={record} />
-          ))}
-        </div>
+        <>
+          <LoadStatusNotice message={warning} />
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {bestCalls.map((record) => (
+              <PublicForecastLinkCard key={record.id} record={record} />
+            ))}
+          </div>
+        </>
       )}
     </div>
   );
@@ -444,6 +480,7 @@ export function PublicForecastPage({ user, onLogin }: ForecastGallerySharedProps
   const [record, setRecord] = useState<PublicForecastRecord | null>(null);
   const [related, setRelated] = useState<PublicForecastRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadWarning, setLoadWarning] = useState<string | null>(null);
   const [isSaved, setIsSaved] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isFollowing, setIsFollowing] = useState(false);
@@ -451,21 +488,18 @@ export function PublicForecastPage({ user, onLogin }: ForecastGallerySharedProps
   useEffect(() => {
     let active = true;
 
-    void Promise.all([fetchPublicForecastBySlug(slug), fetchPublicForecasts()])
-      .then(([nextRecord, allRecords]) => {
+    void fetchPublicForecastPageData(slug)
+      .then(({ record: nextRecord, related: nextRelated, warning }) => {
         if (!active) return;
         setRecord(nextRecord);
-        if (nextRecord) {
-          setRelated(
-            sortByPublished(
-              allRecords.filter(
-                (candidate) =>
-                  candidate.id !== nextRecord.id &&
-                  (candidate.entity_slug === nextRecord.entity_slug || candidate.topic_slug === nextRecord.topic_slug)
-              )
-            ).slice(0, 3)
-          );
-        }
+        setRelated(nextRelated);
+        setLoadWarning(warning);
+      })
+      .catch((error) => {
+        if (!active) return;
+        setRecord(null);
+        setRelated([]);
+        setLoadWarning(error instanceof Error ? error.message : 'Crystal could not load this public forecast right now.');
       })
       .finally(() => {
         if (active) {
@@ -566,6 +600,8 @@ export function PublicForecastPage({ user, onLogin }: ForecastGallerySharedProps
             {state.replace(/_/g, ' ')}
           </div>
         </div>
+
+        <LoadStatusNotice message={loadWarning} />
 
         <div className="mt-6 flex flex-wrap gap-3">
           <button
