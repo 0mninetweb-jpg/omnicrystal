@@ -1,6 +1,6 @@
 {
   "summary": {
-    "generated_at": "2026-03-26T13:57:51.389Z",
+    "generated_at": "2026-03-26T14:53:31.592Z",
     "report_date": "2026-03-26",
     "total_cases": 10,
     "binary_cases": 8,
@@ -132,6 +132,7 @@
           "rss_allowlist",
           "polymarket_public"
         ],
+        "optional_sources": [],
         "used_sources": [
           "wikidata",
           "polymarket_public",
@@ -139,7 +140,8 @@
           "rss_allowlist",
           "historical-cache"
         ],
-        "missing_required_sources": []
+        "missing_required_sources": [],
+        "missing_optional_sources": []
       },
       "missing_required_sources": [],
       "missing_metadata": [],
@@ -223,6 +225,7 @@
           "rss_allowlist",
           "polymarket_public"
         ],
+        "optional_sources": [],
         "used_sources": [
           "wikidata",
           "polymarket_public",
@@ -230,7 +233,8 @@
           "rss_allowlist",
           "historical-cache"
         ],
-        "missing_required_sources": []
+        "missing_required_sources": [],
+        "missing_optional_sources": []
       },
       "missing_required_sources": [],
       "missing_metadata": [],
@@ -314,6 +318,7 @@
           "rss_allowlist",
           "polymarket_public"
         ],
+        "optional_sources": [],
         "used_sources": [
           "wikidata",
           "polymarket_public",
@@ -321,7 +326,8 @@
           "rss_allowlist",
           "historical-cache"
         ],
-        "missing_required_sources": []
+        "missing_required_sources": [],
+        "missing_optional_sources": []
       },
       "missing_required_sources": [],
       "missing_metadata": [],
@@ -406,6 +412,7 @@
           "rss_allowlist",
           "polymarket_public"
         ],
+        "optional_sources": [],
         "used_sources": [
           "wikidata",
           "polymarket_public",
@@ -413,7 +420,8 @@
           "rss_allowlist",
           "historical-cache"
         ],
-        "missing_required_sources": []
+        "missing_required_sources": [],
+        "missing_optional_sources": []
       },
       "missing_required_sources": [],
       "missing_metadata": [],
@@ -496,6 +504,7 @@
           "rss_allowlist",
           "polymarket_public"
         ],
+        "optional_sources": [],
         "used_sources": [
           "wikidata",
           "polymarket_public",
@@ -503,7 +512,8 @@
           "rss_allowlist",
           "historical-cache"
         ],
-        "missing_required_sources": []
+        "missing_required_sources": [],
+        "missing_optional_sources": []
       },
       "missing_required_sources": [],
       "missing_metadata": [],
@@ -587,6 +597,7 @@
           "rss_allowlist",
           "polymarket_public"
         ],
+        "optional_sources": [],
         "used_sources": [
           "wikidata",
           "polymarket_public",
@@ -594,7 +605,8 @@
           "rss_allowlist",
           "historical-cache"
         ],
-        "missing_required_sources": []
+        "missing_required_sources": [],
+        "missing_optional_sources": []
       },
       "missing_required_sources": [],
       "missing_metadata": [],
@@ -675,13 +687,15 @@
           "gdelt",
           "rss_allowlist"
         ],
+        "optional_sources": [],
         "used_sources": [
           "wikidata",
           "gdelt",
           "rss_allowlist",
           "historical-cache"
         ],
-        "missing_required_sources": []
+        "missing_required_sources": [],
+        "missing_optional_sources": []
       },
       "missing_required_sources": [],
       "missing_metadata": [],
@@ -762,13 +776,15 @@
           "gdelt",
           "rss_allowlist"
         ],
+        "optional_sources": [],
         "used_sources": [
           "wikidata",
           "gdelt",
           "rss_allowlist",
           "historical-cache"
         ],
-        "missing_required_sources": []
+        "missing_required_sources": [],
+        "missing_optional_sources": []
       },
       "missing_required_sources": [],
       "missing_metadata": [],
@@ -853,6 +869,7 @@
           "rss_allowlist",
           "polymarket_public"
         ],
+        "optional_sources": [],
         "used_sources": [
           "wikidata",
           "polymarket_public",
@@ -860,7 +877,8 @@
           "rss_allowlist",
           "historical-cache"
         ],
-        "missing_required_sources": []
+        "missing_required_sources": [],
+        "missing_optional_sources": []
       },
       "missing_required_sources": [],
       "missing_metadata": [],
@@ -944,6 +962,7 @@
           "rss_allowlist",
           "polymarket_public"
         ],
+        "optional_sources": [],
         "used_sources": [
           "wikidata",
           "polymarket_public",
@@ -951,7 +970,8 @@
           "rss_allowlist",
           "historical-cache"
         ],
-        "missing_required_sources": []
+        "missing_required_sources": [],
+        "missing_optional_sources": []
       },
       "missing_required_sources": [],
       "missing_metadata": [],

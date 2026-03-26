@@ -10,6 +10,10 @@ const {
 
 const ACTIVE_CALIBRATION_SAMPLE_SIZE = 30;
 const ACTIVE_CALIBRATION_MAX_AGE_DAYS = 7;
+const RUNTIME_CALIBRATION_TARGET_DOMAINS = [
+  "A.24.governance_policy_and_public_timeline",
+  "A.23.markets_and_asset_regimes",
+];
 const DEFAULT_PUBLISH_THRESHOLDS = {
   published_min_confidence: 0.6,
   published_min_coverage: 0.58,
@@ -222,12 +226,58 @@ function isFreshCalibrationDoc(doc = {}) {
   return Number(doc?.sample_size || 0) >= ACTIVE_CALIBRATION_SAMPLE_SIZE && ageDays <= ACTIVE_CALIBRATION_MAX_AGE_DAYS;
 }
 
+function isRuntimeCalibrationTargetDomain(domainId = "") {
+  return RUNTIME_CALIBRATION_TARGET_DOMAINS.includes(safeText(domainId));
+}
+
+function buildCalibrationActivationState({
+  domainId = "",
+  sampleSize = 0,
+  updatedAt = null,
+  backfillSampleSize = 0,
+  organicSampleSize = 0,
+}) {
+  const sampleFloorMet = Number(sampleSize || 0) >= ACTIVE_CALIBRATION_SAMPLE_SIZE;
+  const updated = updatedAt?.toDate ? updatedAt.toDate() : updatedAt ? new Date(updatedAt) : new Date();
+  const ageDays = updated && !Number.isNaN(updated.getTime()) ? (Date.now() - updated.getTime()) / (1000 * 60 * 60 * 24) : Infinity;
+  const freshnessOk = Number.isFinite(ageDays) && ageDays <= ACTIVE_CALIBRATION_MAX_AGE_DAYS;
+  const runtimeTarget = isRuntimeCalibrationTargetDomain(domainId);
+  const activeForRuntime = runtimeTarget && sampleFloorMet && freshnessOk;
+
+  let activationReason = "hold_static_thresholds";
+  if (!runtimeTarget) {
+    activationReason = "not_runtime_target_domain";
+  } else if (!sampleFloorMet) {
+    activationReason = "sample_floor_not_met";
+  } else if (!freshnessOk) {
+    activationReason = "calibration_stale";
+  } else if (backfillSampleSize > 0 && organicSampleSize > 0) {
+    activationReason = "activate_calibrated_thresholds_backfill_plus_organic";
+  } else if (backfillSampleSize > 0) {
+    activationReason = "activate_calibrated_thresholds_backfill_seed";
+  } else {
+    activationReason = "activate_calibrated_thresholds_organic_only";
+  }
+
+  return {
+    active_for_runtime: activeForRuntime,
+    activation_reason: activationReason,
+    sample_floor_met: sampleFloorMet,
+    freshness_ok: freshnessOk,
+    backfill_sample_size: Number(backfillSampleSize || 0),
+    organic_sample_size: Number(organicSampleSize || 0),
+  };
+}
+
 async function loadActiveCalibration(db, domainId) {
   if (!db || !safeText(domainId)) return null;
   const snapshot = await db.collection("domain_calibration").doc(domainId).get();
   if (!snapshot.exists) return null;
   const data = snapshot.data() || null;
-  return data && isFreshCalibrationDoc(data) ? data : null;
+  if (!data || !isFreshCalibrationDoc(data)) return null;
+  if (data.active_for_runtime === false) return null;
+  if (data.active_for_runtime === true) return data;
+  return isRuntimeCalibrationTargetDomain(domainId) ? data : null;
 }
 
 function applyCalibrationToScorecard(scorecard = {}, calibrationDoc = null) {
@@ -237,6 +287,7 @@ function applyCalibrationToScorecard(scorecard = {}, calibrationDoc = null) {
       calibration_snapshot: {
         active: false,
         calibration_version: null,
+        threshold_source: "static_defaults",
       },
     };
   }
@@ -362,6 +413,8 @@ function applyCalibrationToScorecard(scorecard = {}, calibrationDoc = null) {
     calibration_snapshot: {
       active: true,
       calibration_version: safeText(calibrationDoc.calibration_version),
+      threshold_source: "domain_calibration",
+      activation_reason: safeText(calibrationDoc.activation_reason),
       raw_probability: Number(rawProbability.toFixed(4)),
       calibrated_probability: Number(calibratedProbability.toFixed(4)),
       raw_winning_probability: Number(rawProbability.toFixed(4)),
@@ -370,6 +423,7 @@ function applyCalibrationToScorecard(scorecard = {}, calibrationDoc = null) {
       calibrated_confidence: Number(calibratedConfidence.toFixed(4)),
       band: safeText(nextScorecard?.binary_contract?.band),
       thresholds: toSerializable(thresholds),
+      active_for_runtime: calibrationDoc.active_for_runtime === true,
       updated_at: toSerializable(calibrationDoc.updated_at),
     },
   };
@@ -639,11 +693,16 @@ function buildBinaryParitySummary(recentRuns = []) {
     if (pair.remote && pair.local_core) {
       const remoteCard = pair.remote.result_card?.binary_contract || {};
       const localCard = pair.local_core.result_card?.binary_contract || {};
+      const domainId = safeText(
+        pair.remote?.query_plan?.primary_domain_id || pair.remote?.result_card?.domain,
+        safeText(pair.local_core?.query_plan?.primary_domain_id || pair.local_core?.result_card?.domain)
+      );
       const probabilityDelta = Math.abs(
         clamp01(remoteCard.winning_probability, 0.5) - clamp01(localCard.winning_probability, 0.5)
       );
       comparablePairs.push({
         parity_key: parityKey,
+        domain_id: domainId,
         query_text: safeText(pair.remote.query_text, safeText(pair.local_core.query_text)),
         remote_transport: safeText(pair.remote.runtime_transport),
         local_transport: safeText(pair.local_core.runtime_transport),
@@ -671,6 +730,29 @@ function buildBinaryParitySummary(recentRuns = []) {
       ? comparablePairs.filter((pair) => safeText(pair.remote_publication_state) !== safeText(pair.local_publication_state)).length / comparablePairs.length
       : null;
   const probabilityDeltas = comparablePairs.map((pair) => pair.probability_delta).filter((value) => Number.isFinite(value));
+  const byDomain = Object.fromEntries(
+    uniqueStrings(comparablePairs.map((pair) => safeText(pair.domain_id)).filter(Boolean)).map((domainId) => {
+      const domainPairs = comparablePairs.filter((pair) => safeText(pair.domain_id) === domainId);
+      const domainDeltas = domainPairs.map((pair) => pair.probability_delta).filter((value) => Number.isFinite(value));
+      return [
+        domainId,
+        {
+          comparable_pairs: domainPairs.length,
+          winner_mismatch_rate: Number(
+            (
+              domainPairs.filter((pair) => safeText(pair.remote_winner) !== safeText(pair.local_winner)).length / Math.max(1, domainPairs.length)
+            ).toFixed(4)
+          ),
+          band_mismatch_rate: Number(
+            (
+              domainPairs.filter((pair) => safeText(pair.remote_band) !== safeText(pair.local_band)).length / Math.max(1, domainPairs.length)
+            ).toFixed(4)
+          ),
+          median_probability_delta: median(domainDeltas),
+        },
+      ];
+    })
+  );
 
   return {
     binary_runs_scanned: binaryRuns.length,
@@ -683,6 +765,7 @@ function buildBinaryParitySummary(recentRuns = []) {
       publicationStateMismatchRate == null ? null : Number(publicationStateMismatchRate.toFixed(4)),
     median_probability_delta: median(probabilityDeltas),
     max_probability_delta: probabilityDeltas.length ? Number(Math.max(...probabilityDeltas).toFixed(4)) : null,
+    by_domain: byDomain,
     regressions: comparablePairs.sort((left, right) => right.probability_delta - left.probability_delta).slice(0, 10),
   };
 }
@@ -746,21 +829,21 @@ async function runEvaluationSweep(context, options = {}) {
   resolutionDocs.forEach((item) => {
     const domainId = safeText(item?.domain_id, "unknown");
     const predictedProbability = clamp01(item?.predicted_probability, 0.5);
-    const actualOutcome = Number(item?.actual_outcome) === 1 ? 1 : 0;
     const predictedLabel = safeText(item?.predicted_label).toLowerCase();
     const observedOutcome = safeText(item?.observed_outcome).toLowerCase();
     const correct =
       predictedLabel && observedOutcome
         ? predictedLabel === observedOutcome
         : predictedProbability >= 0.5
-          ? actualOutcome === 1
-          : actualOutcome === 0;
+          ? Number(item?.actual_outcome) === 1
+          : Number(item?.actual_outcome) === 0;
+    const actualOutcomeForCalibration = correct ? 1 : 0;
     if (!byDomain.has(domainId)) {
       byDomain.set(domainId, []);
     }
     byDomain.get(domainId).push({
       predicted_probability: predictedProbability,
-      actual_outcome: actualOutcome,
+      actual_outcome: actualOutcomeForCalibration,
       correct,
       card_state: safeText(item?.card_state),
     });
@@ -770,10 +853,20 @@ async function runEvaluationSweep(context, options = {}) {
   for (const [domainId, samples] of byDomain.entries()) {
     const metrics = computeBinaryMetrics(samples);
     const domainRunSet = recentRuns.filter((runDoc) => safeText(runDoc?.query_plan?.primary_domain_id || runDoc?.result_card?.domain) === domainId);
+    const domainResolutionSet = resolutionDocs.filter((item) => safeText(item?.domain_id) === domainId);
+    const backfillSampleSize = domainResolutionSet.filter((item) => item?.backfill_seed === true || safeText(item?.runtime_transport) === "backfill_seed").length;
+    const organicSampleSize = Math.max(0, domainResolutionSet.length - backfillSampleSize);
     const coverageGapRate =
       domainRunSet.length > 0
         ? domainRunSet.filter((runDoc) => safeText(runDoc?.result_card?.card_state) === "blocked").length / domainRunSet.length
         : metrics.coverage_gap_rate ?? 0;
+    const activationState = buildCalibrationActivationState({
+      domainId,
+      sampleSize: metrics.sample_size,
+      updatedAt: new Date(),
+      backfillSampleSize,
+      organicSampleSize,
+    });
 
     const docPayload = {
       calibration_version: `domain-calibration-${nowIso().slice(0, 10)}`,
@@ -790,6 +883,7 @@ async function runEvaluationSweep(context, options = {}) {
       reliability_curve: metrics.reliability_curve,
       confidence_adjustment: metrics.confidence_adjustment,
       publish_thresholds: metrics.publish_thresholds,
+      ...activationState,
       updated_at: admin.firestore.FieldValue.serverTimestamp(),
     };
     await db.collection("domain_calibration").doc(domainId).set(docPayload, { merge: true });
@@ -837,6 +931,31 @@ function buildRolloutRecommendation({
   };
 }
 
+function buildCalibrationReadiness(domainSummaries = []) {
+  const lookup = new Map(domainSummaries.map((item) => [safeText(item?.domain_id), item]));
+  const targets = RUNTIME_CALIBRATION_TARGET_DOMAINS.map((domainId) => {
+    const item = lookup.get(domainId) || {};
+    return {
+      domain_id: domainId,
+      active_for_runtime: item?.active_for_runtime === true,
+      activation_reason: safeText(item?.activation_reason, "hold_static_thresholds"),
+      sample_size: Number(item?.sample_size || 0),
+      backfill_sample_size: Number(item?.backfill_sample_size || 0),
+      organic_sample_size: Number(item?.organic_sample_size || 0),
+      sample_floor_met: item?.sample_floor_met === true,
+      freshness_ok: item?.freshness_ok === true,
+      updated_at: toSerializable(item?.updated_at),
+    };
+  });
+
+  return {
+    targets,
+    recommendation: targets.every((item) => item.active_for_runtime === true)
+      ? "activate_calibrated_thresholds"
+      : "hold_static_thresholds",
+  };
+}
+
 async function generateEvaluationReport(context, options = {}) {
   const { db, admin } = context;
   const reportType = safeText(options.reportType, "daily");
@@ -873,6 +992,7 @@ async function generateEvaluationReport(context, options = {}) {
       ? recentRuns.filter((runDoc) => safeText(runDoc?.query_plan?.primary_domain_id || runDoc?.result_card?.domain) === "A.0.general.general_forecast").length / recentRuns.length
       : null;
   const binaryParitySummary = buildBinaryParitySummary(recentRuns);
+  const calibrationReadiness = buildCalibrationReadiness(domainSummaries);
 
   const rolloutRecommendation = buildRolloutRecommendation({
     remoteErrorRate: remoteErrors,
@@ -898,6 +1018,10 @@ async function generateEvaluationReport(context, options = {}) {
     `Binary winner mismatch: ${binaryParitySummary.winner_mismatch_rate == null ? "n/a" : `${Math.round(binaryParitySummary.winner_mismatch_rate * 100)}%`}`,
     `Binary median probability delta: ${binaryParitySummary.median_probability_delta == null ? "n/a" : `${Math.round(binaryParitySummary.median_probability_delta * 100)} pts`}`,
     "",
+    `Policy calibration: ${calibrationReadiness.targets.find((item) => item.domain_id === "A.24.governance_policy_and_public_timeline")?.activation_reason || "hold_static_thresholds"}`,
+    `Markets calibration: ${calibrationReadiness.targets.find((item) => item.domain_id === "A.23.markets_and_asset_regimes")?.activation_reason || "hold_static_thresholds"}`,
+    `Calibration recommendation: ${calibrationReadiness.recommendation}`,
+    "",
     `Recommendation: ${rolloutRecommendation.next_step}`,
   ];
 
@@ -916,8 +1040,10 @@ async function generateEvaluationReport(context, options = {}) {
       general_fallback_rate: generalRate,
       binary_parity: binaryParitySummary,
     },
+    vertical_calibration: calibrationReadiness,
     domain_summaries: domainSummaries.slice(0, 25),
     regressions: rolloutRecommendation.blockers,
+    calibration_recommendation: calibrationReadiness.recommendation,
     rollout_recommendation: rolloutRecommendation,
     status: "completed",
     updated_at: admin.firestore.FieldValue.serverTimestamp(),
@@ -963,6 +1089,7 @@ async function runOfflineEvaluationMode(context, options = {}) {
 module.exports = {
   ACTIVE_CALIBRATION_MAX_AGE_DAYS,
   ACTIVE_CALIBRATION_SAMPLE_SIZE,
+  RUNTIME_CALIBRATION_TARGET_DOMAINS,
   buildResolutionTarget,
   buildBinaryParitySummary,
   applyCalibrationToScorecard,

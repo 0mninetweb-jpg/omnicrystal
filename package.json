@@ -13,7 +13,9 @@
     "check:prediction-core": "node scripts/check-prediction-core.mjs",
     "check:crystal-core-json-path": "node scripts/check-crystal-core-json-path.mjs",
     "check:policy-governance": "node scripts/check-policy-governance.mjs",
-    "report:policy-governance": "node scripts/run-policy-quality-report.mjs"
+    "report:policy-governance": "node scripts/run-policy-quality-report.mjs",
+    "check:markets-assets": "node scripts/check-markets-assets.mjs",
+    "report:markets-assets": "node scripts/run-markets-quality-report.mjs"
   },
   "dependencies": {
     "@google/genai": "^1.29.0",

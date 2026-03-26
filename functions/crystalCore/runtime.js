@@ -529,6 +529,7 @@ async function fetchText(url) {
 
 function pickMarketSymbol(queryText = "", normalizedQuery = {}) {
   const corpus = normalizeSignalText([queryText, normalizedQuery?.original_query].filter(Boolean).join(" "));
+  if (/\bcrypto risk appetite|crypto market\b/.test(corpus)) return { symbol: "BTC-USD", label: "Bitcoin proxy" };
   if (/\bbitcoin|btc\b/.test(corpus)) return { symbol: "BTC-USD", label: "Bitcoin" };
   if (/\bethereum|eth\b/.test(corpus)) return { symbol: "ETH-USD", label: "Ethereum" };
   if (/\bgold\b/.test(corpus)) return { symbol: "GC=F", label: "Gold futures" };
@@ -537,6 +538,11 @@ function pickMarketSymbol(queryText = "", normalizedQuery = {}) {
   if (/\bs&p|sp500|s&p 500\b/.test(corpus)) return { symbol: "^GSPC", label: "S&P 500" };
   if (/\beurusd|eurusd|euro dollar\b/.test(corpus)) return { symbol: "EURUSD=X", label: "EUR/USD" };
   return null;
+}
+
+function isMacroMarketQuery(queryText = "", normalizedQuery = {}) {
+  const corpus = normalizeSignalText([queryText, normalizedQuery?.original_query, normalizedQuery?.primary_domain_id].filter(Boolean).join(" "));
+  return /\b(inflation|cpi|rates|ecb|fed|liquidity|macro|gdp|recession|eurusd|eur\/usd|fx|yield|unemployment)\b/.test(corpus);
 }
 
 async function fetchYahooMarketSignal(queryText, normalizedQuery = {}) {
@@ -561,6 +567,9 @@ async function fetchYahooMarketSignal(queryText, normalizedQuery = {}) {
     const lean = delta > 0.02 ? "up" : delta < -0.02 ? "down" : "flat";
     const high = Math.max(...recent);
     const low = Math.min(...recent);
+    const midpoint = (high + low) / 2 || latest || 1;
+    const rangeWidthPct = midpoint ? (high - low) / midpoint : 0;
+    const regimeRisk = rangeWidthPct >= 0.12 ? "high" : rangeWidthPct >= 0.07 ? "medium" : "low";
 
     return {
       signals: [
@@ -581,6 +590,17 @@ async function fetchYahooMarketSignal(queryText, normalizedQuery = {}) {
         },
       ],
       conflict_map: [],
+      market_metrics: {
+        symbol: target.symbol,
+        label: target.label,
+        latest_price: Number(latest.toFixed(4)),
+        prior_price: Number(prior.toFixed(4)),
+        delta_pct: Number(delta.toFixed(4)),
+        range_low: Number(low.toFixed(4)),
+        range_high: Number(high.toFixed(4)),
+        range_width_pct: Number(rangeWidthPct.toFixed(4)),
+        regime_risk: regimeRisk,
+      },
     };
   } catch (_error) {
     return null;
@@ -638,6 +658,14 @@ async function fetchFredMacroSignal(fetchJson, queryText, normalizedQuery = {}) 
         },
       ],
       conflict_map: [],
+      macro_metrics: {
+        series_id: series.seriesId,
+        label: series.label,
+        latest_value: Number(latest.toFixed(4)),
+        previous_value: Number(previous.toFixed(4)),
+        delta: Number(delta.toFixed(4)),
+        lean,
+      },
     };
   } catch (_error) {
     return null;
@@ -1054,6 +1082,69 @@ function summarizeDirectionalLean(liveSignals = []) {
   return "flat";
 }
 
+function formatMarketStructureForPrompt(marketStructure = {}) {
+  if (!marketStructure || typeof marketStructure !== "object") return "";
+  return uniqueStrings([
+    marketStructure?.trend_signal?.summary ? `trend=${marketStructure.trend_signal.summary}` : "",
+    marketStructure?.range_signal?.summary ? `range=${marketStructure.range_signal.summary}` : "",
+    marketStructure?.regime_risk_signal?.summary ? `regime=${marketStructure.regime_risk_signal.summary}` : "",
+    marketStructure?.consensus_reference?.summary ? `consensus=${marketStructure.consensus_reference.summary}` : "",
+    Array.isArray(marketStructure?.macro_context) && marketStructure.macro_context.length > 0
+      ? `macro=${marketStructure.macro_context.join(" | ")}`
+      : "",
+  ]).join("; ");
+}
+
+function buildDirectionalMarketRead({
+  queryText,
+  marketStructure = {},
+  keyDrivers = [],
+  invalidators = [],
+  domainConfig = {},
+}) {
+  const trendLean = safeText(marketStructure?.trend_signal?.lean, "flat").toLowerCase();
+  const rangeLean = safeText(marketStructure?.range_signal?.lean, "contained").toLowerCase();
+  const regimeLean = safeText(marketStructure?.regime_risk_signal?.lean, "medium").toLowerCase();
+  const subject = safeText(queryText).split(/\s+/).slice(0, 4).join(" ") || safeText(domainConfig?.short_label, "This market");
+
+  let primaryCall = `${subject} is likely to remain range-bound with mixed conviction over the selected horizon.`;
+  if (trendLean === "up" && rangeLean === "contained") {
+    primaryCall = `${subject} is likely to stay in range with a mild bullish bias over the selected horizon.`;
+  } else if (trendLean === "down" && rangeLean === "contained") {
+    primaryCall = `${subject} is likely to stay in range with a mild bearish bias over the selected horizon.`;
+  } else if (trendLean === "up" && rangeLean === "wide") {
+    primaryCall = `${subject} is trading with upward pressure, but the range remains wide and vulnerable to reversals.`;
+  } else if (trendLean === "down" && rangeLean === "wide") {
+    primaryCall = `${subject} is under pressure and trading in a wide risk range over the selected horizon.`;
+  }
+
+  const whyThisSide = uniqueStrings([
+    marketStructure?.trend_signal?.summary,
+    marketStructure?.range_signal?.summary,
+    marketStructure?.regime_risk_signal?.summary,
+    keyDrivers.length ? `The active edge is currently anchored by ${keyDrivers.slice(0, 2).join(" and ")}.` : "",
+  ])
+    .slice(0, 2)
+    .join(" ");
+  const recommendedPosture =
+    regimeLean === "high"
+      ? "Treat this as a fragile market read and size decisions conservatively until regime risk cools."
+      : "Treat this as a bounded market read and keep watching the range and regime triggers before acting more aggressively.";
+  const marketInvalidators = invalidators.length
+    ? invalidators
+    : uniqueStrings([
+        marketStructure?.regime_risk_signal?.summary ? "A sharper regime-break signal would invalidate the current range read." : "",
+        marketStructure?.trend_signal?.summary ? "A reversal in search and price momentum would flip the directional bias." : "",
+      ]).slice(0, 4);
+
+  return {
+    primaryCall,
+    whyThisSide,
+    recommendedPosture,
+    invalidators: marketInvalidators,
+  };
+}
+
 function buildFallbackDossierPrediction({
   queryText,
   normalizedQuery,
@@ -1084,6 +1175,8 @@ function buildFallbackDossierPrediction({
   ).slice(0, 4);
   const dominantLean = summarizeDirectionalLean(liveSignals);
   const binaryFrame = normalizedQuery?.binary_frame || {};
+  const marketStructure = verifiedEvidencePack?.market_structure || null;
+  const marketLike = Boolean(marketStructure);
   const primarySide = safeText(binaryFrame?.question_side_a, "Primary");
   const secondarySide = safeText(binaryFrame?.question_side_b, "Alternative");
 
@@ -1127,6 +1220,18 @@ function buildFallbackDossierPrediction({
       ? `The current edge comes from ${keyDrivers.slice(0, 2).join(" and ")}.`
       : "The current edge comes from the strongest verified directional signals in the run.";
     recommendedPosture = "Treat this as a directional read and monitor the flip conditions before acting on it.";
+  } else if (marketLike) {
+    const marketRead = buildDirectionalMarketRead({
+      queryText,
+      marketStructure,
+      keyDrivers,
+      invalidators,
+      domainConfig,
+    });
+    primaryCall = marketRead.primaryCall;
+    whyThisSide = marketRead.whyThisSide;
+    recommendedPosture = marketRead.recommendedPosture;
+    invalidators.splice(0, invalidators.length, ...marketRead.invalidators);
   } else {
     const leanPhrase =
       dominantLean === "up"
@@ -1150,7 +1255,11 @@ function buildFallbackDossierPrediction({
       selected_variables: selectedVariables.map((variable) => variable.label).filter(Boolean).slice(0, 6),
       ranked_drivers: keyDrivers,
       macro_context: normalizeTextList(Array.isArray(baselineConsensusPack?.consensus_prediction) ? baselineConsensusPack.consensus_prediction : [safeText(baselineConsensusPack?.consensus_prediction)], 3),
-      case_specific_context: liveSignals.map((signal) => `${signal.label}: ${signal.summary}`).slice(0, 4),
+      case_specific_context: uniqueStrings(
+        liveSignals.map((signal) => `${signal.label}: ${signal.summary}`).concat(
+          marketStructure ? [formatMarketStructureForPrompt(marketStructure)] : []
+        )
+      ).slice(0, 4),
       uncertainty_map: counterSignals,
       data_quality_map: Array.isArray(verifiedEvidencePack?.missingness_map) ? verifiedEvidencePack.missingness_map.slice(0, 4) : [],
     },
@@ -1370,11 +1479,12 @@ function buildVerificationSummary({ searchPayload, sourceTrustMap, conflictMap, 
   ]).join(" ");
 }
 
-function buildSourceUsageSummary({ normalizedQuery = {}, domainConfig = {}, sourceLedger = [] }) {
+function buildSourceUsageSummary({ normalizedQuery = {}, domainConfig = {}, sourceLedger = [], predictionMarketFrame = null }) {
   const usedSources = uniqueStrings(sourceLedger);
   const policyLike = isPolicyLikeQuery(normalizedQuery, domainConfig);
   const marketLike = isMarketLikeQuery(normalizedQuery, domainConfig);
   const requiredSources = [];
+  const optionalSources = [];
 
   if (policyLike) {
     requiredSources.push("wikidata", "gdelt", "rss_allowlist");
@@ -1384,16 +1494,104 @@ function buildSourceUsageSummary({ normalizedQuery = {}, domainConfig = {}, sour
   }
 
   if (marketLike) {
-    requiredSources.push("yahoo_finance");
+    requiredSources.push("yahoo_finance", "google_trends");
+    if (predictionMarketFrame) {
+      requiredSources.push("polymarket_public");
+    }
+    if (isMacroMarketQuery(normalizedQuery?.original_query, normalizedQuery)) {
+      if (safeText(process.env.FRED_API_KEY)) {
+        requiredSources.push("fred_api");
+      } else {
+        optionalSources.push("fred_api");
+      }
+    }
   }
 
   const uniqueRequiredSources = uniqueStrings(requiredSources);
+  const uniqueOptionalSources = uniqueStrings(optionalSources);
   return {
     policy_like: policyLike,
     market_like: marketLike,
     required_sources: uniqueRequiredSources,
+    optional_sources: uniqueOptionalSources,
     used_sources: usedSources,
     missing_required_sources: uniqueRequiredSources.filter((sourceId) => !usedSources.includes(sourceId)),
+    missing_optional_sources: uniqueOptionalSources.filter((sourceId) => !usedSources.includes(sourceId)),
+  };
+}
+
+function buildMarketStructure({
+  queryText = "",
+  normalizedQuery = {},
+  liveSignals = [],
+  connectorPacks = [],
+  predictionMarketFrame = null,
+  sourceUsage = {},
+}) {
+  if (!isMarketLikeQuery(normalizedQuery, getDomain(normalizedQuery?.primary_domain_id, GENERAL_FORECAST_DOMAIN))) {
+    return null;
+  }
+
+  const yahooPack = connectorPacks.find((pack) => pack?.market_metrics);
+  const fredPack = connectorPacks.find((pack) => pack?.macro_metrics);
+  const trendSignal =
+    (Array.isArray(liveSignals) ? liveSignals : []).find((signal) => safeText(signal?.source_id) === "google_trends") ||
+    (Array.isArray(liveSignals) ? liveSignals : []).find((signal) => safeText(signal?.source_id) === "yahoo_finance") ||
+    null;
+  const marketMetrics = yahooPack?.market_metrics || null;
+  const macroMetrics = fredPack?.macro_metrics || null;
+
+  const rangeSignal = marketMetrics
+    ? {
+        source_id: "yahoo_finance",
+        label: `${safeText(marketMetrics?.label, "Asset")} range pressure`,
+        summary: `${safeText(marketMetrics?.label, "Asset")} traded between ${Number(marketMetrics?.range_low || 0).toFixed(2)} and ${Number(
+          marketMetrics?.range_high || 0
+        ).toFixed(2)} over the recent window, with range width ${Math.round(Number(marketMetrics?.range_width_pct || 0) * 100)}%.`,
+        lean: Number(marketMetrics?.range_width_pct || 0) >= 0.08 ? "wide" : "contained",
+      }
+    : null;
+  const regimeRiskSignal = marketMetrics
+    ? {
+        source_id: "yahoo_finance",
+        label: `${safeText(marketMetrics?.label, "Asset")} regime risk`,
+        summary: `${safeText(marketMetrics?.label, "Asset")} shows ${safeText(marketMetrics?.regime_risk, "medium")} regime-break risk with ${Math.round(
+          Math.abs(Number(marketMetrics?.delta_pct || 0)) * 100
+        )}% recent directional pressure.`,
+        lean: safeText(marketMetrics?.regime_risk, "medium"),
+      }
+    : null;
+  const consensusReference = predictionMarketFrame
+    ? {
+        source_id: "polymarket_public",
+        summary: `Closest market reference leans ${safeText(
+          predictionMarketFrame?.outcome || normalizedQuery?.question_side_a,
+          "the bullish side"
+        )} at ${Math.round(
+          clamp01(predictionMarketFrame?.calibrated_probability ?? predictionMarketFrame?.implied_probability, 0.5) * 100
+        )}%.`,
+        match_status: safeText(predictionMarketFrame?.match_status, "reference"),
+      }
+    : null;
+  const macroContext = uniqueStrings(
+    []
+      .concat(macroMetrics ? [`${safeText(macroMetrics?.label)} moved from ${Number(macroMetrics?.previous_value || 0).toFixed(2)} to ${Number(macroMetrics?.latest_value || 0).toFixed(2)}.`] : [])
+      .concat(sourceUsage?.missing_optional_sources?.includes("fred_api") ? ["FRED macro context is optional and currently unavailable in this runtime."] : [])
+  ).slice(0, 3);
+
+  return {
+    trend_signal: trendSignal
+      ? {
+          source_id: safeText(trendSignal?.source_id),
+          label: safeText(trendSignal?.label),
+          summary: safeText(trendSignal?.summary),
+          lean: safeText(trendSignal?.lean, "flat"),
+        }
+      : null,
+    range_signal: rangeSignal,
+    regime_risk_signal: regimeRiskSignal,
+    consensus_reference: consensusReference,
+    macro_context: macroContext,
   };
 }
 
@@ -1615,6 +1813,8 @@ function buildDossierPredictionPrompt({
   const entityLabels = Array.isArray(normalizedQuery?.entities)
     ? normalizedQuery.entities.map((entity) => safeText(entity?.label)).filter(Boolean).slice(0, 4)
     : [];
+  const marketStructureSummary = formatMarketStructureForPrompt(verifiedEvidencePack?.market_structure);
+  const marketLike = Boolean(verifiedEvidencePack?.market_structure);
 
   return `Query: "${safeText(queryText)}"
 Domain: ${safeText(normalizedQuery?.primary_domain_id)}
@@ -1634,6 +1834,7 @@ Conflicts: ${compactConflictMapForPrompt(verifiedEvidencePack?.conflict_map)
     .join("; ")}
 Verification summary: ${safeText(verifiedEvidencePack?.verification_summary)}
 Consensus note: ${safeText(baselineConsensusPack?.consensus_prediction)}
+Market structure: ${marketStructureSummary}
 
 Return one JSON object only with keys:
 structured_dossier, raw_prediction.
@@ -1641,8 +1842,10 @@ structured_dossier, raw_prediction.
 Rules:
 - Publish a directional thesis when evidence has orientation.
 - Keep structured_dossier compact.
+- If this is a markets/assets question, reason explicitly in this order: trend, range, regime risk, consensus.
 - raw_prediction must include primary_call, confidence_score, key_drivers, counter_signals, invalidators, historical_anchors, why_this_side, recommended_posture.
 - If the question is binary, include probability_split with explicit side labels and binary_contract with question_side_a, question_side_b, winning_side, winning_probability, flip_conditions, and keep winning_side explicit.
+- Do not force a binary contract for directional/range markets queries.
 - For binary calls, set why_this_side, winning_side, and losing_side so the winner never has to be inferred from prose.
 - Do not leave the winner implicit in the prose.
 - No markdown. No commentary. No wrapper keys.`;
@@ -1871,6 +2074,7 @@ function buildBaselineConsensusPack({ verifiedEvidencePack = {}, normalizedQuery
       verifiedEvidencePack?.prediction_market_frame?.implied_probability,
     0.5
   );
+  const marketConsensusReference = safeText(verifiedEvidencePack?.market_structure?.consensus_reference?.summary);
 
   return {
     naive_baseline: binaryFrame.asks_binary_question
@@ -1880,7 +2084,7 @@ function buildBaselineConsensusPack({ verifiedEvidencePack = {}, normalizedQuery
       ? `Closest consensus reference leans ${primaryProbability >= 0.55 ? safeText(binaryFrame.question_side_a, "Primary") : safeText(binaryFrame.question_side_b, "Alternative")} at ${Math.round(
           primaryProbability * 100
         )}%.`
-      : "No strong external consensus reference was available for this run.",
+      : marketConsensusReference || "No strong external consensus reference was available for this run.",
     delta_vs_consensus: verifiedEvidencePack?.prediction_market_frame ? "Crystal should explain where it diverges from external pricing." : "Consensus delta unavailable.",
     edge_claim:
       verifiedEvidencePack?.prediction_market_frame || verifiedEvidencePack?.live_signals?.length >= 2
@@ -1925,6 +2129,14 @@ function buildFallbackVerifiedEvidencePack({ normalizedQuery = {}, variableSelec
     normalizedQuery,
     domainConfig,
     sourceLedger: fallbackPack.source_ledger,
+    predictionMarketFrame: fallbackPack.prediction_market_frame,
+  });
+  fallbackPack.market_structure = buildMarketStructure({
+    normalizedQuery,
+    liveSignals: fallbackPack.live_signals,
+    connectorPacks: [],
+    predictionMarketFrame: fallbackPack.prediction_market_frame,
+    sourceUsage: fallbackPack.source_usage,
   });
   fallbackPack.evidence_quality = computeEvidenceQuality(fallbackPack, domainConfig, engine || "extended");
   return fallbackPack;
@@ -1941,6 +2153,7 @@ async function buildVerifiedEvidencePack(context, { runId, queryText, normalized
   const resolveGdeltSignal = typeof context.fetchGdeltAttentionSignal === "function" ? context.fetchGdeltAttentionSignal : fetchGdeltAttentionSignal;
   const resolveAllowlistedRssSignal =
     typeof context.fetchAllowlistedRssSignal === "function" ? context.fetchAllowlistedRssSignal : fetchAllowlistedRssSignal;
+  const resolveTrendSignal = typeof context.fetchTrendSignal === "function" ? context.fetchTrendSignal : fetchTrendSignal;
   const resolveYahooMarketSignal = typeof context.fetchYahooMarketSignal === "function" ? context.fetchYahooMarketSignal : fetchYahooMarketSignal;
   const resolveFredMacroSignal = typeof context.fetchFredMacroSignal === "function" ? context.fetchFredMacroSignal : fetchFredMacroSignal;
   const resolvePredictionMarketPulse =
@@ -1977,7 +2190,7 @@ async function buildVerifiedEvidencePack(context, { runId, queryText, normalized
   }
 
   const liveSignals = [];
-  const trendSignal = await fetchTrendSignal(queryText, normalizedQuery, domainConfig);
+  const trendSignal = await resolveTrendSignal(queryText, normalizedQuery, domainConfig);
   if (trendSignal) {
     liveSignals.push(trendSignal);
   }
@@ -2066,6 +2279,15 @@ async function buildVerifiedEvidencePack(context, { runId, queryText, normalized
     normalizedQuery,
     domainConfig,
     sourceLedger,
+    predictionMarketFrame,
+  });
+  const marketStructure = buildMarketStructure({
+    queryText,
+    normalizedQuery,
+    liveSignals,
+    connectorPacks,
+    predictionMarketFrame,
+    sourceUsage,
   });
 
   const verifiedEvidencePack = {
@@ -2097,6 +2319,7 @@ async function buildVerifiedEvidencePack(context, { runId, queryText, normalized
     },
     prediction_market_frame: predictionMarketFrame,
     source_usage: sourceUsage,
+    market_structure: marketStructure,
     selected_variables: Array.isArray(variableSelectionPack?.selected_variables) ? variableSelectionPack.selected_variables : [],
     adapter_activation_map: Array.isArray(variableSelectionPack?.adapter_activation_map) ? variableSelectionPack.adapter_activation_map : [],
     notes: uniqueStrings([
@@ -2105,6 +2328,9 @@ async function buildVerifiedEvidencePack(context, { runId, queryText, normalized
       conflictMap.length > 0 ? "Active signal conflicts remain unresolved." : "",
       sourceUsage.missing_required_sources.length > 0
         ? `Required source coverage is still missing ${sourceUsage.missing_required_sources.join(", ")}.`
+        : "",
+      sourceUsage.missing_optional_sources.length > 0
+        ? `Optional source coverage is still missing ${sourceUsage.missing_optional_sources.join(", ")}.`
         : "",
     ]).slice(0, 4),
   };
@@ -2854,5 +3080,6 @@ module.exports = {
     buildVerifiedEvidencePack,
     buildFallbackVerifiedEvidencePack,
     buildSourceUsageSummary,
+    buildMarketStructure,
   },
 };

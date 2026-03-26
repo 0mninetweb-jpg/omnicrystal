@@ -472,7 +472,9 @@ function inferIntentShape(queryText) {
   if (/\b(top|best|worst|ranking|rank|classifica)\b/.test(normalized)) return "ranking";
   if (
     BINARY_YES_NO_PATTERNS.some((pattern) => pattern.test(normalized)) ||
-    /\b(should i|dovrei|buy|sell|wait|rent|surviv\w*|sopravviv\w*|pass|approve|reject|win|lose|vincer\w*|cambio di governo|government change|change of government|snap election|elezioni anticipate|governo)\b/.test(normalized)
+    /\b(should i|dovrei|buy|sell|wait|rent|surviv\w*|sopravviv\w*|pass|approve|reject|win|lose|vincer\w*|cambio di governo|government change|change of government|snap election|elezioni anticipate|governo|outperform|underperform|break higher|break lower|breakout|break down|break below|break above|rise above|fall below)\b/.test(
+      normalized
+    )
   ) {
     return "binary_outcome";
   }
@@ -574,6 +576,56 @@ function extractPolicyContext(queryText = "", resolutionFrame = "", binaryFrame 
   };
 }
 
+function inferMarketBinaryFrame(queryText = "") {
+  const normalized = normalizeText(queryText);
+  const cleanedQuery = normalizeDisplayLabel(queryText);
+  if (!normalized) return null;
+
+  const outperformMatch = cleanedQuery.match(/^will\s+(.+?)\s+outperform\s+(.+?)(?:\s+(?:this|next)\b.*)?\??$/i);
+  if (outperformMatch) {
+    const asset = normalizeDisplayLabel(outperformMatch[1]);
+    return {
+      asks_binary_question: true,
+      question_side_a: `${asset} outperforms`,
+      question_side_b: `${asset} does not outperform`,
+    };
+  }
+
+  if (/\bbitcoin\b/.test(normalized) && /\b(break higher|breakout|break above|rise above)\b/.test(normalized)) {
+    return {
+      asks_binary_question: true,
+      question_side_a: "Breaks higher",
+      question_side_b: "Holds range",
+    };
+  }
+
+  if (/\bbitcoin\b/.test(normalized) && /\b(break lower|break down|break below|fall below)\b/.test(normalized)) {
+    return {
+      asks_binary_question: true,
+      question_side_a: "Breaks lower",
+      question_side_b: "Holds range",
+    };
+  }
+
+  if (/\b(gold|oil|bitcoin|ethereum|nasdaq|s&p 500|sp500|eurusd|eur\/usd)\b/.test(normalized) && /\b(rise|higher|up)\b/.test(normalized)) {
+    return {
+      asks_binary_question: true,
+      question_side_a: "Rises",
+      question_side_b: "Does not rise",
+    };
+  }
+
+  if (/\b(gold|oil|bitcoin|ethereum|nasdaq|s&p 500|sp500|eurusd|eur\/usd)\b/.test(normalized) && /\b(fall|lower|down)\b/.test(normalized)) {
+    return {
+      asks_binary_question: true,
+      question_side_a: "Falls",
+      question_side_b: "Does not fall",
+    };
+  }
+
+  return null;
+}
+
 function extractBinaryFrame(queryText) {
   const normalized = normalizeText(queryText);
   const fixtureSides = extractFixtureSides(queryText);
@@ -583,6 +635,11 @@ function extractBinaryFrame(queryText) {
       question_side_a: fixtureSides.question_side_a,
       question_side_b: fixtureSides.question_side_b,
     };
+  }
+
+  const marketBinaryFrame = inferMarketBinaryFrame(queryText);
+  if (marketBinaryFrame) {
+    return marketBinaryFrame;
   }
 
   if (/\b(wait|buy now|buy|rent now|affittare|comprare|spostarmi|move now)\b/.test(normalized) && /\b(should i|dovrei)\b/.test(normalized)) {

@@ -312,7 +312,7 @@ function createVerticalAdapters() {
         return [
           buildVariable(
             this.id,
-            "Price action, range pressure, and regime change risk",
+            "Trend and momentum structure",
             "core",
             {
               causal_relevance: 0.86,
@@ -322,8 +322,56 @@ function createVerticalAdapters() {
               marginal_information_gain: 0.82,
             },
             {
-              evidence_needs: ["trend_signal", "consensus_baseline", "historical_baseline"],
-              rationale: "Markets improve when Crystal separates trend, regime, and consensus explicitly.",
+              evidence_needs: ["trend_signal", "historical_baseline", "consensus_baseline"],
+              rationale: "Markets improve when Crystal isolates trend and momentum instead of collapsing everything into one generic asset read.",
+            }
+          ),
+          buildVariable(
+            this.id,
+            "Range pressure and volatility compression",
+            "core",
+            {
+              causal_relevance: 0.84,
+              temporal_relevance: 0.8,
+              geographic_relevance: 0.42,
+              signal_quality: 0.7,
+              marginal_information_gain: 0.8,
+            },
+            {
+              evidence_needs: ["trend_signal", "historical_baseline"],
+              rationale: "Range behavior often matters more than raw direction for short-horizon asset calls.",
+            }
+          ),
+          buildVariable(
+            this.id,
+            "Regime break and drawdown risk",
+            "core",
+            {
+              causal_relevance: 0.88,
+              temporal_relevance: 0.74,
+              geographic_relevance: 0.4,
+              signal_quality: 0.68,
+              marginal_information_gain: 0.82,
+            },
+            {
+              evidence_needs: ["trend_signal", "historical_baseline", "macro_context"],
+              rationale: "Markets need an explicit regime-risk layer so Crystal can distinguish trend continuation from fragile break risk.",
+            }
+          ),
+          buildVariable(
+            this.id,
+            "External consensus and market-implied baseline",
+            "consensus",
+            {
+              causal_relevance: 0.8,
+              temporal_relevance: 0.78,
+              geographic_relevance: 0.36,
+              signal_quality: 0.76,
+              marginal_information_gain: 0.74,
+            },
+            {
+              evidence_needs: ["consensus_baseline", "prediction_market"],
+              rationale: "Crystal should know where external pricing or consensus already leans before claiming an edge.",
             }
           ),
           buildVariable(
@@ -338,7 +386,7 @@ function createVerticalAdapters() {
               marginal_information_gain: 0.76,
             },
             {
-              evidence_needs: ["macro_context", "search_live"],
+              evidence_needs: ["macro_context", "search_live", "trend_signal"],
               rationale: "Edge often comes from spillovers that the consensus underweights.",
             }
           ),
