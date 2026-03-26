@@ -1,5 +1,5 @@
 ﻿{
-    "generated_at":  "2026-03-26T18:25:17.5852650+01:00",
+    "generated_at":  "2026-03-26T19:57:56.3978958+01:00",
     "local_api_base":  "https://api-paaqyfwena-ew.a.run.app",
     "remote_service_url":  "https://crystal-core-paaqyfwena-ew.a.run.app",
     "queries":  [
@@ -9,9 +9,9 @@
                         "remote_status":  "completed",
                         "local_domain":  "A.24.governance_policy_and_public_timeline",
                         "remote_domain":  "A.24.governance_policy_and_public_timeline",
-                        "local_call":  "Lean Si 64/36",
+                        "local_call":  "Lean No 64/36",
                         "remote_call":  "Lean No 64/36",
-                        "local_winner":  "Si",
+                        "local_winner":  "No",
                         "remote_winner":  "No",
                         "local_band":  "limited",
                         "remote_band":  "limited",
@@ -38,7 +38,7 @@
                         "local_domain":  "A.29.sports_performance_and_outcomes",
                         "remote_domain":  "A.29.sports_performance_and_outcomes",
                         "local_call":  "Crystal needs a live sports provider before it can publish a grounded match pick.",
-                        "remote_call":  "Crystal needs a live sports provider before it can publish a grounded match pick.",
+                        "remote_call":  "Crystal could not resolve the sports fixture cleanly enough to publish a grounded match pick.",
                         "local_winner":  "",
                         "remote_winner":  "",
                         "local_band":  "",
@@ -66,7 +66,7 @@
                         "local_domain":  "A.23.markets_and_asset_regimes",
                         "remote_domain":  "A.23.markets_and_asset_regimes",
                         "local_call":  "Bitcoin is likely to trade within a defined range over the next 30 days with moderate volatility and no clear directional breakout.",
-                        "remote_call":  "Bitcoin is expected to trade within a defined range over the next 30 days with moderate volatility and no clear directional breakout.",
+                        "remote_call":  "Bitcoin is likely to trade within a moderate range with mild upward bias over the next 30 days",
                         "local_winner":  "",
                         "remote_winner":  "",
                         "local_band":  "",
@@ -147,7 +147,7 @@
     "summary":  {
                     "remote_max_completed_streak":  5,
                     "binary_comparable_count":  3,
-                    "binary_winner_mismatch_rate":  0.3333,
+                    "binary_winner_mismatch_rate":  0,
                     "median_probability_delta":  0,
                     "missing_binary_contract_rate":  0.25,
                     "direct_api_502_count":  0,
@@ -156,7 +156,6 @@
                     "blockers":  [
                                      "sports provider grounding unavailable on local_core: Inter vs Juventus",
                                      "sports provider grounding unavailable on remote: Inter vs Juventus",
-                                     "binary winner mismatch present",
                                      "missing binary contract on binary benchmark",
                                      "sports probe is not provider-grounded and parity-ready"
                                  ]

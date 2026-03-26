@@ -36,7 +36,7 @@
 
 ### macro_markets
 - Cases: `3`
-- Used sources: `polymarket_public`, `google_trends`, `historical-cache`, `yahoo_finance`
+- Used sources: `eurostat_api`, `polymarket_public`, `world_bank_api`, `oecd_api`, `google_trends`, `historical-cache`, `yahoo_finance`
 - Missing required sources: none
 - Missing optional sources: `fred_api`
 
@@ -54,8 +54,8 @@
 | range_regime | Market regime shift in tech stocks this summer | A.23.markets_and_asset_regimes | ready | yahoo_finance, google_trends, historical-cache | - | Range pressure remains elevated and regime-break risk is still live over the selected horizon. |
 | consensus_reference | Will gold outperform equities this quarter? | A.23.markets_and_asset_regimes | ready | yahoo_finance, polymarket_public, google_trends, historical-cache | - | Lean gold does not outperform 58/42 |
 | consensus_reference | Crypto risk appetite in the next 6 months | A.23.markets_and_asset_regimes | ready | yahoo_finance, google_trends, historical-cache | - | Risk appetite still leans constructive, but the edge remains bounded by range pressure and consensus positioning. |
-| macro_markets | Will ECB rates fall by autumn? | A.14.macro_economy_and_cycles | ready | polymarket_public, google_trends, historical-cache | fred_api | Lean Yes 57/43 |
-| macro_markets | Inflation in Italy next 12 months | A.14.macro_economy_and_cycles | ready | google_trends, historical-cache | fred_api | Macro market pressure remains elevated over the selected window, with rates and liquidity still shaping the read. |
+| macro_markets | Will ECB rates fall by autumn? | A.14.macro_economy_and_cycles | ready | eurostat_api, polymarket_public, world_bank_api, oecd_api, google_trends, historical-cache | fred_api | Lean Yes 57/43 |
+| macro_markets | Inflation in Italy next 12 months | A.14.macro_economy_and_cycles | ready | eurostat_api, world_bank_api, oecd_api, google_trends, historical-cache | fred_api | Macro market pressure remains elevated over the selected window, with rates and liquidity still shaping the read. |
 | macro_markets | EURUSD next quarter | A.23.markets_and_asset_regimes | ready | yahoo_finance, google_trends, historical-cache | fred_api | Macro market pressure remains elevated over the selected window, with rates and liquidity still shaping the read. |
 
 ## Open Issues
