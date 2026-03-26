@@ -85,7 +85,6 @@ function New-EnvYamlFile {
 
   $lines = foreach ($key in $Entries.Keys) {
     $value = [string]$Entries[$key]
-    if ([string]::IsNullOrWhiteSpace($value)) { continue }
     $escaped = $value.Replace('"', '\"')
     "${key}: `"$escaped`""
   }

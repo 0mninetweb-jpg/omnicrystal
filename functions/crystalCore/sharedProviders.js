@@ -132,6 +132,15 @@ function parseJsonEnvArray(value = "") {
   }
 }
 
+function readConfiguredCredential(value = "") {
+  const normalized = safeText(value);
+  if (!normalized) return "";
+  if (/^-[A-Za-z][A-Za-z0-9-]*:?$/.test(normalized)) {
+    return "";
+  }
+  return normalized;
+}
+
 function fetchJsonWithHeaders(url, headers = {}) {
   return fetch(url, {
     headers: {
@@ -210,7 +219,7 @@ function getProviderRuntimeStatus(sourceId) {
   }
 
   if (sourceId === "fred_api") {
-    const configured = Boolean(safeText(process.env.FRED_API_KEY));
+    const configured = Boolean(readConfiguredCredential(process.env.FRED_API_KEY));
     return {
       source_id: sourceId,
       title: "FRED API",
@@ -225,7 +234,7 @@ function getProviderRuntimeStatus(sourceId) {
   }
 
   if (sourceId === "openaq") {
-    const configured = Boolean(safeText(process.env.OPENAQ_API_KEY));
+    const configured = Boolean(readConfiguredCredential(process.env.OPENAQ_API_KEY));
     return {
       source_id: sourceId,
       title: "OpenAQ",
@@ -240,7 +249,7 @@ function getProviderRuntimeStatus(sourceId) {
   }
 
   if (sourceId === "eia_api") {
-    const configured = Boolean(safeText(process.env.EIA_API_KEY));
+    const configured = Boolean(readConfiguredCredential(process.env.EIA_API_KEY));
     return {
       source_id: sourceId,
       title: "EIA API",
@@ -429,7 +438,7 @@ function buildRequiredSourcesForQuery({
       requiredSources.push("polymarket_public");
     }
     if (/rates|inflation|ecb|fed|macro|eurusd|fx|yield|liquidity/.test(corpus)) {
-      if (safeText(process.env.FRED_API_KEY)) {
+      if (readConfiguredCredential(process.env.FRED_API_KEY)) {
         requiredSources.push("fred_api");
       } else {
         optionalSources.push("fred_api");
@@ -452,7 +461,7 @@ function buildRequiredSourcesForQuery({
 
   if (macroLike) {
     requiredSources.push("world_bank_api", "eurostat_api", "oecd_api");
-    if (safeText(process.env.FRED_API_KEY)) {
+    if (readConfiguredCredential(process.env.FRED_API_KEY)) {
       requiredSources.push("fred_api");
     } else {
       optionalSources.push("fred_api");
@@ -468,7 +477,7 @@ function buildRequiredSourcesForQuery({
   }
 
   if (environmentLike) {
-    if (safeText(process.env.OPENAQ_API_KEY)) {
+    if (readConfiguredCredential(process.env.OPENAQ_API_KEY)) {
       requiredSources.push("openaq");
     } else {
       optionalSources.push("openaq");
@@ -1006,7 +1015,7 @@ async function fetchGtfsRealtimeSignal(queryText = "", normalizedQuery = {}) {
 }
 
 async function fetchOpenAqSignal(queryText = "", normalizedQuery = {}) {
-  const apiKey = safeText(process.env.OPENAQ_API_KEY);
+  const apiKey = readConfiguredCredential(process.env.OPENAQ_API_KEY);
   if (!apiKey) return null;
   const country = getCountryProfile(queryText, normalizedQuery).iso2 || "IT";
   const baseUrl = safeText(process.env.OPENAQ_BASE_URL, DEFAULT_OPENAQ_BASE_URL).replace(/\/+$/, "");

@@ -1,6 +1,6 @@
 param(
   [string]$LocalApiBase = "https://api-paaqyfwena-ew.a.run.app",
-  [string]$RemoteServiceUrl = "https://crystal-core-294034419055.europe-west1.run.app",
+  [string]$RemoteServiceUrl = "https://crystal-core-paaqyfwena-ew.a.run.app",
   [string]$OutputMarkdownPath = "docs/parity-report-2026-03-24.md",
   [string]$OutputJsonPath = "docs/parity-report-2026-03-24.json"
 )
@@ -40,6 +40,19 @@ function Get-RemoteToken {
     throw "Impossibile ottenere un token per il servizio remoto."
   }
   return $token
+}
+
+function Resolve-CanonicalRemoteServiceUrl {
+  param([string]$FallbackUrl)
+  $gcloud = Get-GcloudExecutable
+  try {
+    $resolved = (& $gcloud run services describe crystal-core --region europe-west1 --project omnicrystal --format "value(status.url)" 2>$null | Select-Object -First 1).Trim()
+    if ($resolved) {
+      return $resolved.TrimEnd("/")
+    }
+  } catch {
+  }
+  return $FallbackUrl.TrimEnd("/")
 }
 
 function Invoke-JsonPost {
@@ -188,6 +201,24 @@ function Get-SportsParityReady($card) {
   return [bool]($grounding.provider_required -and $grounding.provider_configured -and $grounding.fixture_resolved -and $grounding.parity_ready)
 }
 
+function Get-SportsGroundingFlag($card, [string]$name) {
+  $grounding = Get-SportsGrounding $card
+  if ($null -eq $grounding) { return $false }
+  if ($grounding.PSObject.Properties.Name -contains $name) {
+    return [bool]$grounding.$name
+  }
+  return $false
+}
+
+function Get-SportsGroundingReason($card) {
+  $grounding = Get-SportsGrounding $card
+  if ($null -eq $grounding) { return "" }
+  if ($grounding.PSObject.Properties.Name -contains "reason") {
+    return [string]$grounding.reason
+  }
+  return ""
+}
+
 function Get-SportsSideA($card) {
   $grounding = Get-SportsGrounding $card
   if ($null -ne $grounding -and $grounding.PSObject.Properties.Name -contains "question_side_a") {
@@ -273,6 +304,7 @@ $queries = @(
   }
 )
 
+$RemoteServiceUrl = Resolve-CanonicalRemoteServiceUrl -FallbackUrl $RemoteServiceUrl
 $remoteToken = Get-RemoteToken -Audience $RemoteServiceUrl.TrimEnd("/")
 $remoteHeaders = @{
   Authorization = "Bearer $remoteToken"
@@ -371,6 +403,12 @@ foreach ($item in $queries) {
   $remoteSideA = if ($sportsProbe) { Get-SportsSideA $remoteCard } else { "" }
   $localSideB = if ($sportsProbe) { Get-SportsSideB $localCard } else { "" }
   $remoteSideB = if ($sportsProbe) { Get-SportsSideB $remoteCard } else { "" }
+  $localProviderConfigured = if ($sportsProbe) { Get-SportsGroundingFlag $localCard "provider_configured" } else { $false }
+  $remoteProviderConfigured = if ($sportsProbe) { Get-SportsGroundingFlag $remoteCard "provider_configured" } else { $false }
+  $localFixtureResolved = if ($sportsProbe) { Get-SportsGroundingFlag $localCard "fixture_resolved" } else { $false }
+  $remoteFixtureResolved = if ($sportsProbe) { Get-SportsGroundingFlag $remoteCard "fixture_resolved" } else { $false }
+  $localSportsReason = if ($sportsProbe) { Get-SportsGroundingReason $localCard } else { "" }
+  $remoteSportsReason = if ($sportsProbe) { Get-SportsGroundingReason $remoteCard } else { "" }
 
   if ($item.expects_binary) {
     if (-not $localCard.binary_contract -or -not $remoteCard.binary_contract) {
@@ -409,6 +447,12 @@ foreach ($item in $queries) {
     remote_side_a = $remoteSideA
     local_side_b = $localSideB
     remote_side_b = $remoteSideB
+    local_provider_configured = $localProviderConfigured
+    remote_provider_configured = $remoteProviderConfigured
+    local_fixture_resolved = $localFixtureResolved
+    remote_fixture_resolved = $remoteFixtureResolved
+    local_sports_reason = $localSportsReason
+    remote_sports_reason = $remoteSportsReason
     expects_binary = $item.expects_binary
     timeout = [bool]$remoteWait.timed_out
   }
@@ -427,10 +471,10 @@ foreach ($item in $queries) {
       $sportsProbeReady = $true
     }
     if (-not $localSportsReady) {
-      $blockers += "sports provider grounding unavailable on local_core: $query"
+      $blockers += "sports provider grounding unavailable on local_core: $query (configured=$localProviderConfigured, fixture_resolved=$localFixtureResolved, reason=$localSportsReason)"
     }
     if (-not $remoteSportsReady) {
-      $blockers += "sports provider grounding unavailable on remote: $query"
+      $blockers += "sports provider grounding unavailable on remote: $query (configured=$remoteProviderConfigured, fixture_resolved=$remoteFixtureResolved, reason=$remoteSportsReason)"
     }
     if ($localSportsReady -and $remoteSportsReady) {
       if ($localSideA -ne $remoteSideA -or $localSideB -ne $remoteSideB) {

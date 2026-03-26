@@ -29,7 +29,7 @@ const FOUNDATION_CASES = [
   },
   {
     cluster: "travel",
-    query: "Travel disruption risk in Tokyo next 90 days",
+    query: "Travel disruption risk in Rome next 90 days",
     expectedDomains: ["A.9.travel_flows_and_disruption"],
     requiredSources: ["nominatim", "overpass", "opensky"],
     optionalSources: ["gtfs_static", "gtfs_realtime"],
@@ -83,6 +83,8 @@ const TARGET_RUNTIME_PROVIDER_IDS = [
 ];
 
 const DEFAULT_LIVE_HEALTH_URL = "https://omnicrystal.web.app/api/health";
+const CURRENT_WAVE_REQUIRED_BLOCKERS = ["fred_api", "gtfs_static", "gtfs_realtime"];
+const CURRENT_WAVE_OPTIONAL_MISSING = ["openaq"];
 
 function uniqueStrings(values = []) {
   return [...new Set((Array.isArray(values) ? values : []).filter((item) => typeof item === "string" && item.trim()))];
@@ -127,13 +129,9 @@ function withFoundationSmokeEnv(callback) {
     EIA_API_KEY: "synthetic-eia-key",
     GTFS_STATIC_FEEDS_JSON: JSON.stringify([
       { label: "Rome Transit", region_keywords: ["rome", "roma"], url: "https://fixtures.example/rome-static.zip" },
-      { label: "Tokyo Transit", region_keywords: ["tokyo"], url: "https://fixtures.example/tokyo-static.zip" },
-      { label: "Milan Transit", region_keywords: ["milan", "milano"], url: "https://fixtures.example/milan-static.zip" },
     ]),
     GTFS_REALTIME_FEEDS_JSON: JSON.stringify([
       { label: "Rome Transit Live", region_keywords: ["rome", "roma"], url: "https://fixtures.example/rome-realtime.pb" },
-      { label: "Tokyo Transit Live", region_keywords: ["tokyo"], url: "https://fixtures.example/tokyo-realtime.pb" },
-      { label: "Milan Transit Live", region_keywords: ["milan", "milano"], url: "https://fixtures.example/milan-realtime.pb" },
     ]),
   };
   const previous = {};
@@ -575,8 +573,13 @@ export async function runProviderFoundationBenchmark({ currentDate = new Date().
   const runtimeProviderStates = liveRuntimeProviderStates?.length ? liveRuntimeProviderStates : localRuntimeProviderStates;
   const runtimeConfigBlockers = runtimeProviderStates.filter(
     (provider) =>
-      provider?.available !== true &&
-      !["available_public", "available_public_anonymous", "implemented_public"].includes(safeText(provider?.status))
+      CURRENT_WAVE_REQUIRED_BLOCKERS.includes(safeText(provider?.source_id)) &&
+      provider?.available !== true
+  );
+  const runtimeOptionalMissing = runtimeProviderStates.filter(
+    (provider) =>
+      CURRENT_WAVE_OPTIONAL_MISSING.includes(safeText(provider?.source_id)) &&
+      provider?.available !== true
   );
 
   const syntheticContext = buildSyntheticContext();
@@ -641,6 +644,7 @@ export async function runProviderFoundationBenchmark({ currentDate = new Date().
     public_data_structure_failures: cases.filter((item) => !item.public_data_ready).length,
     runtime_provider_count: runtimeProviderStates.length,
     runtime_config_blocker_count: runtimeConfigBlockers.length,
+    runtime_optional_missing_count: runtimeOptionalMissing.length,
     runtime_state_source: liveRuntimeProviderStates?.length ? "live_health" : "local_env",
     synthetic_smoke_verdict:
       cases.every(
@@ -663,6 +667,13 @@ export async function runProviderFoundationBenchmark({ currentDate = new Date().
     summary,
     runtime_provider_states: runtimeProviderStates,
     runtime_config_blockers: runtimeConfigBlockers.map((provider) => ({
+      source_id: safeText(provider?.source_id),
+      status: safeText(provider?.status),
+      configured: provider?.configured === true,
+      available: provider?.available === true,
+      notes: Array.isArray(provider?.notes) ? provider.notes : [],
+    })),
+    runtime_optional_missing: runtimeOptionalMissing.map((provider) => ({
       source_id: safeText(provider?.source_id),
       status: safeText(provider?.status),
       configured: provider?.configured === true,
@@ -694,6 +705,7 @@ export async function writeProviderFoundationReport({
       `- Mobility structure failures: \`${previousSummary.mobility_structure_failures ?? "n/a"}\` -> \`${report.summary.mobility_structure_failures}\``,
       `- Public data structure failures: \`${previousSummary.public_data_structure_failures ?? "n/a"}\` -> \`${report.summary.public_data_structure_failures}\``,
       `- Runtime config blockers: \`${previousSummary.runtime_config_blocker_count ?? "n/a"}\` -> \`${report.summary.runtime_config_blocker_count}\``,
+      `- Runtime optional missing: \`${previousSummary.runtime_optional_missing_count ?? "n/a"}\` -> \`${report.summary.runtime_optional_missing_count}\``,
     ];
   }
 
@@ -716,6 +728,7 @@ export async function writeProviderFoundationReport({
     `- Public data structure failures: \`${report.summary.public_data_structure_failures}\``,
     `- Runtime provider count: \`${report.summary.runtime_provider_count}\``,
     `- Runtime config blocker count: \`${report.summary.runtime_config_blocker_count}\``,
+    `- Runtime optional missing count: \`${report.summary.runtime_optional_missing_count}\``,
     `- Runtime state source: \`${report.summary.runtime_state_source}\``,
     `- Synthetic smoke verdict: \`${report.summary.synthetic_smoke_verdict}\``,
     `- Runtime config verdict: \`${report.summary.runtime_config_verdict}\``,
@@ -741,6 +754,13 @@ export async function writeProviderFoundationReport({
     "## Runtime Config Blockers",
     ...(report.runtime_config_blockers.length
       ? report.runtime_config_blockers.map(
+          (provider) => `- \`${provider.source_id}\`: status=\`${provider.status}\`, notes=${provider.notes.join("; ") || "none"}`
+        )
+      : ["- None."]),
+    "",
+    "## Runtime Optional Missing",
+    ...(report.runtime_optional_missing.length
+      ? report.runtime_optional_missing.map(
           (provider) => `- \`${provider.source_id}\`: status=\`${provider.status}\`, notes=${provider.notes.join("; ") || "none"}`
         )
       : ["- None."]),

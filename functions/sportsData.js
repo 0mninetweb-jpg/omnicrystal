@@ -39,6 +39,15 @@ function safeText(value, fallback = "") {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
 }
 
+function readRuntimeCredential(value) {
+  const normalized = safeText(value);
+  if (!normalized) return "";
+  if (/^-[A-Za-z][A-Za-z0-9-]*:?$/.test(normalized)) {
+    return "";
+  }
+  return normalized;
+}
+
 function clamp01(value, fallback = 0) {
   const num = Number(value);
   if (!Number.isFinite(num)) return fallback;
@@ -100,7 +109,7 @@ function extractFixtureDate(queryText = "", queryPlan = {}) {
 }
 
 function getSportsConfig() {
-  const apiKey = safeText(process.env.API_FOOTBALL_KEY);
+  const apiKey = readRuntimeCredential(process.env.API_FOOTBALL_KEY);
   const provider = safeText(process.env.SPORTS_PROVIDER, DEFAULT_SPORTS_PROVIDER) || DEFAULT_SPORTS_PROVIDER;
   const baseUrl = safeText(process.env.SPORTS_PROVIDER_BASE_URL, DEFAULT_SPORTS_BASE_URL) || DEFAULT_SPORTS_BASE_URL;
   return {
@@ -186,19 +195,82 @@ async function findFixture(fetchJson, homeTeam, awayTeam, date) {
     return null;
   }
 
-  const payload = await callSportsApi(fetchJson, "/fixtures", {
-    date,
-    team: home.team.id,
-    season: date ? Number(date.slice(0, 4)) : undefined,
-  });
-  const fixtures = Array.isArray(payload?.response) ? payload.response : [];
   const homeId = Number(home.team.id);
   const awayId = Number(away.team.id);
-  const match = fixtures.find((fixture) => {
-    const left = Number(fixture?.teams?.home?.id);
-    const right = Number(fixture?.teams?.away?.id);
-    return left === homeId && right === awayId;
-  });
+
+  const listCandidates = [];
+  if (date) {
+    listCandidates.push({
+      path: "/fixtures",
+      query: {
+        date,
+        team: homeId,
+        season: Number(date.slice(0, 4)),
+      },
+      strictHomeAway: true,
+    });
+  }
+  listCandidates.push(
+    {
+      path: "/fixtures",
+      query: {
+        team: homeId,
+        next: 10,
+      },
+      strictHomeAway: true,
+    },
+    {
+      path: "/fixtures",
+      query: {
+        team: awayId,
+        next: 10,
+      },
+      strictHomeAway: true,
+    },
+    {
+      path: "/fixtures",
+      query: {
+        h2h: `${homeId}-${awayId}`,
+        next: 10,
+      },
+      strictHomeAway: false,
+    },
+    {
+      path: "/fixtures",
+      query: {
+        h2h: `${homeId}-${awayId}`,
+        last: 10,
+      },
+      strictHomeAway: false,
+    },
+    {
+      path: "/fixtures/headtohead",
+      query: {
+        h2h: `${homeId}-${awayId}`,
+        last: 10,
+      },
+      strictHomeAway: false,
+    }
+  );
+
+  let match = null;
+  for (const candidate of listCandidates) {
+    try {
+      const payload = await callSportsApi(fetchJson, candidate.path, candidate.query);
+      const fixtures = Array.isArray(payload?.response) ? payload.response : [];
+      match = fixtures.find((fixture) => {
+        const left = Number(fixture?.teams?.home?.id);
+        const right = Number(fixture?.teams?.away?.id);
+        if (candidate.strictHomeAway) {
+          return left === homeId && right === awayId;
+        }
+        return (left === homeId && right === awayId) || (left === awayId && right === homeId);
+      });
+      if (match) break;
+    } catch (_error) {
+      continue;
+    }
+  }
 
   return {
     fixture: match || null,
@@ -524,6 +596,16 @@ async function buildSportsForecastContext({ queryText, queryPlan, fetchJson }) {
   const entities = Array.isArray(queryPlan?.entities)
     ? queryPlan.entities.filter((entity) => entity?.entity_type === "fixture" || looksLikeFixtureLabel(entity?.label))
     : [];
+  const fixtureCandidates = entities.length
+    ? entities
+    : looksLikeFixtureLabel(queryText)
+      ? [
+          {
+            entity_type: "fixture",
+            label: safeText(queryText),
+          },
+        ]
+      : [];
 
   if (!config.configured) {
     return {
@@ -537,7 +619,7 @@ async function buildSportsForecastContext({ queryText, queryPlan, fetchJson }) {
       notes: ["Sports provider not configured. Crystal should stay conservative and avoid invented match edges."],
       grounded_read: null,
       signals: [],
-      fixtures: entities.map((entity) => ({
+      fixtures: fixtureCandidates.map((entity) => ({
         label: safeText(entity?.label, safeText(entity?.entity_id)),
         resolved: false,
       })),
@@ -545,7 +627,7 @@ async function buildSportsForecastContext({ queryText, queryPlan, fetchJson }) {
   }
 
   const fixtures = [];
-  for (const entity of entities) {
+  for (const entity of fixtureCandidates) {
     const label = safeText(entity?.label, safeText(entity?.entity_id));
     if (!label) continue;
     try {
