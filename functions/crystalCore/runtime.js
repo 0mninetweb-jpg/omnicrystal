@@ -6,12 +6,18 @@ const yahooFinance = require("yahoo-finance2").default;
 const { createLlmRuntime, isRetryableRuntimeError } = require("../llmRuntime");
 const {
   GENERAL_FORECAST_DOMAIN,
+  SPORTS_MATCH_OUTCOMES_DOMAIN,
   CATALOG_VERSION_ID,
   getDomain,
   getDomainCardTypes,
   isSupportedDomain,
   resolveDomainId,
 } = require("../catalogRegistry");
+const {
+  buildSportsForecastContext,
+  getSportsRuntimeHealth,
+  looksLikeSportsMatchQuery,
+} = require("../sportsData");
 const {
   buildRoutingHints,
   mergeQueryPlanWithRouting,
@@ -260,6 +266,9 @@ function getImplementedSourceIds() {
   if (safeText(process.env.FRED_API_KEY)) {
     ids.add("fred_api");
   }
+  if (getSportsRuntimeHealth().configured) {
+    ids.add("api_football_optional");
+  }
   return Array.from(ids);
 }
 
@@ -273,6 +282,7 @@ function buildRuntimeGroundingSummary() {
     "rss_allowlist",
     "yahoo_finance",
     safeText(process.env.FRED_API_KEY) ? "fred_api" : "",
+    getSportsRuntimeHealth().configured ? "api_football_optional" : "",
   ]).filter(Boolean);
 }
 
@@ -1483,6 +1493,7 @@ function buildSourceUsageSummary({ normalizedQuery = {}, domainConfig = {}, sour
   const usedSources = uniqueStrings(sourceLedger);
   const policyLike = isPolicyLikeQuery(normalizedQuery, domainConfig);
   const marketLike = isMarketLikeQuery(normalizedQuery, domainConfig);
+  const sportsLike = isSportsLikeQuery(normalizedQuery, normalizedQuery?.original_query, domainConfig);
   const requiredSources = [];
   const optionalSources = [];
 
@@ -1507,11 +1518,16 @@ function buildSourceUsageSummary({ normalizedQuery = {}, domainConfig = {}, sour
     }
   }
 
+  if (sportsLike) {
+    requiredSources.push("api_football_optional");
+  }
+
   const uniqueRequiredSources = uniqueStrings(requiredSources);
   const uniqueOptionalSources = uniqueStrings(optionalSources);
   return {
     policy_like: policyLike,
     market_like: marketLike,
+    sports_like: sportsLike,
     required_sources: uniqueRequiredSources,
     optional_sources: uniqueOptionalSources,
     used_sources: usedSources,
@@ -1593,6 +1609,176 @@ function buildMarketStructure({
     consensus_reference: consensusReference,
     macro_context: macroContext,
   };
+}
+
+function isSportsLikeQuery(normalizedQuery = {}, queryText = "", domainConfig = {}) {
+  const domainId = resolveDomainId(
+    safeText(normalizedQuery?.primary_domain_id || normalizedQuery?.domain_id || domainConfig?.domain_id),
+    GENERAL_FORECAST_DOMAIN
+  );
+  if (domainId === SPORTS_MATCH_OUTCOMES_DOMAIN) return true;
+  return looksLikeSportsMatchQuery(safeText(queryText || normalizedQuery?.original_query));
+}
+
+function applySportsGroundingToQueryPlan(normalizedQuery = {}, sportsGrounding = null) {
+  if (!sportsGrounding?.fixture_resolved) {
+    return normalizedQuery;
+  }
+  const sideA = safeText(sportsGrounding?.question_side_a);
+  const sideB = safeText(sportsGrounding?.question_side_b);
+  if (!sideA || !sideB) {
+    return normalizedQuery;
+  }
+
+  return {
+    ...normalizedQuery,
+    primary_domain_id: SPORTS_MATCH_OUTCOMES_DOMAIN,
+    domain_id: SPORTS_MATCH_OUTCOMES_DOMAIN,
+    intent_shape: "binary_outcome",
+    resolution_frame: "event",
+    question_side_a: sideA,
+    question_side_b: sideB,
+    binary_frame: {
+      asks_binary_question: true,
+      question_side_a: sideA,
+      question_side_b: sideB,
+    },
+  };
+}
+
+function buildSportsGroundedDossierPrediction({
+  queryText,
+  normalizedQuery,
+  verifiedEvidencePack,
+  baselineConsensusPack,
+}) {
+  const sportsGrounding = verifiedEvidencePack?.sports_grounding || {};
+  const evidenceQuality = verifiedEvidencePack?.evidence_quality || {};
+  const domainConfig = getDomain(normalizedQuery?.primary_domain_id, SPORTS_MATCH_OUTCOMES_DOMAIN);
+  const keyDrivers = normalizeTextList(sportsGrounding?.key_drivers, 4);
+  const counterSignals = normalizeTextList(sportsGrounding?.counter_signals, 4);
+  const invalidators = normalizeTextList(sportsGrounding?.invalidators, 4);
+  const historicalAnchors = extractHistoricalAnchorLines(verifiedEvidencePack?.historical_baseline_20y, 3);
+  const questionSideA = safeText(sportsGrounding?.question_side_a || normalizedQuery?.question_side_a);
+  const questionSideB = safeText(sportsGrounding?.question_side_b || normalizedQuery?.question_side_b);
+
+  if (!sportsGrounding?.provider_configured || !sportsGrounding?.fixture_resolved || !sportsGrounding?.parity_ready) {
+    const coverageReason = sportsGrounding?.provider_configured
+      ? "Crystal could not resolve the sports fixture cleanly enough to publish a grounded match pick."
+      : "Crystal needs a live sports provider before it can publish a grounded match pick.";
+    const payload = {
+      structured_dossier: {
+        query_normalized: safeText(queryText),
+        domain_map: [SPORTS_MATCH_OUTCOMES_DOMAIN],
+        outcome_target: coverageReason,
+        horizon: safeText(normalizedQuery?.horizon?.horizon_id || normalizedQuery?.horizons?.[0]?.horizon_id, "event"),
+        selected_variables: [],
+        ranked_drivers: [],
+        macro_context: [],
+        case_specific_context: [],
+        uncertainty_map: normalizeTextList([safeText(sportsGrounding?.reason), coverageReason], 3),
+        data_quality_map: ["sports_provider_required"],
+      },
+      feature_bundle: [],
+      baseline_consensus_pack: baselineConsensusPack || {},
+      raw_prediction: {
+        primary_call: coverageReason,
+        probability_split: null,
+        binary_contract: null,
+        confidence_score: 0.18,
+        key_drivers: [],
+        counter_signals: normalizeTextList([coverageReason], 2),
+        invalidators: normalizeTextList(
+          [
+            "Configure API-Football and resolve the fixture before trusting a sports pick.",
+            "Stand down until the runtime can ground the match with provider data.",
+          ],
+          3
+        ),
+        historical_anchors: historicalAnchors,
+        why_this_side: coverageReason,
+        recommended_posture: "Treat this as a coverage gap. Crystal should not invent a sports edge without provider grounding.",
+        scenario_set: [],
+      },
+    };
+    return normalizeDossierStagePayload(payload, {
+      baselineConsensusPack,
+      variableSelectionPack: { selected_variables: [] },
+      normalizedQuery,
+      evidenceQuality,
+    });
+  }
+
+  const winningSide = safeText(sportsGrounding?.winning_side, questionSideA || "Home side");
+  const winningProbability = clamp01(sportsGrounding?.winning_probability, 0.58);
+  const binaryContract = buildBinaryContract(
+    {
+      question_side_a: questionSideA,
+      question_side_b: questionSideB,
+      winning_side: winningSide,
+      winning_probability: winningProbability,
+      question_side_a_probability: winningSide === questionSideA ? winningProbability : 1 - winningProbability,
+      question_side_b_probability: winningSide === questionSideB ? winningProbability : 1 - winningProbability,
+      flip_conditions: invalidators,
+    },
+    {
+      question_side_a: questionSideA,
+      question_side_b: questionSideB,
+    },
+    null,
+    winningSide,
+    {
+      publicationState: "limited",
+      confidenceScore: 0.62,
+      evidenceQuality: {
+        ...evidenceQuality,
+        coverage_score: Math.max(0.6, Number(evidenceQuality?.coverage_score || 0.6)),
+      },
+    }
+  );
+  const payload = {
+    structured_dossier: {
+      query_normalized: safeText(queryText),
+      domain_map: [SPORTS_MATCH_OUTCOMES_DOMAIN],
+      outcome_target: safeText(binaryContract?.display_call, `Lean ${winningSide} 58/42`),
+      horizon: safeText(normalizedQuery?.horizon?.horizon_id || normalizedQuery?.horizons?.[0]?.horizon_id, "event"),
+      selected_variables: ["sports_provider_grounding", "recent_form", "odds_snapshot"],
+      ranked_drivers: keyDrivers,
+      macro_context: [],
+      case_specific_context: keyDrivers,
+      uncertainty_map: counterSignals,
+      data_quality_map: normalizeTextList(verifiedEvidencePack?.missingness_map, 3),
+    },
+    feature_bundle: keyDrivers.map((label, index) => ({
+      label,
+      direction: winningSide === questionSideA ? "up" : "down",
+      confidence: Number((0.72 - index * 0.08).toFixed(2)),
+      note: "Grounded directly in the shared sports provider path.",
+    })),
+    baseline_consensus_pack: baselineConsensusPack || {},
+    raw_prediction: {
+      primary_call: safeText(binaryContract?.display_call, `Lean ${winningSide} 58/42`),
+      probability_split: buildCompatibleProbabilitySplit(binaryContract),
+      binary_contract: binaryContract,
+      confidence_score: 0.64,
+      key_drivers: keyDrivers,
+      counter_signals: counterSignals,
+      invalidators,
+      historical_anchors: historicalAnchors,
+      why_this_side:
+        safeText(sportsGrounding?.reason) ||
+        `API-Football grounding currently leans ${winningSide} on recent form and the odds snapshot.`,
+      recommended_posture:
+        "Treat this as a provider-grounded sports read and keep watching lineups, odds drift, and late availability news.",
+      scenario_set: [],
+    },
+  };
+  return normalizeDossierStagePayload(payload, {
+    baselineConsensusPack,
+    variableSelectionPack: { selected_variables: [] },
+    normalizedQuery,
+    evidenceQuality,
+  });
 }
 
 function normalizeScenarioSet(rawScenarioSet = [], probabilitySplit = null) {
@@ -1994,6 +2180,7 @@ function buildFinalCard({
     runtime_transport: safeText(runtimeTransport, "local_core"),
     rollout_bucket: rolloutBucket ? safeText(rolloutBucket) : undefined,
     calibration_snapshot: calibrationSnapshot || undefined,
+    sports_grounding: verifiedEvidencePack?.sports_grounding || undefined,
     core_version: CRYSTAL_CORE_VERSION,
     _source: "crystal-core",
   };
@@ -2095,6 +2282,7 @@ function buildBaselineConsensusPack({ verifiedEvidencePack = {}, normalizedQuery
 
 function buildFallbackVerifiedEvidencePack({ normalizedQuery = {}, variableSelectionPack = {}, engine = "extended", reason = "" }) {
   const domainConfig = getDomain(normalizedQuery.primary_domain_id, GENERAL_FORECAST_DOMAIN);
+  const sportsLike = isSportsLikeQuery(normalizedQuery, normalizedQuery?.original_query, domainConfig);
   const fallbackPack = {
     historical_baseline: "",
     historical_baseline_20y: "",
@@ -2118,6 +2306,18 @@ function buildFallbackVerifiedEvidencePack({ normalizedQuery = {}, variableSelec
       jurisdiction: safeText(normalizedQuery?.jurisdiction),
     },
     prediction_market_frame: null,
+    sports_grounding: sportsLike
+      ? {
+          provider_required: true,
+          provider: safeText(process.env.SPORTS_PROVIDER, "api-football"),
+          provider_configured: Boolean(getSportsRuntimeHealth().configured),
+          fixture_resolved: false,
+          parity_ready: false,
+          question_side_a: safeText(normalizedQuery?.question_side_a),
+          question_side_b: safeText(normalizedQuery?.question_side_b),
+          reason: "Sports evidence degraded before Crystal could ground the fixture with the shared provider path.",
+        }
+      : null,
     selected_variables: Array.isArray(variableSelectionPack?.selected_variables) ? variableSelectionPack.selected_variables : [],
     adapter_activation_map: Array.isArray(variableSelectionPack?.adapter_activation_map) ? variableSelectionPack.adapter_activation_map : [],
     notes: uniqueStrings([
@@ -2138,6 +2338,9 @@ function buildFallbackVerifiedEvidencePack({ normalizedQuery = {}, variableSelec
     predictionMarketFrame: fallbackPack.prediction_market_frame,
     sourceUsage: fallbackPack.source_usage,
   });
+  if (sportsLike) {
+    fallbackPack.hard_stop = true;
+  }
   fallbackPack.evidence_quality = computeEvidenceQuality(fallbackPack, domainConfig, engine || "extended");
   return fallbackPack;
 }
@@ -2149,6 +2352,7 @@ async function buildVerifiedEvidencePack(context, { runId, queryText, normalized
   const supportingDomains = Array.isArray(normalizedQuery.supporting_domains) ? normalizedQuery.supporting_domains.slice(0, 3) : [];
   const policyLike = isPolicyLikeQuery(normalizedQuery, domainConfig);
   const marketLike = isMarketLikeQuery(normalizedQuery, domainConfig);
+  const sportsLike = isSportsLikeQuery(normalizedQuery, queryText, domainConfig);
   const resolveWikidataSignal = typeof context.fetchWikidataEntitySignal === "function" ? context.fetchWikidataEntitySignal : fetchWikidataEntitySignal;
   const resolveGdeltSignal = typeof context.fetchGdeltAttentionSignal === "function" ? context.fetchGdeltAttentionSignal : fetchGdeltAttentionSignal;
   const resolveAllowlistedRssSignal =
@@ -2158,6 +2362,8 @@ async function buildVerifiedEvidencePack(context, { runId, queryText, normalized
   const resolveFredMacroSignal = typeof context.fetchFredMacroSignal === "function" ? context.fetchFredMacroSignal : fetchFredMacroSignal;
   const resolvePredictionMarketPulse =
     typeof context.getPredictionMarketPulse === "function" ? context.getPredictionMarketPulse : getPolymarketPulse;
+  const resolveSportsForecastContext =
+    typeof context.buildSportsForecastContext === "function" ? context.buildSportsForecastContext : buildSportsForecastContext;
 
   const mainBaseline = await get20YearHistoricalContext({
     db,
@@ -2190,13 +2396,48 @@ async function buildVerifiedEvidencePack(context, { runId, queryText, normalized
   }
 
   const liveSignals = [];
-  const trendSignal = await resolveTrendSignal(queryText, normalizedQuery, domainConfig);
-  if (trendSignal) {
-    liveSignals.push(trendSignal);
+  let sportsContext = null;
+  if (sportsLike) {
+    try {
+      sportsContext = await resolveSportsForecastContext({
+        queryText,
+        queryPlan: normalizedQuery,
+        fetchJson,
+      });
+    } catch (error) {
+      sportsContext = {
+        provider_required: true,
+        provider_configured: false,
+        configured: false,
+        available: false,
+        parity_ready: false,
+        reason: error instanceof Error ? error.message : "Sports provider lookup failed.",
+        grounded_read: null,
+        signals: [],
+        notes: [error instanceof Error ? error.message : "Sports provider lookup failed."],
+      };
+    }
   }
 
-  const searchPayload = await fetchSearchSignals(ai, queryText, normalizedQuery, variableSelectionPack);
+  if (!sportsLike) {
+    const trendSignal = await resolveTrendSignal(queryText, normalizedQuery, domainConfig);
+    if (trendSignal) {
+      liveSignals.push(trendSignal);
+    }
+  }
+
+  const searchPayload = sportsLike
+    ? {
+        signals: [],
+        source_trust_map: [],
+        conflict_map: [],
+        verification_summary: "Sports runs use the shared provider-backed grounding path instead of generic web search.",
+      }
+    : await fetchSearchSignals(ai, queryText, normalizedQuery, variableSelectionPack);
   liveSignals.push(...searchPayload.signals);
+  if (Array.isArray(sportsContext?.signals)) {
+    liveSignals.push(...sportsContext.signals);
+  }
 
   const connectorPacks = (
     await Promise.all(
@@ -2218,7 +2459,7 @@ async function buildVerifiedEvidencePack(context, { runId, queryText, normalized
   liveSignals.push(...connectorSignals);
 
   let predictionMarketFrame = null;
-  if (normalizedQuery?.binary_frame?.asks_binary_question) {
+  if (normalizedQuery?.binary_frame?.asks_binary_question && !sportsLike) {
     try {
       predictionMarketFrame = await resolvePredictionMarketPulse({
         db,
@@ -2274,6 +2515,7 @@ async function buildVerifiedEvidencePack(context, { runId, queryText, normalized
     []
       .concat(sourceTrustMap.map((item) => item.source_id))
       .concat(mainBaseline ? ["historical-cache"] : [])
+      .concat(sportsContext?.available ? ["api_football_optional"] : [])
   );
   const sourceUsage = buildSourceUsageSummary({
     normalizedQuery,
@@ -2289,6 +2531,22 @@ async function buildVerifiedEvidencePack(context, { runId, queryText, normalized
     predictionMarketFrame,
     sourceUsage,
   });
+  const sportsGrounding = sportsLike
+    ? {
+        provider_required: true,
+        provider: safeText(sportsContext?.provider, "api-football"),
+        provider_configured: Boolean(sportsContext?.provider_configured ?? sportsContext?.configured),
+        fixture_resolved: Boolean(sportsContext?.grounded_read?.fixture_resolved),
+        parity_ready: Boolean(sportsContext?.grounded_read?.parity_ready),
+        question_side_a: safeText(sportsContext?.grounded_read?.question_side_a),
+        question_side_b: safeText(sportsContext?.grounded_read?.question_side_b),
+        winning_side: safeText(sportsContext?.grounded_read?.winning_side),
+        winning_probability: Number.isFinite(Number(sportsContext?.grounded_read?.winning_probability))
+          ? Number(sportsContext.grounded_read.winning_probability)
+          : null,
+        reason: safeText(sportsContext?.grounded_read?.reason, safeText(sportsContext?.reason)),
+      }
+    : null;
 
   const verifiedEvidencePack = {
     historical_baseline: buildHistoricalBundle(mainBaseline, supportingBaselines),
@@ -2320,6 +2578,7 @@ async function buildVerifiedEvidencePack(context, { runId, queryText, normalized
     prediction_market_frame: predictionMarketFrame,
     source_usage: sourceUsage,
     market_structure: marketStructure,
+    sports_grounding: sportsGrounding,
     selected_variables: Array.isArray(variableSelectionPack?.selected_variables) ? variableSelectionPack.selected_variables : [],
     adapter_activation_map: Array.isArray(variableSelectionPack?.adapter_activation_map) ? variableSelectionPack.adapter_activation_map : [],
     notes: uniqueStrings([
@@ -2332,8 +2591,18 @@ async function buildVerifiedEvidencePack(context, { runId, queryText, normalized
       sourceUsage.missing_optional_sources.length > 0
         ? `Optional source coverage is still missing ${sourceUsage.missing_optional_sources.join(", ")}.`
         : "",
+      sportsLike && !sportsGrounding?.provider_configured
+        ? "Sports picks require API-Football. The shared runtime is currently missing that provider configuration."
+        : "",
+      sportsLike && sportsGrounding?.provider_configured && !sportsGrounding?.fixture_resolved
+        ? "Sports provider is configured, but the runtime could not resolve the fixture cleanly enough for a parity-ready pick."
+        : "",
     ]).slice(0, 4),
   };
+
+  if (sportsLike && (!sportsGrounding?.provider_configured || !sportsGrounding?.fixture_resolved || !sportsGrounding?.parity_ready)) {
+    verifiedEvidencePack.hard_stop = true;
+  }
 
   verifiedEvidencePack.evidence_quality = computeEvidenceQuality(verifiedEvidencePack, domainConfig, engine || "extended");
   await writeArtifact(db, admin, runId, "verified_evidence_pack", verifiedEvidencePack);
@@ -2517,6 +2786,17 @@ async function executeForecastRun(context, payload = {}) {
         fallback_used: true,
       });
     }
+    const sportsLike = isSportsLikeQuery(normalizedQuery, queryText, getDomain(normalizedQuery.primary_domain_id, GENERAL_FORECAST_DOMAIN));
+    if (sportsLike) {
+      const groundedQuery = applySportsGroundingToQueryPlan(normalizedQuery, verifiedEvidencePack?.sports_grounding);
+      if (groundedQuery !== normalizedQuery) {
+        normalizedQuery = groundedQuery;
+        await writeRunPatch(db, admin, runId, {
+          query_plan: normalizedQuery,
+        });
+        await writeArtifact(db, admin, runId, "normalized_query_grounded", normalizedQuery);
+      }
+    }
     const baselineConsensusPack = buildBaselineConsensusPack({
       verifiedEvidencePack,
       normalizedQuery,
@@ -2530,61 +2810,91 @@ async function executeForecastRun(context, payload = {}) {
       ensureExecutionBudget(runDeadlineAt, "dossier_prediction_agent");
       let dossierPredictionPayload;
       let dossierFallbackActivated = false;
-      const forceDeterministicDossierFallback = shouldUseDeterministicDossierFallback({
-        normalizedQuery,
-        verifiedEvidencePack,
-      });
+      const forceSportsDeterministicPath = sportsLike;
+      const forceDeterministicDossierFallback =
+        forceSportsDeterministicPath ||
+        shouldUseDeterministicDossierFallback({
+          normalizedQuery,
+          verifiedEvidencePack,
+        });
       try {
         if (forceDeterministicDossierFallback) {
-          throw Object.assign(new Error("Deterministic dossier fallback activated for thin binary coverage."), {
-            code: "dossier-deterministic-fallback",
+          dossierPredictionPayload = forceSportsDeterministicPath
+            ? buildSportsGroundedDossierPrediction({
+                queryText,
+                normalizedQuery,
+                verifiedEvidencePack,
+                baselineConsensusPack,
+              })
+            : buildFallbackDossierPrediction({
+                queryText,
+                normalizedQuery,
+                variableSelectionPack: variable_selection_pack,
+                verifiedEvidencePack,
+                baselineConsensusPack,
+              });
+          dossierFallbackActivated = true;
+          await writeArtifact(db, admin, runId, "dossier_prediction_fallback", {
+            activated: true,
+            deterministic: true,
+            sports_grounded: forceSportsDeterministicPath,
+            message: forceSportsDeterministicPath
+              ? "Deterministic sports grounding activated for shared-runtime parity."
+              : "Deterministic dossier fallback activated for thin binary coverage.",
+            code: forceSportsDeterministicPath ? "sports-provider-grounded" : "dossier-deterministic-fallback",
+          });
+          logCoreEvent("stage_skipped", {
+            runId,
+            stage: "dossier_prediction_agent",
+            error_code: forceSportsDeterministicPath ? "sports-provider-grounded" : "dossier-deterministic-fallback",
+          });
+        } else {
+          const dossierStageStartedAt = Date.now();
+          dossierPredictionPayload = await withRetry(
+            () =>
+              runWithStageTimeout(
+                () =>
+                  llmRuntime.generateJson({
+                    modelKind: "forecast",
+                    temperature: 0.1,
+                    systemInstruction:
+                      "You are Crystal's Dossier and Prediction Agent. Return exactly one JSON object. Stay concrete, directional, and grounded in the supplied evidence.",
+                    prompt: buildDossierPredictionPrompt({
+                      queryText,
+                      normalizedQuery,
+                      variableSelectionPack: variable_selection_pack,
+                      verifiedEvidencePack,
+                      baselineConsensusPack,
+                    }),
+                    maxTokens: JSON_STAGE_MAX_TOKENS.dossier,
+                    jsonStage: "dossier",
+                    preferTextMode: true,
+                  }),
+                STAGE_RETRY_POLICY.dossier.timeoutMs,
+                "dossier"
+              ),
+            {
+              ...STAGE_RETRY_POLICY.dossier,
+              label: "dossier",
+              stage: "dossier_prediction_agent",
+              onRetry: ({ attempt, error, nextDelayMs }) => {
+                logCoreEvent("stage_retry", {
+                  runId,
+                  stage: "dossier_prediction_agent",
+                  attempt,
+                  next_delay_ms: nextDelayMs,
+                  error_code: safeText(error?.code),
+                  provider: safeText(error?.details?.provider),
+                });
+              },
+            }
+          );
+          logCoreEvent("stage_completed", {
+            runId,
+            stage: "dossier_prediction_agent",
+            duration_ms: Date.now() - dossierStageStartedAt,
           });
         }
-        const dossierStageStartedAt = Date.now();
-        dossierPredictionPayload = await withRetry(
-          () =>
-            runWithStageTimeout(
-              () =>
-                llmRuntime.generateJson({
-                  modelKind: "forecast",
-                  temperature: 0.1,
-                  systemInstruction:
-                    "You are Crystal's Dossier and Prediction Agent. Return exactly one JSON object. Stay concrete, directional, and grounded in the supplied evidence.",
-                  prompt: buildDossierPredictionPrompt({
-                    queryText,
-                    normalizedQuery,
-                    variableSelectionPack: variable_selection_pack,
-                    verifiedEvidencePack,
-                    baselineConsensusPack,
-                  }),
-                  maxTokens: JSON_STAGE_MAX_TOKENS.dossier,
-                  jsonStage: "dossier",
-                  preferTextMode: true,
-                }),
-              STAGE_RETRY_POLICY.dossier.timeoutMs,
-              "dossier"
-            ),
-          {
-            ...STAGE_RETRY_POLICY.dossier,
-            label: "dossier",
-            stage: "dossier_prediction_agent",
-            onRetry: ({ attempt, error, nextDelayMs }) => {
-              logCoreEvent("stage_retry", {
-                runId,
-                stage: "dossier_prediction_agent",
-                attempt,
-                next_delay_ms: nextDelayMs,
-                error_code: safeText(error?.code),
-                provider: safeText(error?.details?.provider),
-              });
-            },
-          }
-        );
-        logCoreEvent("stage_completed", {
-          runId,
-          stage: "dossier_prediction_agent",
-          duration_ms: Date.now() - dossierStageStartedAt,
-        });
       } catch (error) {
         dossierFallbackActivated = true;
         dossierPredictionPayload = buildFallbackDossierPrediction({
@@ -2788,52 +3098,68 @@ async function executeForecastRun(context, payload = {}) {
       });
       let voicePayloadRaw;
       let voiceFallbackActivated = false;
+      const forceDeterministicVoicePayload = sportsLike;
       try {
-        ensureExecutionBudget(runDeadlineAt, "card_generation");
-        const verbalizerStageStartedAt = Date.now();
-        voicePayloadRaw = await withRetry(
-          () =>
-            runWithStageTimeout(
-              () =>
-                llmRuntime.generateJson({
-                  modelKind: "forecast",
-                  temperature: 0.15,
-                  systemInstruction:
-                    "You write Crystal prediction cards. Return exactly one JSON object. Put the call first, keep the tone precise, and never hide the thesis behind vague uncertainty copy.",
-                  prompt: buildForecastVerbalizationPrompt({
-                    queryText,
-                    normalizedQuery,
-                    verifiedEvidencePack,
-                    scorecard: finalizedScorecard,
-                  }),
-                  maxTokens: JSON_STAGE_MAX_TOKENS.verbalizer,
-                  jsonStage: "verbalizer",
-                  preferTextMode: true,
-                }),
-              STAGE_RETRY_POLICY.verbalizer.timeoutMs,
-              "verbalizer"
-            ),
-          {
-            ...STAGE_RETRY_POLICY.verbalizer,
-            label: "verbalizer",
+        if (forceDeterministicVoicePayload) {
+          voicePayloadRaw = buildFallbackVoicePayload({
+            queryText,
+            normalizedQuery,
+            scorecard: finalizedScorecard,
+            verifiedEvidencePack,
+          });
+          voiceFallbackActivated = true;
+          logCoreEvent("stage_skipped", {
+            runId,
             stage: "card_generation",
-            onRetry: ({ attempt, error, nextDelayMs }) => {
-              logCoreEvent("stage_retry", {
-                runId,
-                stage: "card_generation",
-                attempt,
-                next_delay_ms: nextDelayMs,
-                error_code: safeText(error?.code),
-                provider: safeText(error?.details?.provider),
-              });
-            },
-          }
-        );
-        logCoreEvent("stage_completed", {
-          runId,
-          stage: "card_generation",
-          duration_ms: Date.now() - verbalizerStageStartedAt,
-        });
+            error_code: "sports-deterministic-voice",
+          });
+        } else {
+          ensureExecutionBudget(runDeadlineAt, "card_generation");
+          const verbalizerStageStartedAt = Date.now();
+          voicePayloadRaw = await withRetry(
+            () =>
+              runWithStageTimeout(
+                () =>
+                  llmRuntime.generateJson({
+                    modelKind: "forecast",
+                    temperature: 0.15,
+                    systemInstruction:
+                      "You write Crystal prediction cards. Return exactly one JSON object. Put the call first, keep the tone precise, and never hide the thesis behind vague uncertainty copy.",
+                    prompt: buildForecastVerbalizationPrompt({
+                      queryText,
+                      normalizedQuery,
+                      verifiedEvidencePack,
+                      scorecard: finalizedScorecard,
+                    }),
+                    maxTokens: JSON_STAGE_MAX_TOKENS.verbalizer,
+                    jsonStage: "verbalizer",
+                    preferTextMode: true,
+                  }),
+                STAGE_RETRY_POLICY.verbalizer.timeoutMs,
+                "verbalizer"
+              ),
+            {
+              ...STAGE_RETRY_POLICY.verbalizer,
+              label: "verbalizer",
+              stage: "card_generation",
+              onRetry: ({ attempt, error, nextDelayMs }) => {
+                logCoreEvent("stage_retry", {
+                  runId,
+                  stage: "card_generation",
+                  attempt,
+                  next_delay_ms: nextDelayMs,
+                  error_code: safeText(error?.code),
+                  provider: safeText(error?.details?.provider),
+                });
+              },
+            }
+          );
+          logCoreEvent("stage_completed", {
+            runId,
+            stage: "card_generation",
+            duration_ms: Date.now() - verbalizerStageStartedAt,
+          });
+        }
       } catch (error) {
         voiceFallbackActivated = true;
         voicePayloadRaw = buildFallbackVoicePayload({
@@ -3038,6 +3364,7 @@ function createCrystalCoreRuntime(config = {}) {
         mode: "deep_default",
         available: true,
         llm: llmRuntime.getRuntimeMetadata(),
+        sports: getSportsRuntimeHealth(),
         simulation: {
           configured: Boolean(safeText(process.env.MIROFISH_BASE_URL)),
           adapterReachable: remoteAdapterReachable,

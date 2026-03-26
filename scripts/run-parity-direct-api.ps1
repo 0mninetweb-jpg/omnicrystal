@@ -174,6 +174,42 @@ function Get-BinaryProbability($card) {
   return $null
 }
 
+function Get-SportsGrounding($card) {
+  if ($null -eq $card) { return $null }
+  if ($card.PSObject.Properties.Name -contains "sports_grounding" -and $null -ne $card.sports_grounding) {
+    return $card.sports_grounding
+  }
+  return $null
+}
+
+function Get-SportsParityReady($card) {
+  $grounding = Get-SportsGrounding $card
+  if ($null -eq $grounding) { return $false }
+  return [bool]($grounding.provider_required -and $grounding.provider_configured -and $grounding.fixture_resolved -and $grounding.parity_ready)
+}
+
+function Get-SportsSideA($card) {
+  $grounding = Get-SportsGrounding $card
+  if ($null -ne $grounding -and $grounding.PSObject.Properties.Name -contains "question_side_a") {
+    return [string]$grounding.question_side_a
+  }
+  if ($null -ne $card -and $null -ne $card.binary_contract) {
+    return [string]$card.binary_contract.question_side_a
+  }
+  return ""
+}
+
+function Get-SportsSideB($card) {
+  $grounding = Get-SportsGrounding $card
+  if ($null -ne $grounding -and $grounding.PSObject.Properties.Name -contains "question_side_b") {
+    return [string]$grounding.question_side_b
+  }
+  if ($null -ne $card -and $null -ne $card.binary_contract) {
+    return [string]$card.binary_contract.question_side_b
+  }
+  return ""
+}
+
 function Get-Median {
   param([double[]]$Values)
   if (-not $Values -or $Values.Count -eq 0) { return $null }
@@ -214,6 +250,29 @@ $queries = @(
   }
 )
 
+$queries = @(
+  @{
+    query = "Cosa passera al referendum costituzionale di marzo in Italia? si o no"
+    expects_binary = $true
+  },
+  @{
+    query = "Inter vs Juventus"
+    expects_binary = $true
+  },
+  @{
+    query = "Bitcoin next 30 days"
+    expects_binary = $false
+  },
+  @{
+    query = "La mia startup sopravvivera 12 mesi?"
+    expects_binary = $true
+  },
+  @{
+    query = "Dovrei aspettare prima di affittare a Roma?"
+    expects_binary = $true
+  }
+)
+
 $remoteToken = Get-RemoteToken -Audience $RemoteServiceUrl.TrimEnd("/")
 $remoteHeaders = @{
   Authorization = "Bearer $remoteToken"
@@ -228,6 +287,7 @@ $binaryComparableProbabilityDeltas = @()
 $binaryComparableCount = 0
 $binaryWinnerMismatches = 0
 $binaryMissingContracts = 0
+$sportsProbeReady = $false
 $blockers = @()
 
 foreach ($item in $queries) {
@@ -304,6 +364,13 @@ foreach ($item in $queries) {
   $localProbability = Get-BinaryProbability $localCard
   $remoteProbability = Get-BinaryProbability $remoteCard
   $probabilityDelta = if ($null -ne $localProbability -and $null -ne $remoteProbability) { [math]::Round([math]::Abs($localProbability - $remoteProbability), 4) } else { $null }
+  $sportsProbe = ($query -eq "Inter vs Juventus")
+  $localSportsReady = if ($sportsProbe) { Get-SportsParityReady $localCard } else { $false }
+  $remoteSportsReady = if ($sportsProbe) { Get-SportsParityReady $remoteCard } else { $false }
+  $localSideA = if ($sportsProbe) { Get-SportsSideA $localCard } else { "" }
+  $remoteSideA = if ($sportsProbe) { Get-SportsSideA $remoteCard } else { "" }
+  $localSideB = if ($sportsProbe) { Get-SportsSideB $localCard } else { "" }
+  $remoteSideB = if ($sportsProbe) { Get-SportsSideB $remoteCard } else { "" }
 
   if ($item.expects_binary) {
     if (-not $localCard.binary_contract -or -not $remoteCard.binary_contract) {
@@ -336,6 +403,12 @@ foreach ($item in $queries) {
     remote_failures = ($remoteWait.history | Where-Object { $_.error } | ForEach-Object { $_.error }) -join "; "
     local_card_state = if ($localCard) { [string]$localCard.card_state } else { "" }
     remote_card_state = if ($remoteCard) { [string]$remoteCard.card_state } else { "" }
+    local_sports_ready = $localSportsReady
+    remote_sports_ready = $remoteSportsReady
+    local_side_a = $localSideA
+    remote_side_a = $remoteSideA
+    local_side_b = $localSideB
+    remote_side_b = $remoteSideB
     expects_binary = $item.expects_binary
     timeout = [bool]$remoteWait.timed_out
   }
@@ -348,6 +421,31 @@ foreach ($item in $queries) {
   }
   if ($remoteStateStatus -eq "failed") {
     $blockers += "remote failed: $query"
+  }
+  if ($sportsProbe) {
+    if ($localSportsReady -and $remoteSportsReady) {
+      $sportsProbeReady = $true
+    }
+    if (-not $localSportsReady) {
+      $blockers += "sports provider grounding unavailable on local_core: $query"
+    }
+    if (-not $remoteSportsReady) {
+      $blockers += "sports provider grounding unavailable on remote: $query"
+    }
+    if ($localSportsReady -and $remoteSportsReady) {
+      if ($localSideA -ne $remoteSideA -or $localSideB -ne $remoteSideB) {
+        $blockers += "sports fixture side ordering mismatch: $query"
+      }
+      if ($localWinner -ne $remoteWinner) {
+        $blockers += "sports winning side mismatch: $query"
+      }
+      if ($localBand -ne $remoteBand) {
+        $blockers += "sports band mismatch: $query"
+      }
+      if ($localCard.card_state -ne $remoteCard.card_state) {
+        $blockers += "sports card_state mismatch: $query"
+      }
+    }
   }
 }
 
@@ -378,6 +476,7 @@ if (-not $hasBinaryParity -or $null -eq $medianProbabilityDelta) {
 if (-not $missingOk) { $blockers += "missing binary contract on binary benchmark" }
 if (-not $remoteStreakOk) { $blockers += "fewer than 3 consecutive remote completions" }
 if (-not $api502Ok) { $blockers += "repeated 502 on direct API path" }
+if (-not $sportsProbeReady) { $blockers += "sports probe is not provider-grounded and parity-ready" }
 
 $blockers = $blockers | Select-Object -Unique
 $verdict = if ($blockers.Count -eq 0) { "10% ready" } else { "hold at 0/0" }
@@ -394,6 +493,7 @@ $report = [ordered]@{
     median_probability_delta = $medianProbabilityDelta
     missing_binary_contract_rate = $missingBinaryContractRate
     direct_api_502_count = $local502Count
+    sports_probe_ready = $sportsProbeReady
     verdict = $verdict
     blockers = @($blockers)
   }
@@ -415,6 +515,7 @@ $markdown = @(
   ('- Median probability delta: `{0}`' -f $medianProbabilityText),
   ('- Missing binary contract rate: `{0}`' -f $missingBinaryText),
   ('- Direct API 502 count: `{0}`' -f $local502Count),
+  ('- Sports probe ready: `{0}`' -f $sportsProbeReady),
   ('- Verdict: **{0}**' -f $verdict),
   "",
   "## Benchmark",

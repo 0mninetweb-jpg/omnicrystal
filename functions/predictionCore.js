@@ -1388,6 +1388,10 @@ function finalizeScorecard(rawScorecard = {}, evidenceBundle = {}, queryPlan = {
   );
 
   const hardStop = Boolean(evidenceBundle.hard_stop);
+  const providerRequiredNoPick =
+    hardStop &&
+    Boolean(evidenceBundle?.sports_grounding?.provider_required) &&
+    !Boolean(evidenceBundle?.sports_grounding?.parity_ready);
   let publicationState = "limited";
   if (hardStop) {
     publicationState = "blocked";
@@ -1424,7 +1428,7 @@ function finalizeScorecard(rawScorecard = {}, evidenceBundle = {}, queryPlan = {
   );
 
   let primaryCall = safeText(rawScorecard.primary_call || rawScorecard.directional_hypothesis || rawScorecard.verdict);
-  if (binaryContract?.display_call) {
+  if (!providerRequiredNoPick && binaryContract?.display_call) {
     primaryCall = binaryContract.display_call;
   } else if (!primaryCall) {
     primaryCall = inferPrimaryCallFromSplit(probabilitySplit);
@@ -1468,6 +1472,7 @@ function finalizeScorecard(rawScorecard = {}, evidenceBundle = {}, queryPlan = {
     publicationState = publicationState === "blocked" ? "blocked" : "limited";
   }
   if (
+    !providerRequiredNoPick &&
     binaryContract &&
     publicationState === "published" &&
     (!safeText(binaryContract.question_side_a) ||
@@ -1482,8 +1487,8 @@ function finalizeScorecard(rawScorecard = {}, evidenceBundle = {}, queryPlan = {
 
   return {
     primary_call: primaryCall,
-    binary_contract: binaryContract,
-    probability_split: probabilitySplit,
+    binary_contract: providerRequiredNoPick ? null : binaryContract,
+    probability_split: providerRequiredNoPick ? null : probabilitySplit,
     confidence_score: confidenceScore,
     publication_state: publicationState,
     key_drivers: keyDrivers,

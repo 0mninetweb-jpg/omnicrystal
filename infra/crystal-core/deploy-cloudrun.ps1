@@ -16,6 +16,9 @@ param(
   [string]$LlmModelForecast = "",
   [string]$LlmModelChat = "",
   [string]$LlmModelCopy = "",
+  [string]$SportsProvider = "",
+  [string]$SportsProviderBaseUrl = "",
+  [string]$ApiFootballKey = "",
   [string]$OpenrouterSiteUrl = "https://omnicrystal.web.app",
   [string]$OpenrouterAppTitle = "Crystal",
   [int]$MinInstances = 1,
@@ -122,6 +125,9 @@ $serviceEnvEntries = @{
   "LLM_MODEL_FORECAST" = $LlmModelForecast
   "LLM_MODEL_CHAT" = $LlmModelChat
   "LLM_MODEL_COPY" = $LlmModelCopy
+  "SPORTS_PROVIDER" = $SportsProvider
+  "SPORTS_PROVIDER_BASE_URL" = $SportsProviderBaseUrl
+  "API_FOOTBALL_KEY" = $ApiFootballKey
   "OPENROUTER_SITE_URL" = $OpenrouterSiteUrl
   "OPENROUTER_APP_TITLE" = $OpenrouterAppTitle
 }
@@ -182,6 +188,9 @@ $jobEnvEntries = @{
   "LLM_MODEL_FORECAST" = $LlmModelForecast
   "LLM_MODEL_CHAT" = $LlmModelChat
   "LLM_MODEL_COPY" = $LlmModelCopy
+  "SPORTS_PROVIDER" = $SportsProvider
+  "SPORTS_PROVIDER_BASE_URL" = $SportsProviderBaseUrl
+  "API_FOOTBALL_KEY" = $ApiFootballKey
   "OPENROUTER_SITE_URL" = $OpenrouterSiteUrl
   "OPENROUTER_APP_TITLE" = $OpenrouterAppTitle
 }
@@ -229,3 +238,5 @@ Write-Host "Configura poi Firebase Functions con:"
 Write-Host "  CRYSTAL_CORE_BASE_URL=$serviceUrl"
 Write-Host "  CRYSTAL_CORE_INVOKER_AUDIENCE=$serviceUrl"
 Write-Host "  CRYSTAL_CORE_EVAL_JOB_NAME=$JobName"
+Write-Host "  SPORTS_PROVIDER=$SportsProvider"
+Write-Host "  SPORTS_PROVIDER_BASE_URL=$SportsProviderBaseUrl"

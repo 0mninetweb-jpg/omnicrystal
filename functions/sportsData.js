@@ -116,7 +116,9 @@ function getSportsRuntimeHealth() {
   return {
     available: config.configured,
     configured: config.configured,
+    source_id: "api_football_optional",
     provider: config.provider,
+    base_url: config.baseUrl,
     mode: config.configured ? "live" : "preview",
     coverage: ["fixtures", "recent-form", "odds"],
   };
@@ -258,20 +260,182 @@ function buildOddsSummary(payload) {
     ? firstBookmaker.bets.find((bet) => safeText(bet?.name).toLowerCase().includes("match winner")) || firstBookmaker.bets[0]
     : null;
   const values = Array.isArray(matchWinner?.values) ? matchWinner.values : [];
-  return values
+  const market = {
+    bookmaker: safeText(firstBookmaker?.name),
+    home_decimal_odd: null,
+    away_decimal_odd: null,
+    draw_decimal_odd: null,
+    home_implied_probability: null,
+    away_implied_probability: null,
+    draw_implied_probability: null,
+  };
+  const summary = values
     .map((item) => `${safeText(item?.value)} ${safeText(item?.odd)}`.trim())
     .filter(Boolean)
     .slice(0, 3);
+
+  for (const item of values) {
+    const label = normalizeWhitespace(item?.value).toLowerCase();
+    const odd = Number(item?.odd);
+    if (!Number.isFinite(odd) || odd <= 1) continue;
+    const implied = Number((1 / odd).toFixed(3));
+    if (label === "home" || label === "1") {
+      market.home_decimal_odd = odd;
+      market.home_implied_probability = implied;
+    } else if (label === "away" || label === "2") {
+      market.away_decimal_odd = odd;
+      market.away_implied_probability = implied;
+    } else if (label === "draw" || label === "x") {
+      market.draw_decimal_odd = odd;
+      market.draw_implied_probability = implied;
+    }
+  }
+
+  return {
+    summary,
+    market,
+  };
 }
 
 async function fetchFixtureOdds(fetchJson, fixtureId) {
-  if (!fixtureId) return [];
+  if (!fixtureId) {
+    return {
+      summary: [],
+      market: null,
+    };
+  }
   try {
     const payload = await callSportsApi(fetchJson, "/odds", { fixture: fixtureId });
     return buildOddsSummary(payload);
   } catch (_error) {
-    return [];
+    return {
+      summary: [],
+      market: null,
+    };
   }
+}
+
+function calculateFormStrength(summary = {}) {
+  const games = Number(summary?.games || 0);
+  if (!Number.isFinite(games) || games <= 0) return 0;
+  const wins = Number(summary?.wins || 0);
+  const draws = Number(summary?.draws || 0);
+  const goalsFor = Number(summary?.goalsFor || 0);
+  const goalsAgainst = Number(summary?.goalsAgainst || 0);
+  const pointsRate = (wins * 3 + draws) / Math.max(1, games * 3);
+  const goalDiffPerGame = (goalsFor - goalsAgainst) / Math.max(1, games);
+  return pointsRate * 0.7 + goalDiffPerGame * 0.1;
+}
+
+function buildSportsGroundedRead({
+  fixtureLabel = "",
+  homeTeamLabel = "",
+  awayTeamLabel = "",
+  homeForm = {},
+  awayForm = {},
+  oddsMarket = null,
+  leagueName = "",
+  kickoffUtc = "",
+  venue = "",
+}) {
+  const questionSideA = safeText(homeTeamLabel);
+  const questionSideB = safeText(awayTeamLabel);
+  if (!questionSideA || !questionSideB) {
+    return {
+      provider_required: true,
+      provider_configured: true,
+      fixture_resolved: false,
+      parity_ready: false,
+      reason: "Fixture resolution did not return stable home and away teams.",
+    };
+  }
+
+  const homeFormStrength = calculateFormStrength(homeForm);
+  const awayFormStrength = calculateFormStrength(awayForm);
+  const homeConsensus = Number(oddsMarket?.home_implied_probability);
+  const awayConsensus = Number(oddsMarket?.away_implied_probability);
+  const hasProviderEdge = Number(homeForm?.games || 0) > 0 || Number(awayForm?.games || 0) > 0 || (Number.isFinite(homeConsensus) && Number.isFinite(awayConsensus));
+  if (!hasProviderEdge) {
+    return {
+      provider_required: true,
+      provider_configured: true,
+      fixture_resolved: true,
+      parity_ready: false,
+      question_side_a: questionSideA,
+      question_side_b: questionSideB,
+      reason: "The fixture resolved, but API-Football did not return enough structured edge data to support a parity-ready pick.",
+    };
+  }
+  const formDelta = homeFormStrength - awayFormStrength;
+  const consensusDelta =
+    Number.isFinite(homeConsensus) && Number.isFinite(awayConsensus) ? homeConsensus - awayConsensus : 0;
+  const combinedEdge = formDelta * 0.65 + consensusDelta * 0.35;
+  const winningSide = combinedEdge >= 0 ? questionSideA : questionSideB;
+  const losingSide = winningSide === questionSideA ? questionSideB : questionSideA;
+  const edgeStrength = Math.abs(combinedEdge);
+  const winningProbability = edgeStrength >= 0.18 ? 0.66 : edgeStrength >= 0.1 ? 0.62 : 0.58;
+  const sideALean = winningSide === questionSideA ? "up" : "down";
+  const recentFormSummary = `${questionSideA} recent form ${homeForm.wins || 0}W-${homeForm.draws || 0}D-${homeForm.losses || 0}L versus ${questionSideB} ${awayForm.wins || 0}W-${awayForm.draws || 0}D-${awayForm.losses || 0}L.`;
+  const consensusSummary =
+    Number.isFinite(homeConsensus) && Number.isFinite(awayConsensus)
+      ? `API-Football odds lean ${winningSide} at roughly ${Math.round(
+          (winningSide === questionSideA ? homeConsensus : awayConsensus) * 100
+        )}% implied win probability.`
+      : "No stable 1X2 odds snapshot was available, so Crystal leans on provider-grounded recent form.";
+  const venueSummary = uniqueStrings([
+    safeText(leagueName) ? `Competition: ${safeText(leagueName)}.` : "",
+    safeText(venue) ? `Venue: ${safeText(venue)}.` : "",
+    safeText(kickoffUtc) ? `Kickoff UTC: ${safeText(kickoffUtc)}.` : "",
+  ]).join(" ");
+  const invalidators = uniqueStrings([
+    `If the odds snapshot flips toward ${losingSide}, this edge disappears.`,
+    `If confirmed lineups materially weaken ${winningSide}, Crystal should stand down.`,
+    "Late injury or availability news can break the current read.",
+  ]).slice(0, 4);
+  const counterSignals = uniqueStrings([
+    edgeStrength < 0.1 ? "The provider edge is still narrow and vulnerable to match volatility." : "",
+    Number.isFinite(homeConsensus) && Number.isFinite(awayConsensus)
+      ? "The odds market still leaves room for draw volatility and late repricing."
+      : "Without a clean odds snapshot, the edge leans more heavily on recent form.",
+  ]).slice(0, 4);
+
+  return {
+    provider_required: true,
+    provider_configured: true,
+    fixture_resolved: true,
+    parity_ready: true,
+    fixture_label: safeText(fixtureLabel),
+    question_side_a: questionSideA,
+    question_side_b: questionSideB,
+    winning_side: winningSide,
+    winning_probability: winningProbability,
+    reason: `API-Football grounding leans ${winningSide} over ${losingSide}.`,
+    key_drivers: uniqueStrings([
+      recentFormSummary,
+      consensusSummary,
+      venueSummary,
+    ]).slice(0, 4),
+    counter_signals: counterSignals,
+    invalidators,
+    signals: [
+      {
+        source_id: "api_football_optional",
+        label: `${winningSide} provider edge`,
+        summary: recentFormSummary,
+        lean: sideALean,
+        freshness_score: 0.84,
+        trust_score: 0.78,
+      },
+      {
+        source_id: "api_football_optional",
+        label: `${safeText(leagueName, "Fixture")} odds snapshot`,
+        summary: consensusSummary,
+        lean: sideALean,
+        freshness_score: 0.8,
+        trust_score: 0.76,
+      },
+    ],
+  };
 }
 
 function formatFormSummary(label, summary) {
@@ -312,24 +476,45 @@ async function resolveFixtureContext(fetchJson, fixtureLabel, date) {
   const leagueName = safeText(fixture?.league?.name, "Competition not resolved");
   const kickoffUtc = safeText(fixture?.fixture?.date);
   const venue = safeText(fixture?.fixture?.venue?.name);
+  const homeTeamLabel = safeText(resolved.homeTeam?.team?.name, split.homeTeam);
+  const awayTeamLabel = safeText(resolved.awayTeam?.team?.name, split.awayTeam);
+  const groundedRead = buildSportsGroundedRead({
+    fixtureLabel,
+    homeTeamLabel,
+    awayTeamLabel,
+    homeForm,
+    awayForm,
+    oddsMarket: odds?.market || null,
+    leagueName,
+    kickoffUtc,
+    venue,
+  });
   const lines = [
     `Fixture: ${fixtureLabel}`,
     `Competition: ${leagueName}${venue ? ` at ${venue}` : ""}.`,
     kickoffUtc ? `Kickoff UTC: ${kickoffUtc}.` : "",
     formatFormSummary("Home recent form", homeForm),
     formatFormSummary("Away recent form", awayForm),
-    odds.length > 0 ? `Indicative 1X2 odds snapshot: ${odds.join(" | ")}.` : "",
+    Array.isArray(odds?.summary) && odds.summary.length > 0 ? `Indicative 1X2 odds snapshot: ${odds.summary.join(" | ")}.` : "",
   ].filter(Boolean);
 
   return {
     label: fixtureLabel,
     resolved: true,
     lines,
+    homeTeamLabel,
+    awayTeamLabel,
+    homeForm,
+    awayForm,
     homeTeamId: resolved.homeTeam.team.id,
     awayTeamId: resolved.awayTeam.team.id,
     fixtureId: fixture?.fixture?.id || null,
     leagueName,
     kickoffUtc: kickoffUtc || null,
+    odds_snapshot: Array.isArray(odds?.summary) ? odds.summary : [],
+    odds_market: odds?.market || null,
+    grounded_read: groundedRead,
+    parity_ready: Boolean(groundedRead?.parity_ready),
   };
 }
 
@@ -343,10 +528,15 @@ async function buildSportsForecastContext({ queryText, queryPlan, fetchJson }) {
   if (!config.configured) {
     return {
       provider: config.provider,
+      provider_required: true,
+      provider_configured: false,
       configured: false,
       available: false,
+      parity_ready: false,
       contextText: "",
       notes: ["Sports provider not configured. Crystal should stay conservative and avoid invented match edges."],
+      grounded_read: null,
+      signals: [],
       fixtures: entities.map((entity) => ({
         label: safeText(entity?.label, safeText(entity?.entity_id)),
         resolved: false,
@@ -377,13 +567,21 @@ async function buildSportsForecastContext({ queryText, queryPlan, fetchJson }) {
     return base.concat(`${fixture.label}: ${safeText(fixture.note, "No structured sports data available.")}`);
   });
 
+  const primaryGroundedRead = fixtures.find((fixture) => fixture?.grounded_read?.parity_ready)?.grounded_read || null;
+  const parityReady = Boolean(primaryGroundedRead?.parity_ready);
+
   return {
     provider: config.provider,
+    provider_required: true,
+    provider_configured: true,
     configured: true,
     available: fixtures.some((fixture) => fixture.resolved),
+    parity_ready: parityReady,
     fixtures,
     notes: fixtures.filter((fixture) => !fixture.resolved).map((fixture) => `${fixture.label}: ${safeText(fixture.note)}`),
     contextText: contextLines.length > 0 ? `SPORTS DATA\n${contextLines.join("\n")}` : "",
+    grounded_read: primaryGroundedRead,
+    signals: Array.isArray(primaryGroundedRead?.signals) ? primaryGroundedRead.signals : [],
   };
 }
 
@@ -392,7 +590,9 @@ module.exports = {
   SPORTS_MATCH_OUTCOMES_DOMAIN,
   SPORTS_FIXTURE_CARD_TYPE,
   buildSportsForecastContext,
+  buildSportsGroundedRead,
   getSportsRuntimeHealth,
+  getSportsConfig,
   isSportsDomain: (domain) => resolveDomainId(safeText(domain), "") === SPORTS_MATCH_OUTCOMES_DOMAIN,
   looksLikeSportsMatchQuery,
 };

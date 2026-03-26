@@ -2048,6 +2048,7 @@ function mergeRuntimeSourceHealth(baseSummary = {}, crystalCoreHealth = {}) {
   const runtimeTitles = {
     google_trends: "Google Trends",
     yahoo_finance: "Yahoo Finance",
+    api_football_optional: "API-Football",
   };
   const connectors = Array.isArray(baseSummary?.connectors)
     ? baseSummary.connectors.map((connector) => {
