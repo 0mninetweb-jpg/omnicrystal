@@ -15,12 +15,15 @@
     "check:policy-governance": "node scripts/check-policy-governance.mjs",
     "report:policy-governance": "node scripts/run-policy-quality-report.mjs",
     "check:markets-assets": "node scripts/check-markets-assets.mjs",
-    "report:markets-assets": "node scripts/run-markets-quality-report.mjs"
+    "report:markets-assets": "node scripts/run-markets-quality-report.mjs",
+    "check:provider-foundation": "node scripts/check-provider-foundation.mjs",
+    "report:provider-foundation": "node scripts/run-provider-foundation-report.mjs"
   },
   "dependencies": {
     "@google/genai": "^1.29.0",
     "@tailwindcss/vite": "^4.1.14",
     "@vitejs/plugin-react": "^5.0.4",
+    "adm-zip": "^0.5.16",
     "axios": "^1.13.6",
     "clsx": "^2.1.1",
     "crypto-js": "^4.2.0",
@@ -29,8 +32,10 @@
     "firebase": "^12.10.0",
     "framer-motion": "^12.36.0",
     "google-trends-api": "^4.9.2",
+    "gtfs-realtime-bindings": "^1.1.1",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
+    "papaparse": "^5.5.3",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-markdown": "^10.1.0",

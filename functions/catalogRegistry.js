@@ -239,7 +239,7 @@ const CATALOG_DOMAINS = [
     "wave_1",
     "published",
     "City pulse can already reuse public geospatial and trend signals in a truthful coverage envelope.",
-    ["wikidata", "nominatim", "overpass", "open_meteo"]
+    ["wikidata", "google_trends", "rss_allowlist", "nominatim", "overpass", "open_meteo"]
   ),
   createDomain(
     "A.8.mobility_congestion_and_accessibility",
@@ -273,7 +273,7 @@ const CATALOG_DOMAINS = [
     "wave_1",
     "published",
     "Travel can be grounded through public transport, weather, and aviation feeds.",
-    ["gtfs_static", "gtfs_realtime", "opensky", "open_meteo"]
+    ["gtfs_static", "gtfs_realtime", "opensky", "nominatim", "rss_allowlist", "open_meteo"]
   ),
   createDomain(
     "A.10.connectivity_and_network_quality_signals",
@@ -375,7 +375,7 @@ const CATALOG_DOMAINS = [
     "wave_2",
     "limited",
     "Labor market routing exists, but city and sector depth is still partial.",
-    ["fred_api", "world_bank_api", "eurostat_api", "oecd_api"]
+    ["fred_api", "world_bank_api", "eurostat_api", "oecd_api", "google_trends"]
   ),
   createDomain(
     "A.16.consumer_sentiment_and_attention_economics",
@@ -392,7 +392,7 @@ const CATALOG_DOMAINS = [
     "wave_1",
     "limited",
     "The domain is live in the registry, but attention grounding still depends on a lighter public stack.",
-    ["gdelt", "rss_allowlist", "polymarket_public"]
+    ["google_trends", "gdelt", "rss_allowlist", "polymarket_public"]
   ),
   createDomain(
     "A.17.technology_adoption_and_digital_pulse",
@@ -409,7 +409,7 @@ const CATALOG_DOMAINS = [
     "wave_1",
     "limited",
     "Technology adoption is cataloged with public evidence lanes, but feature depth is still expanding.",
-    ["world_bank_api", "oecd_api", "gdelt", "rss_allowlist"]
+    ["google_trends", "world_bank_api", "oecd_api", "gdelt", "rss_allowlist"]
   ),
   createDomain(
     "A.18.education_system_and_skills_pipeline",
@@ -494,7 +494,7 @@ const CATALOG_DOMAINS = [
     "wave_2",
     "limited",
     "Industry is routable, but the sector-specific feature library is still maturing.",
-    ["fred_api", "world_bank_api", "oecd_api", "gdelt"]
+    ["fred_api", "world_bank_api", "oecd_api", "yahoo_finance", "google_trends", "gdelt"]
   ),
   createDomain(
     "A.23.markets_and_asset_regimes",
@@ -511,7 +511,7 @@ const CATALOG_DOMAINS = [
     "wave_1",
     "published",
     "Markets already have a usable public grounding stack and a meaningful trust envelope.",
-    ["polymarket_public", "fred_api", "eia_api", "rss_allowlist"]
+    ["yahoo_finance", "google_trends", "polymarket_public", "fred_api", "eia_api", "rss_allowlist"]
   ),
   createDomain(
     "A.24.governance_policy_and_public_timeline",
@@ -528,7 +528,7 @@ const CATALOG_DOMAINS = [
     "wave_1",
     "limited",
     "The public timeline domain is cataloged, but event normalization is still partial.",
-    ["gdelt", "rss_allowlist", "wikidata"]
+    ["wikidata", "gdelt", "rss_allowlist", "polymarket_public"]
   ),
   createDomain(
     "A.25.geopolitics_and_conflict_dynamics",
@@ -613,7 +613,7 @@ const CATALOG_DOMAINS = [
     "wave_1",
     "published",
     "Sports remains one of the clearest high-frequency use cases, even while provider depth is still improving.",
-    ["football_data", "rss_allowlist"]
+    ["api_football_optional", "rss_allowlist"]
   ),
   createDomain(
     "A.30.culture_events_and_attention",
@@ -840,24 +840,26 @@ const CATALOG_DOMAINS = [
 
 const SOURCE_REGISTRY = [
   { source_id: "open_meteo", title: "Open-Meteo", category: "weather", status: "approved", access_profile: "public", implementation_status: "implemented" },
+  { source_id: "google_trends", title: "Google Trends", category: "attention", status: "approved", access_profile: "public", implementation_status: "implemented" },
+  { source_id: "yahoo_finance", title: "Yahoo Finance", category: "markets", status: "approved", access_profile: "public", implementation_status: "implemented" },
   { source_id: "nws_api", title: "National Weather Service API", category: "weather", status: "approved", access_profile: "public", implementation_status: "registry_only" },
   { source_id: "noaa_water", title: "NOAA Water API", category: "hydrology", status: "approved", access_profile: "public", implementation_status: "registry_only" },
-  { source_id: "openaq", title: "OpenAQ", category: "environment", status: "approved", access_profile: "public", implementation_status: "registry_only" },
-  { source_id: "fred_api", title: "FRED API", category: "macro", status: "approved", access_profile: "public", implementation_status: "registry_only" },
-  { source_id: "world_bank_api", title: "World Bank Indicators API", category: "macro", status: "approved", access_profile: "public", implementation_status: "registry_only" },
-  { source_id: "eurostat_api", title: "Eurostat API", category: "macro", status: "approved", access_profile: "public", implementation_status: "registry_only" },
-  { source_id: "oecd_api", title: "OECD SDMX API", category: "macro", status: "approved", access_profile: "public", implementation_status: "registry_only" },
-  { source_id: "eia_api", title: "EIA API", category: "energy", status: "approved", access_profile: "public", implementation_status: "registry_only" },
+  { source_id: "openaq", title: "OpenAQ", category: "environment", status: "approved", access_profile: "public", implementation_status: "implemented" },
+  { source_id: "fred_api", title: "FRED API", category: "macro", status: "approved", access_profile: "public", implementation_status: "implemented" },
+  { source_id: "world_bank_api", title: "World Bank Indicators API", category: "macro", status: "approved", access_profile: "public", implementation_status: "implemented" },
+  { source_id: "eurostat_api", title: "Eurostat API", category: "macro", status: "approved", access_profile: "public", implementation_status: "implemented" },
+  { source_id: "oecd_api", title: "OECD SDMX API", category: "macro", status: "approved", access_profile: "public", implementation_status: "implemented" },
+  { source_id: "eia_api", title: "EIA API", category: "energy", status: "approved", access_profile: "public", implementation_status: "implemented" },
   { source_id: "polymarket_public", title: "Polymarket Public APIs", category: "prediction_market", status: "approved", access_profile: "public", implementation_status: "implemented" },
-  { source_id: "nominatim", title: "Nominatim", category: "geography", status: "approved", access_profile: "public", implementation_status: "registry_only" },
-  { source_id: "overpass", title: "Overpass API", category: "geography", status: "approved", access_profile: "public", implementation_status: "registry_only" },
-  { source_id: "wikidata", title: "Wikidata", category: "entity_resolution", status: "approved", access_profile: "public", implementation_status: "registry_only" },
-  { source_id: "gtfs_static", title: "GTFS Static", category: "mobility", status: "approved", access_profile: "public", implementation_status: "registry_only" },
-  { source_id: "gtfs_realtime", title: "GTFS Realtime", category: "mobility", status: "approved", access_profile: "public", implementation_status: "registry_only" },
-  { source_id: "opensky", title: "OpenSky", category: "travel", status: "approved", access_profile: "public", implementation_status: "registry_only" },
+  { source_id: "nominatim", title: "Nominatim", category: "geography", status: "approved", access_profile: "public", implementation_status: "implemented" },
+  { source_id: "overpass", title: "Overpass API", category: "geography", status: "approved", access_profile: "public", implementation_status: "implemented" },
+  { source_id: "wikidata", title: "Wikidata", category: "entity_resolution", status: "approved", access_profile: "public", implementation_status: "implemented" },
+  { source_id: "gtfs_static", title: "GTFS Static", category: "mobility", status: "approved", access_profile: "public", implementation_status: "implemented" },
+  { source_id: "gtfs_realtime", title: "GTFS Realtime", category: "mobility", status: "approved", access_profile: "public", implementation_status: "implemented" },
+  { source_id: "opensky", title: "OpenSky", category: "travel", status: "approved", access_profile: "public", implementation_status: "implemented" },
   { source_id: "football_data", title: "football-data.org", category: "sports", status: "approved", access_profile: "public", implementation_status: "registry_only" },
-  { source_id: "gdelt", title: "GDELT", category: "news_attention", status: "approved", access_profile: "public", implementation_status: "registry_only" },
-  { source_id: "rss_allowlist", title: "Allowlisted RSS feeds", category: "news_attention", status: "approved", access_profile: "public", implementation_status: "registry_only" },
+  { source_id: "gdelt", title: "GDELT", category: "news_attention", status: "approved", access_profile: "public", implementation_status: "implemented" },
+  { source_id: "rss_allowlist", title: "Allowlisted RSS feeds", category: "news_attention", status: "approved", access_profile: "public", implementation_status: "implemented" },
   { source_id: "api_football_optional", title: "API-Football", category: "sports", status: "limited", access_profile: "optional_non_default", implementation_status: "implemented" },
 ];
 

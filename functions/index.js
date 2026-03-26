@@ -2036,11 +2036,48 @@ async function getCrystalCoreHealth() {
 }
 
 function mergeRuntimeSourceHealth(baseSummary = {}, crystalCoreHealth = {}) {
-  const implementedIds = new Set(
-    Array.isArray(crystalCoreHealth?.implemented_sources)
+  const providerStates = Array.isArray(crystalCoreHealth?.provider_states)
+    ? crystalCoreHealth.provider_states
+        .map((provider) => ({
+          source_id: safeText(provider?.source_id),
+          title: safeText(provider?.title),
+          category: safeText(provider?.category),
+          configured: provider?.configured === true,
+          available: provider?.available === true,
+          status: safeText(provider?.status),
+          implementation_status: safeText(provider?.implementation_status, "implemented"),
+          access_profile: safeText(provider?.access_profile),
+          notes: safeText(provider?.notes),
+          base_url: safeText(provider?.base_url),
+          feed_count: Number(provider?.feed_count || 0),
+        }))
+        .filter((provider) => provider.source_id)
+    : [];
+  const implementedIds = new Set(providerStates.map((provider) => provider.source_id));
+  if (!implementedIds.size) {
+    const fallbackImplementedIds = Array.isArray(crystalCoreHealth?.implemented_sources)
       ? crystalCoreHealth.implemented_sources.map((item) => safeText(item)).filter(Boolean)
-      : []
-  );
+      : [];
+    if (!fallbackImplementedIds.length) {
+      return baseSummary;
+    }
+    fallbackImplementedIds.forEach((sourceId) => {
+      implementedIds.add(sourceId);
+      providerStates.push({
+        source_id: sourceId,
+        title: "",
+        category: "runtime",
+        configured: false,
+        available: true,
+        status: "available_public",
+        implementation_status: "implemented",
+        access_profile: "",
+        notes: "",
+        base_url: "",
+        feed_count: 0,
+      });
+    });
+  }
   if (!implementedIds.size) {
     return baseSummary;
   }
@@ -2050,29 +2087,45 @@ function mergeRuntimeSourceHealth(baseSummary = {}, crystalCoreHealth = {}) {
     yahoo_finance: "Yahoo Finance",
     api_football_optional: "API-Football",
   };
+  const providerStateById = Object.fromEntries(providerStates.map((provider) => [provider.source_id, provider]));
   const connectors = Array.isArray(baseSummary?.connectors)
     ? baseSummary.connectors.map((connector) => {
         const sourceId = safeText(connector?.source_id);
-        if (!implementedIds.has(sourceId)) {
+        const providerState = providerStateById[sourceId];
+        if (!implementedIds.has(sourceId) && !providerState) {
           return connector;
         }
         return {
           ...connector,
-          implementation_status: "implemented",
+          implementation_status: safeText(providerState?.implementation_status, "implemented"),
+          status: safeText(providerState?.status, safeText(connector?.status)),
+          configured: providerState?.configured === true,
+          available: providerState?.available === true,
+          access_profile: safeText(providerState?.access_profile, safeText(connector?.access_profile)),
+          notes: safeText(providerState?.notes, safeText(connector?.notes)),
+          base_url: safeText(providerState?.base_url, safeText(connector?.base_url)),
+          feed_count: Number(providerState?.feed_count || connector?.feed_count || 0),
         };
       })
     : [];
   const knownSourceIds = new Set(connectors.map((connector) => safeText(connector?.source_id)).filter(Boolean));
   for (const sourceId of implementedIds) {
+    const providerState = providerStateById[sourceId];
     if (knownSourceIds.has(sourceId)) {
       continue;
     }
     connectors.push({
       source_id: sourceId,
-      title: runtimeTitles[sourceId] || sourceId,
-      category: "runtime",
-      implementation_status: "implemented",
-      status: "runtime_only",
+      title: safeText(providerState?.title, runtimeTitles[sourceId] || sourceId),
+      category: safeText(providerState?.category, "runtime"),
+      implementation_status: safeText(providerState?.implementation_status, "implemented"),
+      status: safeText(providerState?.status, "runtime_only"),
+      configured: providerState?.configured === true,
+      available: providerState?.available === true,
+      access_profile: safeText(providerState?.access_profile),
+      notes: safeText(providerState?.notes),
+      base_url: safeText(providerState?.base_url),
+      feed_count: Number(providerState?.feed_count || 0),
     });
   }
   const implementedSources = connectors.filter((connector) => safeText(connector?.implementation_status) === "implemented").length;

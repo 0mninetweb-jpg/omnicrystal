@@ -44,6 +44,31 @@ const {
   loadActiveCalibration,
   runOfflineEvaluationMode,
 } = require("./evaluation");
+const {
+  SHARED_IMPLEMENTED_SOURCE_IDS,
+  getAllProviderRuntimeStatuses,
+  buildProviderStatesForUsage,
+  buildRequiredSourcesForQuery,
+  isGeoLikeQuery,
+  isMobilityLikeQuery,
+  isTravelLikeQuery,
+  isMacroPublicDataQuery,
+  isEnergyLikeQuery,
+  isEnvironmentLikeQuery,
+  fetchNominatimLocationSignal,
+  fetchOverpassContextSignal,
+  fetchWorldBankSignal,
+  fetchEurostatSignal,
+  fetchOecdSignal,
+  fetchOpenSkySignal,
+  fetchGtfsStaticSignal,
+  fetchGtfsRealtimeSignal,
+  fetchOpenAqSignal,
+  fetchEiaSignal,
+  buildLocationStructure,
+  buildMobilityStructure,
+  buildPublicDataStructure,
+} = require("./sharedProviders");
 
 const CRYSTAL_CORE_VERSION = "crystal-core-v1";
 const JSON_STAGE_MAX_TOKENS = {
@@ -65,15 +90,7 @@ const SIMULATION_STAGE_POLICY = {
   minimumBudgetMs: 6 * 1000,
   reserveForFinalizationMs: 14 * 1000,
 };
-const RUNTIME_IMPLEMENTED_SOURCE_IDS = [
-  "open_meteo",
-  "polymarket_public",
-  "wikidata",
-  "gdelt",
-  "rss_allowlist",
-  "google_trends",
-  "yahoo_finance",
-];
+const RUNTIME_IMPLEMENTED_SOURCE_IDS = SHARED_IMPLEMENTED_SOURCE_IDS;
 const PLANNER_RESPONSE_SCHEMA = {
   type: "object",
   properties: {
@@ -262,28 +279,14 @@ function createStageTimeoutError(stage, timeoutMs) {
 }
 
 function getImplementedSourceIds() {
-  const ids = new Set(RUNTIME_IMPLEMENTED_SOURCE_IDS);
-  if (safeText(process.env.FRED_API_KEY)) {
-    ids.add("fred_api");
-  }
-  if (getSportsRuntimeHealth().configured) {
-    ids.add("api_football_optional");
-  }
-  return Array.from(ids);
+  return Array.from(new Set(RUNTIME_IMPLEMENTED_SOURCE_IDS));
 }
 
 function buildRuntimeGroundingSummary() {
-  return uniqueStrings([
-    "historical-cache",
-    "google-trends",
-    "polymarket",
-    "wikidata",
-    "gdelt",
-    "rss_allowlist",
-    "yahoo_finance",
-    safeText(process.env.FRED_API_KEY) ? "fred_api" : "",
-    getSportsRuntimeHealth().configured ? "api_football_optional" : "",
-  ]).filter(Boolean);
+  const availableSources = getAllProviderRuntimeStatuses()
+    .filter((provider) => provider.available === true)
+    .map((provider) => provider.source_id);
+  return uniqueStrings(["historical-cache"].concat(availableSources));
 }
 
 function logCoreEvent(event, payload = {}) {
@@ -1489,50 +1492,41 @@ function buildVerificationSummary({ searchPayload, sourceTrustMap, conflictMap, 
   ]).join(" ");
 }
 
-function buildSourceUsageSummary({ normalizedQuery = {}, domainConfig = {}, sourceLedger = [], predictionMarketFrame = null }) {
+function buildSourceUsageSummary({ queryText = "", normalizedQuery = {}, domainConfig = {}, sourceLedger = [], predictionMarketFrame = null }) {
   const usedSources = uniqueStrings(sourceLedger);
   const policyLike = isPolicyLikeQuery(normalizedQuery, domainConfig);
   const marketLike = isMarketLikeQuery(normalizedQuery, domainConfig);
-  const sportsLike = isSportsLikeQuery(normalizedQuery, normalizedQuery?.original_query, domainConfig);
-  const requiredSources = [];
-  const optionalSources = [];
-
-  if (policyLike) {
-    requiredSources.push("wikidata", "gdelt", "rss_allowlist");
-    if (normalizedQuery?.binary_frame?.asks_binary_question) {
-      requiredSources.push("polymarket_public");
-    }
-  }
-
-  if (marketLike) {
-    requiredSources.push("yahoo_finance", "google_trends");
-    if (predictionMarketFrame) {
-      requiredSources.push("polymarket_public");
-    }
-    if (isMacroMarketQuery(normalizedQuery?.original_query, normalizedQuery)) {
-      if (safeText(process.env.FRED_API_KEY)) {
-        requiredSources.push("fred_api");
-      } else {
-        optionalSources.push("fred_api");
-      }
-    }
-  }
-
-  if (sportsLike) {
-    requiredSources.push("api_football_optional");
-  }
-
-  const uniqueRequiredSources = uniqueStrings(requiredSources);
-  const uniqueOptionalSources = uniqueStrings(optionalSources);
+  const sportsLike = isSportsLikeQuery(normalizedQuery, normalizedQuery?.original_query || queryText, domainConfig);
+  const requirementSummary = buildRequiredSourcesForQuery({
+    queryText,
+    normalizedQuery,
+    domainConfig,
+    policyLike,
+    marketLike,
+    sportsLike,
+    predictionMarketFrame,
+  });
+  const providerStates = buildProviderStatesForUsage({
+    requiredSources: requirementSummary.required_sources,
+    optionalSources: requirementSummary.optional_sources,
+    usedSources,
+  });
   return {
     policy_like: policyLike,
     market_like: marketLike,
     sports_like: sportsLike,
-    required_sources: uniqueRequiredSources,
-    optional_sources: uniqueOptionalSources,
+    geo_like: requirementSummary.geo_like,
+    mobility_like: requirementSummary.mobility_like,
+    travel_like: requirementSummary.travel_like,
+    macro_public_like: requirementSummary.macro_public_like,
+    energy_like: requirementSummary.energy_like,
+    environment_like: requirementSummary.environment_like,
+    required_sources: requirementSummary.required_sources,
+    optional_sources: requirementSummary.optional_sources,
     used_sources: usedSources,
-    missing_required_sources: uniqueRequiredSources.filter((sourceId) => !usedSources.includes(sourceId)),
-    missing_optional_sources: uniqueOptionalSources.filter((sourceId) => !usedSources.includes(sourceId)),
+    missing_required_sources: requirementSummary.required_sources.filter((sourceId) => !usedSources.includes(sourceId)),
+    missing_optional_sources: requirementSummary.optional_sources.filter((sourceId) => !usedSources.includes(sourceId)),
+    provider_states: providerStates,
   };
 }
 
@@ -2326,11 +2320,15 @@ function buildFallbackVerifiedEvidencePack({ normalizedQuery = {}, variableSelec
     ]).slice(0, 4),
   };
   fallbackPack.source_usage = buildSourceUsageSummary({
+    queryText: safeText(normalizedQuery?.original_query),
     normalizedQuery,
     domainConfig,
     sourceLedger: fallbackPack.source_ledger,
     predictionMarketFrame: fallbackPack.prediction_market_frame,
   });
+  fallbackPack.location_structure = null;
+  fallbackPack.mobility_structure = null;
+  fallbackPack.public_data_structure = null;
   fallbackPack.market_structure = buildMarketStructure({
     normalizedQuery,
     liveSignals: fallbackPack.live_signals,
@@ -2353,6 +2351,12 @@ async function buildVerifiedEvidencePack(context, { runId, queryText, normalized
   const policyLike = isPolicyLikeQuery(normalizedQuery, domainConfig);
   const marketLike = isMarketLikeQuery(normalizedQuery, domainConfig);
   const sportsLike = isSportsLikeQuery(normalizedQuery, queryText, domainConfig);
+  const geoLike = isGeoLikeQuery(queryText, normalizedQuery, domainConfig);
+  const mobilityLike = isMobilityLikeQuery(queryText, normalizedQuery, domainConfig);
+  const travelLike = isTravelLikeQuery(queryText, normalizedQuery, domainConfig);
+  const macroPublicLike = isMacroPublicDataQuery(queryText, normalizedQuery, domainConfig);
+  const energyLike = isEnergyLikeQuery(queryText, normalizedQuery, domainConfig);
+  const environmentLike = isEnvironmentLikeQuery(queryText, normalizedQuery, domainConfig);
   const resolveWikidataSignal = typeof context.fetchWikidataEntitySignal === "function" ? context.fetchWikidataEntitySignal : fetchWikidataEntitySignal;
   const resolveGdeltSignal = typeof context.fetchGdeltAttentionSignal === "function" ? context.fetchGdeltAttentionSignal : fetchGdeltAttentionSignal;
   const resolveAllowlistedRssSignal =
@@ -2360,6 +2364,21 @@ async function buildVerifiedEvidencePack(context, { runId, queryText, normalized
   const resolveTrendSignal = typeof context.fetchTrendSignal === "function" ? context.fetchTrendSignal : fetchTrendSignal;
   const resolveYahooMarketSignal = typeof context.fetchYahooMarketSignal === "function" ? context.fetchYahooMarketSignal : fetchYahooMarketSignal;
   const resolveFredMacroSignal = typeof context.fetchFredMacroSignal === "function" ? context.fetchFredMacroSignal : fetchFredMacroSignal;
+  const resolveNominatimLocationSignal =
+    typeof context.fetchNominatimLocationSignal === "function" ? context.fetchNominatimLocationSignal : fetchNominatimLocationSignal;
+  const resolveOverpassContextSignal =
+    typeof context.fetchOverpassContextSignal === "function" ? context.fetchOverpassContextSignal : fetchOverpassContextSignal;
+  const resolveWorldBankSignal =
+    typeof context.fetchWorldBankSignal === "function" ? context.fetchWorldBankSignal : fetchWorldBankSignal;
+  const resolveEurostatSignal = typeof context.fetchEurostatSignal === "function" ? context.fetchEurostatSignal : fetchEurostatSignal;
+  const resolveOecdSignal = typeof context.fetchOecdSignal === "function" ? context.fetchOecdSignal : fetchOecdSignal;
+  const resolveOpenSkySignal = typeof context.fetchOpenSkySignal === "function" ? context.fetchOpenSkySignal : fetchOpenSkySignal;
+  const resolveGtfsStaticSignal =
+    typeof context.fetchGtfsStaticSignal === "function" ? context.fetchGtfsStaticSignal : fetchGtfsStaticSignal;
+  const resolveGtfsRealtimeSignal =
+    typeof context.fetchGtfsRealtimeSignal === "function" ? context.fetchGtfsRealtimeSignal : fetchGtfsRealtimeSignal;
+  const resolveOpenAqSignal = typeof context.fetchOpenAqSignal === "function" ? context.fetchOpenAqSignal : fetchOpenAqSignal;
+  const resolveEiaSignal = typeof context.fetchEiaSignal === "function" ? context.fetchEiaSignal : fetchEiaSignal;
   const resolvePredictionMarketPulse =
     typeof context.getPredictionMarketPulse === "function" ? context.getPredictionMarketPulse : getPolymarketPulse;
   const resolveSportsForecastContext =
@@ -2439,6 +2458,7 @@ async function buildVerifiedEvidencePack(context, { runId, queryText, normalized
     liveSignals.push(...sportsContext.signals);
   }
 
+  const locationPack = geoLike ? await Promise.resolve(resolveNominatimLocationSignal(queryText, normalizedQuery)).catch(() => null) : null;
   const connectorPacks = (
     await Promise.all(
       [
@@ -2446,15 +2466,24 @@ async function buildVerifiedEvidencePack(context, { runId, queryText, normalized
         policyLike ? resolveGdeltSignal(fetchJson, queryText, normalizedQuery) : null,
         policyLike ? resolveAllowlistedRssSignal(queryText, normalizedQuery) : null,
         marketLike ? resolveYahooMarketSignal(queryText, normalizedQuery) : null,
-        marketLike ? resolveFredMacroSignal(fetchJson, queryText, normalizedQuery) : null,
+        marketLike || macroPublicLike ? resolveFredMacroSignal(fetchJson, queryText, normalizedQuery) : null,
+        geoLike ? resolveOverpassContextSignal(queryText, normalizedQuery, domainConfig, locationPack) : null,
+        macroPublicLike ? resolveWorldBankSignal(queryText, normalizedQuery) : null,
+        macroPublicLike ? resolveEurostatSignal(queryText, normalizedQuery) : null,
+        macroPublicLike ? resolveOecdSignal(queryText, normalizedQuery) : null,
+        travelLike ? resolveOpenSkySignal(queryText, normalizedQuery, locationPack) : null,
+        mobilityLike ? resolveGtfsStaticSignal(queryText, normalizedQuery) : null,
+        mobilityLike ? resolveGtfsRealtimeSignal(queryText, normalizedQuery) : null,
+        environmentLike ? resolveOpenAqSignal(queryText, normalizedQuery) : null,
+        energyLike ? resolveEiaSignal(queryText, normalizedQuery) : null,
       ].map((task) => Promise.resolve(task).catch(() => null))
     )
-  ).filter(Boolean);
+  )
+    .filter(Boolean)
+    .concat(locationPack ? [locationPack] : []);
 
   const connectorSignals = connectorPacks.flatMap((pack) => (Array.isArray(pack?.signals) ? pack.signals : []));
-  const connectorTrustMap = connectorPacks.flatMap((pack) =>
-    Array.isArray(pack?.source_trust_map) ? pack.source_trust_map : []
-  );
+  const connectorTrustMap = connectorPacks.flatMap((pack) => (Array.isArray(pack?.source_trust_map) ? pack.source_trust_map : []));
   const connectorConflicts = connectorPacks.flatMap((pack) => (Array.isArray(pack?.conflict_map) ? pack.conflict_map : []));
   liveSignals.push(...connectorSignals);
 
@@ -2518,10 +2547,37 @@ async function buildVerifiedEvidencePack(context, { runId, queryText, normalized
       .concat(sportsContext?.available ? ["api_football_optional"] : [])
   );
   const sourceUsage = buildSourceUsageSummary({
+    queryText,
     normalizedQuery,
     domainConfig,
     sourceLedger,
     predictionMarketFrame,
+  });
+  const overpassPack = connectorPacks.find((pack) => pack?.poi_metrics);
+  const worldBankPack = connectorPacks.find((pack) => pack?.public_data_metrics?.source_id === "world_bank_api");
+  const eurostatPack = connectorPacks.find((pack) => pack?.public_data_metrics?.source_id === "eurostat_api");
+  const oecdPack = connectorPacks.find((pack) => pack?.public_data_metrics?.source_id === "oecd_api");
+  const eiaPack = connectorPacks.find((pack) => pack?.public_data_metrics?.source_id === "eia_api");
+  const openAqPack = connectorPacks.find((pack) => pack?.environment_metrics?.source_id === "openaq");
+  const openSkyPack = connectorPacks.find((pack) => pack?.mobility_metrics?.source_id === "opensky");
+  const gtfsStaticPack = connectorPacks.find((pack) => pack?.mobility_metrics?.source_id === "gtfs_static");
+  const gtfsRealtimePack = connectorPacks.find((pack) => pack?.mobility_metrics?.source_id === "gtfs_realtime");
+  const locationStructure = buildLocationStructure({
+    locationPack,
+    overpassPack,
+  });
+  const mobilityStructure = buildMobilityStructure({
+    openSkyPack,
+    gtfsStaticPack,
+    gtfsRealtimePack,
+  });
+  const publicDataStructure = buildPublicDataStructure({
+    worldBankPack,
+    eurostatPack,
+    oecdPack,
+    fredPack: connectorPacks.find((pack) => pack?.macro_metrics),
+    eiaPack,
+    openAqPack,
   });
   const marketStructure = buildMarketStructure({
     queryText,
@@ -2577,6 +2633,9 @@ async function buildVerifiedEvidencePack(context, { runId, queryText, normalized
     },
     prediction_market_frame: predictionMarketFrame,
     source_usage: sourceUsage,
+    location_structure: locationStructure,
+    mobility_structure: mobilityStructure,
+    public_data_structure: publicDataStructure,
     market_structure: marketStructure,
     sports_grounding: sportsGrounding,
     selected_variables: Array.isArray(variableSelectionPack?.selected_variables) ? variableSelectionPack.selected_variables : [],
@@ -2591,6 +2650,9 @@ async function buildVerifiedEvidencePack(context, { runId, queryText, normalized
       sourceUsage.missing_optional_sources.length > 0
         ? `Optional source coverage is still missing ${sourceUsage.missing_optional_sources.join(", ")}.`
         : "",
+      locationStructure ? "" : geoLike ? "Location-aware grounding remains thin because the shared geography pack did not fully resolve." : "",
+      mobilityStructure ? "" : mobilityLike || travelLike ? "Mobility/travel grounding remains partial because shared transit or flight feeds are still thin." : "",
+      publicDataStructure ? "" : macroPublicLike || energyLike || environmentLike ? "Public-data grounding remains partial because one or more macro, energy, or environment providers did not return a usable signal." : "",
       sportsLike && !sportsGrounding?.provider_configured
         ? "Sports picks require API-Football. The shared runtime is currently missing that provider configuration."
         : "",
@@ -2599,6 +2661,8 @@ async function buildVerifiedEvidencePack(context, { runId, queryText, normalized
         : "",
     ]).slice(0, 4),
   };
+
+  verifiedEvidencePack.required_source_gap = sourceUsage.missing_required_sources.length > 0;
 
   if (sportsLike && (!sportsGrounding?.provider_configured || !sportsGrounding?.fixture_resolved || !sportsGrounding?.parity_ready)) {
     verifiedEvidencePack.hard_stop = true;
@@ -3359,16 +3423,17 @@ function createCrystalCoreRuntime(config = {}) {
         }
       }
 
-      return {
-        runtime: CRYSTAL_CORE_VERSION,
-        mode: "deep_default",
-        available: true,
-        llm: llmRuntime.getRuntimeMetadata(),
-        sports: getSportsRuntimeHealth(),
-        simulation: {
-          configured: Boolean(safeText(process.env.MIROFISH_BASE_URL)),
-          adapterReachable: remoteAdapterReachable,
-        },
+        return {
+          runtime: CRYSTAL_CORE_VERSION,
+          mode: "deep_default",
+          available: true,
+          llm: llmRuntime.getRuntimeMetadata(),
+          sports: getSportsRuntimeHealth(),
+          provider_states: getAllProviderRuntimeStatuses(),
+          simulation: {
+            configured: Boolean(safeText(process.env.MIROFISH_BASE_URL)),
+            adapterReachable: remoteAdapterReachable,
+          },
         adapters: [
           "EntityResolutionAdapter",
           "TemporalHorizonAdapter",
@@ -3408,5 +3473,6 @@ module.exports = {
     buildFallbackVerifiedEvidencePack,
     buildSourceUsageSummary,
     buildMarketStructure,
+    getAllProviderRuntimeStatuses,
   },
 };

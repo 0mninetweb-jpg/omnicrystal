@@ -1031,6 +1031,14 @@ function computeEvidenceQuality(evidenceBundle = {}, domainConfig = {}, engine =
   const eventResolved = evidenceBundle.event_resolution?.resolved !== false;
   const domainState = domainConfig.current_state || "limited";
   const engineBonus = engine === "oracle" ? 0.12 : engine === "extended" ? 0.07 : 0.03;
+  const missingRequiredSources = Array.isArray(evidenceBundle?.source_usage?.missing_required_sources)
+    ? evidenceBundle.source_usage.missing_required_sources.length
+    : 0;
+  const missingOptionalSources = Array.isArray(evidenceBundle?.source_usage?.missing_optional_sources)
+    ? evidenceBundle.source_usage.missing_optional_sources.length
+    : 0;
+  const requiredSourcePenalty = Math.min(0.18, missingRequiredSources * 0.08);
+  const optionalSourcePenalty = Math.min(0.06, missingOptionalSources * 0.02);
 
   const coverageScore = clamp01(
     0.16 +
@@ -1040,7 +1048,9 @@ function computeEvidenceQuality(evidenceBundle = {}, domainConfig = {}, engine =
       (entityResolved ? 0.08 : 0) +
       (eventResolved ? 0.06 : 0) +
       (DOMAIN_STATE_SCORE[domainState] || 0) +
-      engineBonus,
+      engineBonus -
+      requiredSourcePenalty -
+      optionalSourcePenalty,
     0.18
   );
 
@@ -1058,6 +1068,8 @@ function computeEvidenceQuality(evidenceBundle = {}, domainConfig = {}, engine =
     agreement_score: directionScores.agreement_score,
     conflict_score: directionScores.conflict_score,
     source_count: sourceLedger.length,
+    missing_required_source_count: missingRequiredSources,
+    missing_optional_source_count: missingOptionalSources,
   };
 }
 
@@ -1388,6 +1400,11 @@ function finalizeScorecard(rawScorecard = {}, evidenceBundle = {}, queryPlan = {
   );
 
   const hardStop = Boolean(evidenceBundle.hard_stop);
+  const requiredSourceGap = Boolean(
+    evidenceBundle?.required_source_gap ||
+      (Array.isArray(evidenceBundle?.source_usage?.missing_required_sources) &&
+        evidenceBundle.source_usage.missing_required_sources.length > 0)
+  );
   const providerRequiredNoPick =
     hardStop &&
     Boolean(evidenceBundle?.sports_grounding?.provider_required) &&
@@ -1484,6 +1501,9 @@ function finalizeScorecard(rawScorecard = {}, evidenceBundle = {}, queryPlan = {
   ) {
     publicationState = "limited";
   }
+  if (requiredSourceGap && publicationState === "published") {
+    publicationState = "limited";
+  }
 
   return {
     primary_call: primaryCall,
@@ -1503,10 +1523,15 @@ function finalizeScorecard(rawScorecard = {}, evidenceBundle = {}, queryPlan = {
       agreement_score: evidenceQuality.agreement_score,
       conflict_score: evidenceQuality.conflict_score,
       source_count: evidenceQuality.source_count,
+      missing_required_source_count: evidenceQuality.missing_required_source_count,
+      missing_optional_source_count: evidenceQuality.missing_optional_source_count,
       domain_state: domainConfig.current_state || "limited",
       notes: uniqueStrings([
         safeText(domainConfig.status_reason),
         safeText(evidenceBundle.notes?.[0]),
+        requiredSourceGap
+          ? "At least one required shared provider was missing, so Crystal downgraded this forecast out of published state."
+          : "",
         publicationState === "limited" ? "Crystal has a directional read, but the evidence is still converging." : "",
       ]).slice(0, 4),
     },

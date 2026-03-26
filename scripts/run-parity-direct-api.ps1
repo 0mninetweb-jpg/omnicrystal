@@ -1,6 +1,6 @@
 param(
   [string]$LocalApiBase = "https://api-paaqyfwena-ew.a.run.app",
-  [string]$RemoteServiceUrl = "https://crystal-core-paaqyfwena-ew.a.run.app",
+  [string]$RemoteServiceUrl = "https://crystal-core-294034419055.europe-west1.run.app",
   [string]$OutputMarkdownPath = "docs/parity-report-2026-03-24.md",
   [string]$OutputJsonPath = "docs/parity-report-2026-03-24.json"
 )
