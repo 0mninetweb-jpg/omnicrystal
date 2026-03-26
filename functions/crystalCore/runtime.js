@@ -1370,6 +1370,33 @@ function buildVerificationSummary({ searchPayload, sourceTrustMap, conflictMap, 
   ]).join(" ");
 }
 
+function buildSourceUsageSummary({ normalizedQuery = {}, domainConfig = {}, sourceLedger = [] }) {
+  const usedSources = uniqueStrings(sourceLedger);
+  const policyLike = isPolicyLikeQuery(normalizedQuery, domainConfig);
+  const marketLike = isMarketLikeQuery(normalizedQuery, domainConfig);
+  const requiredSources = [];
+
+  if (policyLike) {
+    requiredSources.push("wikidata", "gdelt", "rss_allowlist");
+    if (normalizedQuery?.binary_frame?.asks_binary_question) {
+      requiredSources.push("polymarket_public");
+    }
+  }
+
+  if (marketLike) {
+    requiredSources.push("yahoo_finance");
+  }
+
+  const uniqueRequiredSources = uniqueStrings(requiredSources);
+  return {
+    policy_like: policyLike,
+    market_like: marketLike,
+    required_sources: uniqueRequiredSources,
+    used_sources: usedSources,
+    missing_required_sources: uniqueRequiredSources.filter((sourceId) => !usedSources.includes(sourceId)),
+  };
+}
+
 function normalizeScenarioSet(rawScenarioSet = [], probabilitySplit = null) {
   if (Array.isArray(rawScenarioSet) && rawScenarioSet.length > 0) {
     return rawScenarioSet
@@ -1544,6 +1571,10 @@ function buildGenericQueryPlanPrompt(queryText, routingHints = {}) {
   const candidateLines = compactCandidateDomains(routingHints?.candidateDomains)
     .map((candidate) => `- ${candidate.domain_id} (${candidate.score})`)
     .join("\n");
+  const resolvedEntities = Array.isArray(routingHints?.entities)
+    ? routingHints.entities.map((entity) => safeText(entity?.label)).filter(Boolean).slice(0, 4).join(", ")
+    : "";
+  const policyHint = Boolean(routingHints?.policyLike);
 
   return `Query: "${safeText(queryText)}"
 Preferred domain: ${safeText(routingHints.primaryDomainId, GENERAL_FORECAST_DOMAIN)}
@@ -1551,6 +1582,11 @@ Intent hint: ${safeText(routingHints.intentShape, "directional_range")}
 Resolution frame hint: ${safeText(routingHints.resolutionFrame, "trend")}
 Binary side A: ${safeText(routingHints?.binaryFrame?.question_side_a)}
 Binary side B: ${safeText(routingHints?.binaryFrame?.question_side_b)}
+Policy/governance hint: ${policyHint ? "yes" : "no"}
+Event date hint: ${safeText(routingHints?.eventDate)}
+Jurisdiction hint: ${safeText(routingHints?.jurisdiction)}
+Governing entity hint: ${safeText(routingHints?.governingEntity)}
+Resolved entities: ${resolvedEntities}
 Supporting domains: ${Array.isArray(routingHints?.supportingDomains) ? routingHints.supportingDomains.slice(0, 3).join(", ") : ""}
 Candidate domains:
 ${candidateLines || "- none"}
@@ -1562,6 +1598,8 @@ Rules:
 - Choose a concrete domain whenever possible.
 - Use ${GENERAL_FORECAST_DOMAIN} only as a last resort.
 - If the question is binary, fill question_side_a, question_side_b, event_date, jurisdiction and governing_entity whenever the query implies them.
+- If this is a policy/governance or public timeline question, preserve event_date, jurisdiction, governing_entity, and the policy route unless the hints are clearly wrong.
+- For policy/governance questions, do not return ${GENERAL_FORECAST_DOMAIN} when a plausible institutional outcome, jurisdiction, or governing actor is already present in the hints.
 - Leave question_side_a and question_side_b empty only when the question is not binary.
 - Use mode {"type":"forecast"}.
 - No markdown. No commentary. No wrapper keys.`;
@@ -1722,6 +1760,7 @@ function buildFinalCard({
     how_to_raise_confidence: howToRaiseConfidence,
     evidence_drawer: {
       metrics_provenance: uniqueStrings(verifiedEvidencePack.source_ledger || []).slice(0, 8),
+      source_usage: verifiedEvidencePack?.source_usage || undefined,
       freshness_summary: {
         as_of_utc: safeText(verifiedEvidencePack?.prediction_market_frame?.price_updated_at, now),
         cadence: safeText(domainConfig.refresh_cadence, "session-based"),
@@ -1882,6 +1921,11 @@ function buildFallbackVerifiedEvidencePack({ normalizedQuery = {}, variableSelec
       safeText(reason),
     ]).slice(0, 4),
   };
+  fallbackPack.source_usage = buildSourceUsageSummary({
+    normalizedQuery,
+    domainConfig,
+    sourceLedger: fallbackPack.source_ledger,
+  });
   fallbackPack.evidence_quality = computeEvidenceQuality(fallbackPack, domainConfig, engine || "extended");
   return fallbackPack;
 }
@@ -1891,6 +1935,16 @@ async function buildVerifiedEvidencePack(context, { runId, queryText, normalized
   const domainConfig = getDomain(normalizedQuery.primary_domain_id, GENERAL_FORECAST_DOMAIN);
   const locationFocus = getPrimaryLocationFromPlan(normalizedQuery) || getPrimaryEntityLabel(normalizedQuery) || "global";
   const supportingDomains = Array.isArray(normalizedQuery.supporting_domains) ? normalizedQuery.supporting_domains.slice(0, 3) : [];
+  const policyLike = isPolicyLikeQuery(normalizedQuery, domainConfig);
+  const marketLike = isMarketLikeQuery(normalizedQuery, domainConfig);
+  const resolveWikidataSignal = typeof context.fetchWikidataEntitySignal === "function" ? context.fetchWikidataEntitySignal : fetchWikidataEntitySignal;
+  const resolveGdeltSignal = typeof context.fetchGdeltAttentionSignal === "function" ? context.fetchGdeltAttentionSignal : fetchGdeltAttentionSignal;
+  const resolveAllowlistedRssSignal =
+    typeof context.fetchAllowlistedRssSignal === "function" ? context.fetchAllowlistedRssSignal : fetchAllowlistedRssSignal;
+  const resolveYahooMarketSignal = typeof context.fetchYahooMarketSignal === "function" ? context.fetchYahooMarketSignal : fetchYahooMarketSignal;
+  const resolveFredMacroSignal = typeof context.fetchFredMacroSignal === "function" ? context.fetchFredMacroSignal : fetchFredMacroSignal;
+  const resolvePredictionMarketPulse =
+    typeof context.getPredictionMarketPulse === "function" ? context.getPredictionMarketPulse : getPolymarketPulse;
 
   const mainBaseline = await get20YearHistoricalContext({
     db,
@@ -1934,11 +1988,11 @@ async function buildVerifiedEvidencePack(context, { runId, queryText, normalized
   const connectorPacks = (
     await Promise.all(
       [
-        isPolicyLikeQuery(normalizedQuery, domainConfig) ? fetchWikidataEntitySignal(fetchJson, normalizedQuery) : null,
-        isPolicyLikeQuery(normalizedQuery, domainConfig) ? fetchGdeltAttentionSignal(fetchJson, queryText, normalizedQuery) : null,
-        isPolicyLikeQuery(normalizedQuery, domainConfig) ? fetchAllowlistedRssSignal(queryText, normalizedQuery) : null,
-        isMarketLikeQuery(normalizedQuery, domainConfig) ? fetchYahooMarketSignal(queryText, normalizedQuery) : null,
-        isMarketLikeQuery(normalizedQuery, domainConfig) ? fetchFredMacroSignal(fetchJson, queryText, normalizedQuery) : null,
+        policyLike ? resolveWikidataSignal(fetchJson, normalizedQuery) : null,
+        policyLike ? resolveGdeltSignal(fetchJson, queryText, normalizedQuery) : null,
+        policyLike ? resolveAllowlistedRssSignal(queryText, normalizedQuery) : null,
+        marketLike ? resolveYahooMarketSignal(queryText, normalizedQuery) : null,
+        marketLike ? resolveFredMacroSignal(fetchJson, queryText, normalizedQuery) : null,
       ].map((task) => Promise.resolve(task).catch(() => null))
     )
   ).filter(Boolean);
@@ -1953,7 +2007,7 @@ async function buildVerifiedEvidencePack(context, { runId, queryText, normalized
   let predictionMarketFrame = null;
   if (normalizedQuery?.binary_frame?.asks_binary_question) {
     try {
-      predictionMarketFrame = await getPolymarketPulse({
+      predictionMarketFrame = await resolvePredictionMarketPulse({
         db,
         admin,
         fetchJson,
@@ -2008,6 +2062,11 @@ async function buildVerifiedEvidencePack(context, { runId, queryText, normalized
       .concat(sourceTrustMap.map((item) => item.source_id))
       .concat(mainBaseline ? ["historical-cache"] : [])
   );
+  const sourceUsage = buildSourceUsageSummary({
+    normalizedQuery,
+    domainConfig,
+    sourceLedger,
+  });
 
   const verifiedEvidencePack = {
     historical_baseline: buildHistoricalBundle(mainBaseline, supportingBaselines),
@@ -2037,12 +2096,16 @@ async function buildVerifiedEvidencePack(context, { runId, queryText, normalized
       jurisdiction: safeText(normalizedQuery?.jurisdiction),
     },
     prediction_market_frame: predictionMarketFrame,
+    source_usage: sourceUsage,
     selected_variables: Array.isArray(variableSelectionPack?.selected_variables) ? variableSelectionPack.selected_variables : [],
     adapter_activation_map: Array.isArray(variableSelectionPack?.adapter_activation_map) ? variableSelectionPack.adapter_activation_map : [],
     notes: uniqueStrings([
       mainBaseline ? "" : "The 20-year baseline was thin for this entity or geography.",
       liveSignals.length >= 2 ? "" : "Live evidence is still light for this run.",
       conflictMap.length > 0 ? "Active signal conflicts remain unresolved." : "",
+      sourceUsage.missing_required_sources.length > 0
+        ? `Required source coverage is still missing ${sourceUsage.missing_required_sources.join(", ")}.`
+        : "",
     ]).slice(0, 4),
   };
 
@@ -2788,5 +2851,8 @@ module.exports = {
     normalizeDossierStagePayload,
     normalizeVerbalizerStagePayload,
     normalizeQueryPlanPayload,
+    buildVerifiedEvidencePack,
+    buildFallbackVerifiedEvidencePack,
+    buildSourceUsageSummary,
   },
 };

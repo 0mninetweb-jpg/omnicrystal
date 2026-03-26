@@ -259,7 +259,7 @@ function createVerticalAdapters() {
               marginal_information_gain: 0.82,
             },
             {
-              evidence_needs: ["search_live", "historical_baseline", "consensus_baseline"],
+              evidence_needs: ["entity_resolution", "historical_baseline", "consensus_baseline", "event_news"],
               rationale: "Policy calls need calendars, institutions, and coalition incentives, not generic political prose.",
             }
           ),
@@ -275,8 +275,24 @@ function createVerticalAdapters() {
               marginal_information_gain: 0.78,
             },
             {
-              evidence_needs: ["search_live", "trend_signal"],
+              evidence_needs: ["event_news", "trend_signal", "consensus_baseline"],
               rationale: "Binary policy questions usually turn on late public pressure and signal momentum.",
+            }
+          ),
+          buildVariable(
+            this.id,
+            "Legislative path, veto points, and approval bottlenecks",
+            "core",
+            {
+              causal_relevance: 0.88,
+              temporal_relevance: 0.8,
+              geographic_relevance: 0.8,
+              signal_quality: 0.64,
+              marginal_information_gain: 0.76,
+            },
+            {
+              evidence_needs: ["entity_resolution", "event_news", "consensus_baseline"],
+              rationale: "Approval and referendum calls improve when Crystal models who can block, delay, or ratify the outcome.",
             }
           ),
         ];
@@ -438,6 +454,36 @@ function buildAdapterActivationMap(matchedAdapters = [], selectedVariables = [])
   }));
 }
 
+function ensureVerticalAdapterCoverage(candidateVariables = [], matchedAdapters = [], limit = 10) {
+  const selected = candidateVariables.slice(0, limit);
+  const selectedIds = new Set(selected.map((variable) => variable.variable_id));
+  const matchedVerticalAdapters = matchedAdapters.filter((adapter) => safeText(adapter?.scope) === "vertical");
+
+  for (const adapter of matchedVerticalAdapters) {
+    const alreadyCovered = selected.some((variable) => variable.source_adapter === adapter.id);
+    if (alreadyCovered) continue;
+
+    const fallbackVariable = candidateVariables.find(
+      (variable) => variable.source_adapter === adapter.id && !selectedIds.has(variable.variable_id)
+    );
+    if (!fallbackVariable) continue;
+
+    const replacementIndex = selected.findIndex((variable) => variable.source_adapter !== adapter.id);
+    if (replacementIndex >= 0) {
+      selected[replacementIndex] = fallbackVariable;
+      selectedIds.add(fallbackVariable.variable_id);
+    } else if (selected.length < limit) {
+      selected.push(fallbackVariable);
+      selectedIds.add(fallbackVariable.variable_id);
+    }
+  }
+
+  return selected
+    .filter((variable) => variable && safeText(variable.variable_id))
+    .sort((left, right) => Number(right?.overall_score || 0) - Number(left?.overall_score || 0))
+    .slice(0, limit);
+}
+
 function runContextualVariableSelection(normalizedQuery = {}) {
   const registry = [...createUniversalAdapters(), ...createVerticalAdapters()];
   const matchedAdapters = registry.filter((adapter) => {
@@ -458,7 +504,7 @@ function runContextualVariableSelection(normalizedQuery = {}) {
     })
     .sort((left, right) => right.overall_score - left.overall_score);
 
-  const selectedVariables = candidateVariables.slice(0, 10);
+  const selectedVariables = ensureVerticalAdapterCoverage(candidateVariables, matchedAdapters, 10);
   const discardedVariables = candidateVariables.slice(10, 18).map((variable) => ({
     label: variable.label,
     source_adapter: variable.source_adapter,

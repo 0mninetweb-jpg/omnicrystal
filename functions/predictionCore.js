@@ -339,6 +339,42 @@ const SUPPORTING_DOMAINS = {
   ],
 };
 
+const POLICY_JURISDICTION_HINTS = [
+  { label: "Italy", patterns: [/\bitaly\b/i, /\bitalia\b/i, /\bitalian\b/i] },
+  { label: "France", patterns: [/\bfrance\b/i, /\bfrancia\b/i, /\bfrench\b/i] },
+  { label: "European Union", patterns: [/\beuropean union\b/i, /\beu\b/i, /\beu ai\b/i] },
+  { label: "Europe", patterns: [/\beurope\b/i, /\beurozone\b/i, /\beuropean\b/i] },
+  { label: "Germany", patterns: [/\bgermany\b/i, /\bgerman\b/i] },
+  { label: "United Kingdom", patterns: [/\bunited kingdom\b/i, /\buk\b/i, /\bbritain\b/i, /\bbritish\b/i] },
+  { label: "United States", patterns: [/\bunited states\b/i, /\busa\b/i, /\bu\.s\.\b/i, /\bamerican\b/i] },
+];
+
+const POLICY_GOVERNING_ENTITY_HINTS = [
+  { label: "Coalition government", patterns: [/\bcoalition government\b/i, /\bcoalition\b/i] },
+  { label: "Government", patterns: [/\bgovernment\b/i, /\bgoverno\b/i] },
+  { label: "Parliament", patterns: [/\bparliament\b/i, /\bparlamento\b/i] },
+  { label: "Senate", patterns: [/\bsenate\b/i, /\bsenato\b/i] },
+  { label: "European Commission", patterns: [/\beuropean commission\b/i, /\bcommission\b/i] },
+  { label: "EU institutions", patterns: [/\beuropean union\b/i, /\beu ai\b/i, /\beu regulation\b/i] },
+  { label: "Voters", patterns: [/\breferendum\b/i, /\belection\b/i, /\bballot\b/i, /\bvote\b/i] },
+];
+
+const POLICY_EVENT_DATE_HINTS = [
+  { label: "March", patterns: [/\bmarch\b/i, /\bmarzo\b/i] },
+  { label: "April", patterns: [/\bapril\b/i, /\baprile\b/i] },
+  { label: "May", patterns: [/\bmay\b/i, /\bmaggio\b/i] },
+  { label: "June", patterns: [/\bjune\b/i, /\bgiugno\b/i] },
+  { label: "Autumn", patterns: [/\bautumn\b/i, /\bfall\b/i, /\bautunno\b/i] },
+  { label: "Spring", patterns: [/\bspring\b/i, /\bprimavera\b/i] },
+  { label: "Summer", patterns: [/\bsummer\b/i, /\bestate\b/i] },
+  { label: "Winter", patterns: [/\bwinter\b/i, /\binverno\b/i] },
+  { label: "This quarter", patterns: [/\bthis quarter\b/i, /\bquesto trimestre\b/i] },
+  { label: "Next quarter", patterns: [/\bnext quarter\b/i, /\bprossimo trimestre\b/i] },
+  { label: "Next 90 days", patterns: [/\bnext 90 days\b/i, /\bprossimi 90 giorni\b/i] },
+  { label: "Next 6 months", patterns: [/\bnext 6 months\b/i, /\bprossimi 6 mesi\b/i] },
+  { label: "Within 12 months", patterns: [/\bwithin 12 months\b/i, /\bentro 12 mesi\b/i, /\bnext 12 months\b/i] },
+];
+
 const BINARY_YES_NO_PATTERNS = [
   /\bsi o no\b/i,
   /\bsì o no\b/i,
@@ -390,6 +426,23 @@ function uniqueStrings(values = []) {
   return [...new Set((Array.isArray(values) ? values : []).filter((item) => typeof item === "string" && item.trim()))];
 }
 
+function buildEntity(entityId, entityType, label) {
+  return {
+    entity_id: safeText(entityId, labelToKey(label) || entityType || "entity"),
+    entity_type: safeText(entityType, "entity"),
+    label: safeText(label),
+  };
+}
+
+function findPolicyHintLabel(queryText, hintMap = []) {
+  for (const item of hintMap) {
+    if ((item.patterns || []).some((pattern) => pattern.test(queryText))) {
+      return item.label;
+    }
+  }
+  return "";
+}
+
 function normalizeTextList(values = [], limit = 4) {
   return uniqueStrings(
     (Array.isArray(values) ? values : [])
@@ -419,7 +472,7 @@ function inferIntentShape(queryText) {
   if (/\b(top|best|worst|ranking|rank|classifica)\b/.test(normalized)) return "ranking";
   if (
     BINARY_YES_NO_PATTERNS.some((pattern) => pattern.test(normalized)) ||
-    /\b(should i|dovrei|buy|sell|wait|rent|surviv\w*|sopravviv\w*|pass|approve|reject|win|lose|vincer\w*|cambio di governo|governo)\b/.test(normalized)
+    /\b(should i|dovrei|buy|sell|wait|rent|surviv\w*|sopravviv\w*|pass|approve|reject|win|lose|vincer\w*|cambio di governo|government change|change of government|snap election|elezioni anticipate|governo)\b/.test(normalized)
   ) {
     return "binary_outcome";
   }
@@ -450,6 +503,77 @@ function inferResolutionFrame(queryText, intentShape) {
   return "trend";
 }
 
+function isPolicyGovernanceQuery(queryText = "", resolutionFrame = "") {
+  const normalized = normalizeText(queryText);
+  return (
+    safeText(resolutionFrame) === "policy" ||
+    /\b(referendum|election|elezioni|policy|constitutional|constitution|government|governo|parliament|senate|law|regulation|decree|legge|riforma|coalition|public timeline|budget vote)\b/.test(
+      normalized
+    )
+  );
+}
+
+function isGeopoliticalPolicyQuery(queryText = "") {
+  const normalized = normalizeText(queryText);
+  return /\b(war|conflict|ceasefire|sanction|military|ukraine|russia|taiwan|middle east|nato)\b/.test(normalized);
+}
+
+function inferPolicyEventDate(queryText = "") {
+  return findPolicyHintLabel(queryText, POLICY_EVENT_DATE_HINTS);
+}
+
+function inferPolicyJurisdiction(queryText = "") {
+  return findPolicyHintLabel(queryText, POLICY_JURISDICTION_HINTS);
+}
+
+function inferPolicyGoverningEntity(queryText = "", jurisdiction = "") {
+  const explicit = findPolicyHintLabel(queryText, POLICY_GOVERNING_ENTITY_HINTS);
+  if (explicit) return explicit;
+  if (/\b(elezioni anticipate|snap election|change of government|government change)\b/i.test(queryText)) {
+    return "Government";
+  }
+  if (safeText(jurisdiction) === "European Union") return "EU institutions";
+  return "";
+}
+
+function extractPolicyContext(queryText = "", resolutionFrame = "", binaryFrame = {}) {
+  if (!isPolicyGovernanceQuery(queryText, resolutionFrame)) {
+    return {
+      policyLike: false,
+      eventDate: "",
+      jurisdiction: "",
+      governingEntity: "",
+      entities: [],
+    };
+  }
+
+  const jurisdiction = inferPolicyJurisdiction(queryText);
+  const governingEntity = inferPolicyGoverningEntity(queryText, jurisdiction);
+  const eventDate = inferPolicyEventDate(queryText);
+  const entities = [];
+
+  if (jurisdiction) {
+    entities.push(buildEntity(`${labelToKey(jurisdiction)}_jurisdiction`, "jurisdiction", jurisdiction));
+  }
+  if (governingEntity) {
+    entities.push(buildEntity(`${labelToKey(governingEntity)}_institution`, "institution", governingEntity));
+  }
+  if (/\breferendum\b/i.test(queryText)) {
+    entities.push(buildEntity("referendum_event", "event", /\bconstitution|constitutional\b/i.test(queryText) ? "Constitutional referendum" : "Referendum"));
+  }
+  if (binaryFrame?.asks_binary_question && binaryFrame?.question_side_a && binaryFrame?.question_side_b) {
+    entities.push(buildEntity("binary_outcome_frame", "outcome_frame", `${binaryFrame.question_side_a} vs ${binaryFrame.question_side_b}`));
+  }
+
+  return {
+    policyLike: true,
+    eventDate,
+    jurisdiction,
+    governingEntity,
+    entities: entities.filter((entity) => safeText(entity.label)),
+  };
+}
+
 function extractBinaryFrame(queryText) {
   const normalized = normalizeText(queryText);
   const fixtureSides = extractFixtureSides(queryText);
@@ -474,6 +598,30 @@ function extractBinaryFrame(queryText) {
       asks_binary_question: true,
       question_side_a: "Survive",
       question_side_b: "Fail",
+    };
+  }
+
+  if (/\b(coalition|government|governo)\b/.test(normalized) && /\b(surviv\w*|budget vote|confidence vote|fiducia|collapse|fall)\b/.test(normalized)) {
+    return {
+      asks_binary_question: true,
+      question_side_a: "Government survives",
+      question_side_b: "Government falls",
+    };
+  }
+
+  if (/\b(approve|approved|approval|pass|passes|ratify|ratified|adopt|adopted|reform package|regulation|law|decree|legge|riforma)\b/.test(normalized) && !/\breferendum\b/.test(normalized)) {
+    return {
+      asks_binary_question: true,
+      question_side_a: "Approved",
+      question_side_b: "Blocked",
+    };
+  }
+
+  if (/\b(cambio di governo|change of government|government change|snap election|elezioni anticipate)\b/.test(normalized)) {
+    return {
+      asks_binary_question: true,
+      question_side_a: "Government changes",
+      question_side_b: "Government holds",
     };
   }
 
@@ -642,12 +790,41 @@ function buildRoutingHints(queryText) {
   const intentShape = inferIntentShape(queryText);
   const resolutionFrame = inferResolutionFrame(queryText, intentShape);
   const binaryFrame = extractBinaryFrame(queryText);
-  const candidateDomains = buildDomainCandidates(queryText);
+  const policyContext = extractPolicyContext(queryText, resolutionFrame, binaryFrame);
+  let candidateDomains = buildDomainCandidates(queryText);
+  if (policyContext.policyLike) {
+    const preferredPolicyDomain = isGeopoliticalPolicyQuery(queryText)
+      ? "A.25.geopolitics_and_conflict_dynamics"
+      : "A.24.governance_policy_and_public_timeline";
+    const hasPolicyDomainInTopThree = candidateDomains
+      .slice(0, 3)
+      .some((candidate) => ["A.24.governance_policy_and_public_timeline", "A.25.geopolitics_and_conflict_dynamics"].includes(candidate.domain_id));
+    if (!hasPolicyDomainInTopThree) {
+      const policyDomain = getDomain(preferredPolicyDomain, preferredPolicyDomain);
+      candidateDomains = candidateDomains
+        .concat({
+          domain_id: policyDomain.domain_id,
+          title: policyDomain.title,
+          short_label: policyDomain.short_label,
+          current_state: policyDomain.current_state,
+          score: 0.28,
+          reason: "Policy heuristics identified an institutional or governance outcome, so Crystal keeps a policy route in the top candidates.",
+        })
+        .sort((left, right) => right.score - left.score)
+        .slice(0, 6);
+    }
+  }
   const topCandidate = candidateDomains[0];
+  const preferredPolicyFallback =
+    policyContext.policyLike && (policyContext.jurisdiction || policyContext.governingEntity || binaryFrame.asks_binary_question)
+      ? isGeopoliticalPolicyQuery(queryText)
+        ? "A.25.geopolitics_and_conflict_dynamics"
+        : "A.24.governance_policy_and_public_timeline"
+      : GENERAL_FORECAST_DOMAIN;
   const primaryDomainId =
     topCandidate && topCandidate.domain_id !== GENERAL_FORECAST_DOMAIN && topCandidate.score >= 0.18
       ? topCandidate.domain_id
-      : GENERAL_FORECAST_DOMAIN;
+      : preferredPolicyFallback;
 
   return {
     primaryDomainId,
@@ -657,6 +834,11 @@ function buildRoutingHints(queryText) {
     resolutionFrame,
     confidenceMode: "balanced",
     binaryFrame,
+    eventDate: policyContext.eventDate,
+    jurisdiction: policyContext.jurisdiction,
+    governingEntity: policyContext.governingEntity,
+    entities: policyContext.entities,
+    policyLike: policyContext.policyLike,
   };
 }
 
@@ -730,7 +912,7 @@ function mergeQueryPlanWithRouting(payload = {}, routingHints = {}, options = {}
     primaryDomainId = strongestCandidate.domain_id;
   }
 
-  const entities = normalizeEntities(payload.entities || payload.entity_set, "Entity 1");
+  const entities = normalizeEntities(payload.entities || payload.entity_set || routingHints.entities, "Entity 1");
   const binaryFrame = routingHints.binaryFrame || {};
   const mergedIntentShape =
     binaryFrame.asks_binary_question && safeText(payload.intent_shape) === "comparison"
@@ -752,9 +934,9 @@ function mergeQueryPlanWithRouting(payload = {}, routingHints = {}, options = {}
     question_side_b: binaryFrame.asks_binary_question
       ? safeText(binaryFrame.question_side_b, safeText(payload.question_side_b))
       : safeText(payload.question_side_b, ""),
-    event_date: safeText(payload.event_date),
-    governing_entity: safeText(payload.governing_entity),
-    jurisdiction: safeText(payload.jurisdiction),
+    event_date: safeText(payload.event_date, safeText(routingHints.eventDate)),
+    governing_entity: safeText(payload.governing_entity, safeText(routingHints.governingEntity)),
+    jurisdiction: safeText(payload.jurisdiction, safeText(routingHints.jurisdiction)),
     supporting_domains: uniqueStrings([
       ...(Array.isArray(payload.supporting_domains) ? payload.supporting_domains : []),
       ...(routingHints.supportingDomains || []),
