@@ -42,7 +42,20 @@
 - No rollout change should be made from browser evidence alone because the pass is incomplete on signed-in coverage and still shows unresolved loading-state risk on `Forecast` and public forecast detail.
 - The live recommendation after this pass is: **hold at `0/0`**.
 
+## Addendum After Remote Hardening
+- A later direct API parity rerun on 2026-03-24 turned green and produced a `10% ready` verdict from the binary benchmark itself.
+- That technical milestone does **not** override this browser-pass blocker, because the signed-in visual pass is still uncertified from this machine.
+- An additional attempt to reuse the local Edge profile in headless mode did not produce trustworthy signed-in captures, so authenticated `save/follow` flows remain unverified.
+- Operational decision remains unchanged: **keep rollout at `0/0` until signed-in QA is certified.**
+
+## Addendum on 2026-03-26
+- Baseline re-check confirmed the live rollout is still `0/0` and `crystalCore.available = true`.
+- The technical gate remains green: parity report still shows `remote max completed streak = 5`, `winner mismatch rate = 0`, `median probability delta = 0.02`, `missing binary contract rate = 0`, and `direct API 502 count = 0`.
+- Cloud Run logs also confirm remote runs are completing through `dossier_prediction_agent`, `simulation_decision_gate`, and `card_generation`.
+- The signed-in gate is still the blocker. The approved method for this cycle is a manual non-headless Edge pass with the live local profile, and that gate cannot be autonomously certified from this terminal-only workflow.
+- End-of-day operational decision therefore remains: **hold at `0/0`**.
+
 ## Follow-Up
 - Re-run the signed-in visual pass with a browser context that can actually reuse the authenticated session.
-- Re-check `/forecast` and public forecast detail after the next remote/local parity hardening pass.
+- Re-check `/forecast` and public forecast detail after the next visual QA cycle.
 - Keep using `Forecast Gallery` as the clearest live surface; it is visually the strongest of the checked routes in this cycle.
