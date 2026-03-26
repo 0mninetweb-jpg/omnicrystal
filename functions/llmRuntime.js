@@ -222,6 +222,8 @@ function isRetryableRuntimeError(error) {
   return (
     message.includes("resource_exhausted") ||
     message.includes("rate limited") ||
+    message.includes("high demand") ||
+    message.includes("overloaded") ||
     message.includes("temporarily unavailable") ||
     message.includes("unexpected end of json input") ||
     message.includes("unavailable")
@@ -240,7 +242,9 @@ function normalizeProviderException(provider, error) {
     normalized.includes("resource_exhausted") ||
     normalized.includes("quota") ||
     normalized.includes("rate limit") ||
-    normalized.includes("too many requests")
+    normalized.includes("too many requests") ||
+    normalized.includes("high demand") ||
+    normalized.includes("overloaded")
   ) {
     return createRuntimeError(
       `Forecast temporarily unavailable. ${provider === "gemini" ? "Gemini" : "The provider"} is rate limited right now.`,

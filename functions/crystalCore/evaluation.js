@@ -1,6 +1,12 @@
 const crypto = require("node:crypto");
 
-const { safeText, clamp01, buildBinaryContract, buildCompatibleProbabilitySplit } = require("../predictionCore");
+const {
+  safeText,
+  clamp01,
+  buildBinaryContract,
+  buildCompatibleProbabilitySplit,
+  isBinaryContractReady,
+} = require("../predictionCore");
 
 const ACTIVE_CALIBRATION_SAMPLE_SIZE = 30;
 const ACTIVE_CALIBRATION_MAX_AGE_DAYS = 7;
@@ -584,7 +590,11 @@ function getTransportBucket(runtimeTransport = "") {
 function getComparableBinaryRuns(recentRuns = []) {
   return recentRuns.filter((runDoc) => {
     const targetType = safeText(runDoc?.resolution_target?.target_type);
-    return targetType === "binary_outcome" || Boolean(runDoc?.result_card?.binary_contract);
+    return (
+      targetType === "binary_outcome" ||
+      Boolean(runDoc?.query_plan?.binary_frame?.asks_binary_question) ||
+      Boolean(runDoc?.result_card?.binary_contract)
+    );
   });
 }
 
@@ -601,10 +611,12 @@ function median(numbers = []) {
 function buildBinaryParitySummary(recentRuns = []) {
   const binaryRuns = getComparableBinaryRuns(recentRuns);
   const missingBinaryContractRate =
-    binaryRuns.length > 0 ? binaryRuns.filter((runDoc) => !runDoc?.result_card?.binary_contract).length / binaryRuns.length : null;
+    binaryRuns.length > 0
+      ? binaryRuns.filter((runDoc) => !isBinaryContractReady(runDoc?.result_card?.binary_contract)).length / binaryRuns.length
+      : null;
 
   const grouped = new Map();
-  for (const runDoc of binaryRuns.filter((item) => item?.result_card?.binary_contract)) {
+  for (const runDoc of binaryRuns.filter((item) => isBinaryContractReady(item?.result_card?.binary_contract))) {
     const parityKey = getParityKey(runDoc);
     const bucket = getTransportBucket(runDoc?.runtime_transport);
     if (!grouped.has(parityKey)) {
@@ -663,6 +675,7 @@ function buildBinaryParitySummary(recentRuns = []) {
   return {
     binary_runs_scanned: binaryRuns.length,
     comparable_pairs: comparablePairs.length,
+    parity_ready_pairs: comparablePairs.length,
     missing_binary_contract_rate: missingBinaryContractRate == null ? null : Number(missingBinaryContractRate.toFixed(4)),
     winner_mismatch_rate: winnerMismatchRate == null ? null : Number(winnerMismatchRate.toFixed(4)),
     band_mismatch_rate: bandMismatchRate == null ? null : Number(bandMismatchRate.toFixed(4)),
@@ -803,12 +816,14 @@ function buildRolloutRecommendation({
   parityWinnerMismatchRate = null,
   parityMedianProbabilityDelta = null,
   missingBinaryContractRate = null,
+  parityComparablePairs = null,
 }) {
   const blockers = [];
   if (remoteErrorRate != null && remoteErrorRate >= 0.02) blockers.push("remote_error_rate");
   if (remotePendingRate != null && remotePendingRate >= 0.08) blockers.push("pending_rate");
   if (deterministicCallRate != null && deterministicCallRate < 0.85) blockers.push("deterministic_call_rate");
   if (a0GeneralRate != null && a0GeneralRate >= 0.1) blockers.push("general_fallback_rate");
+  if (parityComparablePairs != null && parityComparablePairs <= 0) blockers.push("binary_parity_unavailable");
   if (parityWinnerMismatchRate != null && parityWinnerMismatchRate >= 0.05) blockers.push("binary_winner_parity");
   if (parityMedianProbabilityDelta != null && parityMedianProbabilityDelta >= 0.08) blockers.push("binary_probability_parity");
   if (missingBinaryContractRate != null && missingBinaryContractRate > 0) blockers.push("missing_binary_contract");
@@ -864,6 +879,7 @@ async function generateEvaluationReport(context, options = {}) {
     remotePendingRate: remotePending,
     deterministicCallRate,
     a0GeneralRate: generalRate,
+    parityComparablePairs: binaryParitySummary.comparable_pairs,
     parityWinnerMismatchRate: binaryParitySummary.winner_mismatch_rate,
     parityMedianProbabilityDelta: binaryParitySummary.median_probability_delta,
     missingBinaryContractRate: binaryParitySummary.missing_binary_contract_rate,

@@ -1,6 +1,6 @@
 param(
   [string]$LocalApiBase = "https://api-paaqyfwena-ew.a.run.app",
-  [string]$RemoteServiceUrl = "https://crystal-core-paaqyfwena-ew.a.run.app",
+  [string]$RemoteServiceUrl = "https://crystal-core-294034419055.europe-west1.run.app",
   [string]$OutputMarkdownPath = "docs/parity-report-2026-03-24.md",
   [string]$OutputJsonPath = "docs/parity-report-2026-03-24.json"
 )
@@ -102,14 +102,15 @@ function Wait-ForRemoteRun {
   $history = @()
   for ($poll = 1; $poll -le 30; $poll++) {
     $state = Invoke-JsonGet -Uri "$BaseUrl/v1/runs/$RunId" -Headers $Headers
+    $status = Get-RunStatus -State $state
     $history += @{
       poll = $poll
-      status = $state.status
+      status = $status
       stage = $state.run.current_stage
       transport = $state.run.runtime_transport
       error = $state.run.error_message
     }
-    if (@("completed", "failed", "canceled") -contains $state.status) {
+    if (@("completed", "failed", "canceled") -contains $status) {
       return @{
         terminal = $true
         timed_out = $false
@@ -120,12 +121,34 @@ function Wait-ForRemoteRun {
     Start-Sleep -Seconds 4
   }
   $finalState = Invoke-JsonGet -Uri "$BaseUrl/v1/runs/$RunId" -Headers $Headers
+  $finalStatus = Get-RunStatus -State $finalState
   return @{
-    terminal = @("completed", "failed", "canceled") -contains $finalState.status
-    timed_out = @("completed", "failed", "canceled") -notcontains $finalState.status
+    terminal = @("completed", "failed", "canceled") -contains $finalStatus
+    timed_out = @("completed", "failed", "canceled") -notcontains $finalStatus
     state = $finalState
     history = $history
   }
+}
+
+function Get-QueryPlan {
+  param($Response)
+  if ($null -eq $Response) { return $null }
+  if ($Response.PSObject.Properties.Name -contains "query_plan" -and $null -ne $Response.query_plan) {
+    return $Response.query_plan
+  }
+  return $Response
+}
+
+function Get-RunStatus {
+  param($State)
+  if ($null -eq $State) { return "" }
+  if ($State.PSObject.Properties.Name -contains "status" -and [string]$State.status) {
+    return [string]$State.status
+  }
+  if ($State.PSObject.Properties.Name -contains "run" -and $null -ne $State.run -and $State.run.PSObject.Properties.Name -contains "status") {
+    return [string]$State.run.status
+  }
+  return ""
 }
 
 function Get-BinaryWinner($card) {
@@ -242,7 +265,7 @@ foreach ($item in $queries) {
 
   $localPredictResult = Invoke-LocalJsonWithRetry -Uri "$LocalApiBase/public/predict" -Headers @{ "X-Crystal-Guest-Key" = "parity-local-0" } -Body @{
     query = $query
-    queryPlan = $localCompileResult.response.query_plan
+    queryPlan = (Get-QueryPlan -Response $localCompileResult.response)
   }
   $localFailuresText = ($localCompileResult.failures + $localPredictResult.failures) -join "; "
   if ($localFailuresText -match "502") { $local502Count += 1 }
@@ -253,7 +276,7 @@ foreach ($item in $queries) {
   $remoteRun = Invoke-JsonPost -Uri "$RemoteServiceUrl/v1/runs" -Headers $remoteHeaders -Body @{
     runId = $runId
     queryText = $query
-    queryPlan = $remoteCompile.query_plan
+    queryPlan = (Get-QueryPlan -Response $remoteCompile)
     visibility = "private"
     engine = "extended"
     plan = "free"
@@ -264,7 +287,8 @@ foreach ($item in $queries) {
   $remoteWait = Wait-ForRemoteRun -RunId $runId -Headers $remoteHeaders -BaseUrl $RemoteServiceUrl
   $remoteState = $remoteWait.state
   $remoteCard = $remoteState.card
-  if ($remoteState.status -eq "completed") {
+  $remoteStateStatus = Get-RunStatus -State $remoteState
+  if ($remoteStateStatus -eq "completed") {
     $remoteCompletedStreak += 1
     if ($remoteCompletedStreak -gt $maxRemoteCompletedStreak) {
       $maxRemoteCompletedStreak = $remoteCompletedStreak
@@ -296,7 +320,7 @@ foreach ($item in $queries) {
   $reportRows += [pscustomobject]@{
     query = $query
     local_status = if ($localCard) { "completed" } else { "failed" }
-    remote_status = [string]$remoteState.status
+    remote_status = $remoteStateStatus
     local_domain = if ($localCard) { [string]$localCard.domain } else { "" }
     remote_domain = if ($remoteCard) { [string]$remoteCard.domain } else { "" }
     local_call = if ($localCard) { [string]$localCard.primary_call } else { "" }
@@ -322,7 +346,7 @@ foreach ($item in $queries) {
   if ($remoteWait.timed_out) {
     $blockers += "remote timeout: $query"
   }
-  if ($remoteState.status -eq "failed") {
+  if ($remoteStateStatus -eq "failed") {
     $blockers += "remote failed: $query"
   }
 }
@@ -371,7 +395,7 @@ $report = [ordered]@{
     missing_binary_contract_rate = $missingBinaryContractRate
     direct_api_502_count = $local502Count
     verdict = $verdict
-    blockers = $blockers
+    blockers = @($blockers)
   }
 }
 

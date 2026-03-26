@@ -175,6 +175,19 @@ addCases(
 addCases(
   benchmarkCases,
   [
+    'Inter vs Juventus',
+    'Milan vs Napoli',
+    'Real Madrid vs Barcelona',
+    'Liverpool vs Arsenal',
+    'Juventus contro Inter',
+  ],
+  ['A.29.sports_performance_and_outcomes'],
+  { binary: true }
+);
+
+addCases(
+  benchmarkCases,
+  [
     'Should I buy Bitcoin now with my savings?',
     'Should I wait before investing my cash?',
     'Will my personal budget improve next year?',

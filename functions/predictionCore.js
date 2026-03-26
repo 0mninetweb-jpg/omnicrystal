@@ -1,4 +1,4 @@
-const { GENERAL_FORECAST_DOMAIN, CATALOG_DOMAINS, getDomain } = require("./catalogRegistry");
+const { GENERAL_FORECAST_DOMAIN, SPORTS_MATCH_OUTCOMES_DOMAIN, CATALOG_DOMAINS, getDomain } = require("./catalogRegistry");
 
 const DOMAIN_STATE_SCORE = {
   published: 0.05,
@@ -163,6 +163,7 @@ const DOMAIN_KEYWORD_HINTS = {
   "A.12.housing_and_real_estate_signals": [
     "rent",
     "rents",
+    "renting",
     "house",
     "home",
     "housing",
@@ -174,10 +175,12 @@ const DOMAIN_KEYWORD_HINTS = {
     "comprare casa",
     "affitto",
     "affitti",
+    "affittare",
     "casa",
     "apartment",
     "property",
     "rome",
+    "roma",
     "milan",
   ],
   "A.15.jobs_and_labor_market_signals": [
@@ -281,11 +284,29 @@ const DOMAIN_KEYWORD_HINTS = {
     "dovrei",
     "should i move",
     "should i rent",
+    "affittare",
+    "aspettare",
     "should i buy now",
     "dovrei affittare",
     "tradeoff",
     "decision",
     "wait before",
+  ],
+  [SPORTS_MATCH_OUTCOMES_DOMAIN]: [
+    "partita",
+    "calcio",
+    "football",
+    "soccer",
+    "serie a",
+    "champions",
+    "europa league",
+    "conference league",
+    "goal",
+    "fixture",
+    "match",
+    "vs",
+    "versus",
+    "contro",
   ],
 };
 
@@ -348,6 +369,13 @@ function normalizeText(value = "") {
     .toLowerCase();
 }
 
+function normalizeDisplayLabel(value = "") {
+  return safeText(value)
+    .replace(/[?!.,;:]+$/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function tokenize(value = "") {
   return [...new Set(
     normalizeText(value)
@@ -385,11 +413,13 @@ function labelToKey(label = "") {
 
 function inferIntentShape(queryText) {
   const normalized = normalizeText(queryText);
-  if (/\b(vs|versus|compare|comparison|meglio di|better than)\b/.test(normalized)) return "comparison";
+  if (looksLikeSportsFixtureQuery(queryText)) return "binary_outcome";
+  if (/\b(compare|comparison|meglio di|better than)\b/.test(normalized)) return "comparison";
+  if (/\b(vs|versus)\b/.test(normalized)) return "comparison";
   if (/\b(top|best|worst|ranking|rank|classifica)\b/.test(normalized)) return "ranking";
   if (
     BINARY_YES_NO_PATTERNS.some((pattern) => pattern.test(normalized)) ||
-    /\b(should i|dovrei|buy|sell|wait|rent|survive|sopravviv|pass|approve|reject|win|lose|vincer|vincera|cambio di governo|governo)\b/.test(normalized)
+    /\b(should i|dovrei|buy|sell|wait|rent|surviv\w*|sopravviv\w*|pass|approve|reject|win|lose|vincer\w*|cambio di governo|governo)\b/.test(normalized)
   ) {
     return "binary_outcome";
   }
@@ -399,6 +429,9 @@ function inferIntentShape(queryText) {
 
 function inferResolutionFrame(queryText, intentShape) {
   const normalized = normalizeText(queryText);
+  if (looksLikeSportsFixtureQuery(queryText)) {
+    return "event";
+  }
   if (/\b(referendum|election|elezioni|policy|constitution|constitutional|government|governo|parliament|senate|law|regulation|regolazione|decree|legge|riforma)\b/.test(normalized)) {
     return "policy";
   }
@@ -419,9 +452,34 @@ function inferResolutionFrame(queryText, intentShape) {
 
 function extractBinaryFrame(queryText) {
   const normalized = normalizeText(queryText);
+  const fixtureSides = extractFixtureSides(queryText);
+  if (fixtureSides) {
+    return {
+      asks_binary_question: true,
+      question_side_a: fixtureSides.question_side_a,
+      question_side_b: fixtureSides.question_side_b,
+    };
+  }
+
+  if (/\b(wait|buy now|buy|rent now|affittare|comprare|spostarmi|move now)\b/.test(normalized) && /\b(should i|dovrei)\b/.test(normalized)) {
+    return {
+      asks_binary_question: true,
+      question_side_a: "Act now",
+      question_side_b: "Wait",
+    };
+  }
+
+  if (/\b(startup|business|company|saa[sn]|runway)\b/.test(normalized) && /\b(surviv\w*|sopravviv\w*)\b/.test(normalized)) {
+    return {
+      asks_binary_question: true,
+      question_side_a: "Survive",
+      question_side_b: "Fail",
+    };
+  }
+
   const asksYesNo =
     BINARY_YES_NO_PATTERNS.some((pattern) => pattern.test(normalized)) ||
-    /\b(dovrei|sopravviv|cambio di governo|governo|elezioni anticipate)\b/.test(normalized);
+    /\b(dovrei|sopravviv\w*|cambio di governo|governo|elezioni anticipate)\b/.test(normalized);
   if (asksYesNo || /\breferendum\b/.test(normalized)) {
     const italian = /\b(italia|italy|si o no|sì o no|referendum)\b/.test(normalized);
     return {
@@ -431,18 +489,37 @@ function extractBinaryFrame(queryText) {
     };
   }
 
-  if (/\b(wait|buy now|buy|rent now)\b/.test(normalized) && /\b(should i|dovrei)\b/.test(normalized)) {
-    return {
-      asks_binary_question: true,
-      question_side_a: "Act now",
-      question_side_b: "Wait",
-    };
-  }
-
   return {
     asks_binary_question: false,
     question_side_a: "",
     question_side_b: "",
+  };
+}
+
+function looksLikeSportsFixtureQuery(queryText = "") {
+  const normalized = normalizeText(queryText);
+  if (!normalized) return false;
+  if (!/\b(vs|versus|contro)\b/.test(normalized) && !/\b(partita|calcio|serie a|champions|goal|fixture|match)\b/.test(normalized)) {
+    return false;
+  }
+  if (/\b(compare|comparison|meglio di|better than|bitcoin|crypto|stock|stocks|market|markets|gold|oil)\b/.test(normalized)) {
+    return false;
+  }
+  return true;
+}
+
+function extractFixtureSides(queryText = "") {
+  if (!looksLikeSportsFixtureQuery(queryText)) return null;
+  const raw = normalizeDisplayLabel(queryText);
+  if (!raw) return null;
+  const match = raw.match(/^(.+?)\s+(?:vs\.?|versus|contro)\s+(.+)$/i);
+  if (!match) return null;
+  const sideA = normalizeDisplayLabel(match[1]);
+  const sideB = normalizeDisplayLabel(match[2]);
+  if (!sideA || !sideB || normalizeText(sideA) === normalizeText(sideB)) return null;
+  return {
+    question_side_a: sideA,
+    question_side_b: sideB,
   };
 }
 
@@ -495,6 +572,14 @@ function getIntentBonus(domain, intentShape) {
   return 0;
 }
 
+function getSpecialDomainBonus(domain, queryText = "", intentShape = "", resolutionFrame = "") {
+  const domainId = safeText(domain?.domain_id);
+  if (domainId === SPORTS_MATCH_OUTCOMES_DOMAIN && looksLikeSportsFixtureQuery(queryText)) {
+    return intentShape === "binary_outcome" || resolutionFrame === "event" ? 0.28 : 0.18;
+  }
+  return 0;
+}
+
 function scoreDomainCandidate(domain, queryText, intentShape, resolutionFrame) {
   const normalizedQuery = normalizeText(queryText);
   const queryTokens = tokenize(queryText);
@@ -502,9 +587,11 @@ function scoreDomainCandidate(domain, queryText, intentShape, resolutionFrame) {
   const lexicalScore = getTokenOverlapScore(queryTokens, domainTokens);
   const manualHintScore = getManualHintScore(domain.domain_id, normalizedQuery);
   const resolutionBonus = getResolutionBonus(domain, resolutionFrame);
-  const intentBonus = lexicalScore > 0.04 || manualHintScore > 0 || resolutionBonus >= 0.16 ? getIntentBonus(domain, intentShape) : 0;
-  const stateScore = lexicalScore > 0.04 || manualHintScore > 0 || resolutionBonus >= 0.16 ? DOMAIN_STATE_SCORE[domain.current_state] || 0 : 0;
-  const total = clamp01(lexicalScore * 0.55 + manualHintScore + resolutionBonus + intentBonus + stateScore, 0);
+  const specialDomainBonus = getSpecialDomainBonus(domain, queryText, intentShape, resolutionFrame);
+  const routeActivated = lexicalScore > 0.04 || manualHintScore > 0 || resolutionBonus >= 0.16 || specialDomainBonus > 0;
+  const intentBonus = routeActivated ? getIntentBonus(domain, intentShape) : 0;
+  const stateScore = routeActivated ? DOMAIN_STATE_SCORE[domain.current_state] || 0 : 0;
+  const total = clamp01(lexicalScore * 0.55 + manualHintScore + resolutionBonus + specialDomainBonus + intentBonus + stateScore, 0);
 
   return {
     domain_id: domain.domain_id,
@@ -516,6 +603,7 @@ function scoreDomainCandidate(domain, queryText, intentShape, resolutionFrame) {
       manualHintScore > 0 ? `${domain.short_label} matches the query language directly.` : "",
       lexicalScore > 0.2 ? `${domain.short_label} overlaps with the query entities and theme.` : "",
       resolutionBonus > 0 ? `${domain.short_label} fits the ${resolutionFrame} frame.` : "",
+      specialDomainBonus > 0 ? `${domain.short_label} matches a head-to-head fixture pattern.` : "",
       intentBonus > 0 ? `${domain.short_label} supports the ${intentShape} card contract.` : "",
       domain.current_state === "blocked" ? "The registry marks this domain as blocked, but it can still publish a cautious directional read." : "",
     ]).join(" "),
@@ -644,18 +732,26 @@ function mergeQueryPlanWithRouting(payload = {}, routingHints = {}, options = {}
 
   const entities = normalizeEntities(payload.entities || payload.entity_set, "Entity 1");
   const binaryFrame = routingHints.binaryFrame || {};
+  const mergedIntentShape =
+    binaryFrame.asks_binary_question && safeText(payload.intent_shape) === "comparison"
+      ? safeText(routingHints.intentShape, "binary_outcome")
+      : safeText(payload.intent_shape, routingHints.intentShape || "directional_range");
 
   return {
     ...payload,
     primary_domain_id: primaryDomainId,
     candidate_domains: candidateDomains,
-    intent_shape: safeText(payload.intent_shape, routingHints.intentShape || "directional_range"),
+    intent_shape: mergedIntentShape,
     resolution_frame: safeText(payload.resolution_frame, routingHints.resolutionFrame || "trend"),
     confidence_mode: safeText(payload.confidence_mode, routingHints.confidenceMode || "balanced"),
     entity_set: entities,
     entities,
-    question_side_a: safeText(payload.question_side_a, binaryFrame.question_side_a || ""),
-    question_side_b: safeText(payload.question_side_b, binaryFrame.question_side_b || ""),
+    question_side_a: binaryFrame.asks_binary_question
+      ? safeText(binaryFrame.question_side_a, safeText(payload.question_side_a))
+      : safeText(payload.question_side_a, ""),
+    question_side_b: binaryFrame.asks_binary_question
+      ? safeText(binaryFrame.question_side_b, safeText(payload.question_side_b))
+      : safeText(payload.question_side_b, ""),
     event_date: safeText(payload.event_date),
     governing_entity: safeText(payload.governing_entity),
     jurisdiction: safeText(payload.jurisdiction),
@@ -758,6 +854,17 @@ function extractProbabilityFromCandidate(candidate) {
 function inferSideAProbabilityFromRawSplit(rawProbabilitySplit, sideA, sideB) {
   if (!rawProbabilitySplit || typeof rawProbabilitySplit !== "object") return null;
 
+  const winningProbability = extractProbabilityFromCandidate(rawProbabilitySplit.winning_probability);
+  const explicitWinner = safeText(rawProbabilitySplit.winning_side);
+  if (Number.isFinite(winningProbability) && explicitWinner) {
+    if (binaryLabelsMatch(explicitWinner, sideA)) {
+      return winningProbability;
+    }
+    if (binaryLabelsMatch(explicitWinner, sideB)) {
+      return clamp01(1 - winningProbability, 0.5);
+    }
+  }
+
   const directSideA =
     extractProbabilityFromCandidate(rawProbabilitySplit.question_side_a_probability) ??
     extractProbabilityFromCandidate(rawProbabilitySplit.side_a_probability);
@@ -852,6 +959,34 @@ function buildCompatibleProbabilitySplit(binaryContract) {
   };
 }
 
+function resolveExplicitBinaryWinner(rawBinaryContract = {}, rawProbabilitySplit = null, sideA = "", sideB = "") {
+  const candidates = [safeText(rawBinaryContract?.winning_side), safeText(rawProbabilitySplit?.winning_side)].filter(Boolean);
+  for (const candidate of candidates) {
+    if (binaryLabelsMatch(candidate, sideA)) return sideA;
+    if (binaryLabelsMatch(candidate, sideB)) return sideB;
+  }
+  return "";
+}
+
+function isBinaryContractReady(binaryContract = {}) {
+  const sideA = safeText(binaryContract?.question_side_a);
+  const sideB = safeText(binaryContract?.question_side_b);
+  const winner = safeText(binaryContract?.winning_side);
+  const displayCall = safeText(binaryContract?.display_call);
+  const band = safeText(binaryContract?.band);
+  const sideAProbability = extractProbabilityFromCandidate(binaryContract?.question_side_a_probability);
+  const sideBProbability = extractProbabilityFromCandidate(binaryContract?.question_side_b_probability);
+  const winningProbability = extractProbabilityFromCandidate(binaryContract?.winning_probability);
+
+  if (!sideA || !sideB || !winner || !displayCall || !band) return false;
+  if (!binaryLabelsMatch(winner, sideA) && !binaryLabelsMatch(winner, sideB)) return false;
+  if (!Number.isFinite(sideAProbability) || !Number.isFinite(sideBProbability) || !Number.isFinite(winningProbability)) return false;
+  if (Math.abs(sideAProbability + sideBProbability - 1) > 0.02) return false;
+  const expectedWinningProbability = binaryLabelsMatch(winner, sideA) ? sideAProbability : sideBProbability;
+  if (Math.abs(expectedWinningProbability - winningProbability) > 0.02) return false;
+  return ["limited", "lean", "tilted", "strong"].includes(band);
+}
+
 function buildBinaryContract(rawBinaryContract = {}, queryPlan = {}, rawProbabilitySplit = null, rawPrimaryCall = "", options = {}) {
   const sideA = safeText(queryPlan?.question_side_a, safeText(rawBinaryContract?.question_side_a));
   const sideB = safeText(queryPlan?.question_side_b, safeText(rawBinaryContract?.question_side_b));
@@ -863,30 +998,40 @@ function buildBinaryContract(rawBinaryContract = {}, queryPlan = {}, rawProbabil
 
   const fallbackProbability = extractProbabilityFromCandidate(options?.fallbackProbability);
   const sideMention = inferSideMentionFromCall(rawPrimaryCall, sideA, sideB);
+  const explicitWinner = resolveExplicitBinaryWinner(rawBinaryContract, rawProbabilitySplit, sideA, sideB);
 
   if (!Number.isFinite(sideAProbability) && Number.isFinite(fallbackProbability)) {
-    sideAProbability = sideMention === "b" ? clamp01(1 - fallbackProbability, 0.42) : fallbackProbability;
-  }
-
-  if (!Number.isFinite(sideAProbability)) {
-    sideAProbability = sideMention === "b" ? 0.42 : sideMention === "a" ? 0.58 : 0.56;
-  }
-
-  let winningSide = sideAProbability >= 0.5 ? sideA : sideB;
-  if (sideMention === "a") {
-    winningSide = sideA;
-  } else if (sideMention === "b") {
-    winningSide = sideB;
-  } else if (safeText(rawBinaryContract?.winning_side)) {
-    const explicitWinner = safeText(rawBinaryContract.winning_side);
-    if (binaryLabelsMatch(explicitWinner, sideA)) {
-      winningSide = sideA;
-    } else if (binaryLabelsMatch(explicitWinner, sideB)) {
-      winningSide = sideB;
+    if (explicitWinner && binaryLabelsMatch(explicitWinner, sideB)) {
+      sideAProbability = clamp01(1 - fallbackProbability, 0.42);
+    } else {
+      sideAProbability = sideMention === "b" ? clamp01(1 - fallbackProbability, 0.42) : fallbackProbability;
     }
   }
 
-  const rawWinningProbability = winningSide === sideA ? sideAProbability : clamp01(1 - sideAProbability, 0.44);
+  if (!Number.isFinite(sideAProbability)) {
+    if (explicitWinner && binaryLabelsMatch(explicitWinner, sideB)) {
+      sideAProbability = 0.42;
+    } else if (explicitWinner && binaryLabelsMatch(explicitWinner, sideA)) {
+      sideAProbability = 0.58;
+    } else {
+      sideAProbability = sideMention === "b" ? 0.42 : sideMention === "a" ? 0.58 : 0.56;
+    }
+  }
+
+  let winningSide = sideAProbability >= 0.5 ? sideA : sideB;
+  if (explicitWinner) {
+    winningSide = explicitWinner;
+  } else if (sideMention === "a") {
+    winningSide = sideA;
+  } else if (sideMention === "b") {
+    winningSide = sideB;
+  }
+
+  let rawWinningProbability = winningSide === sideA ? sideAProbability : clamp01(1 - sideAProbability, 0.44);
+  if (rawWinningProbability < 0.5) {
+    rawWinningProbability = clamp01(1 - rawWinningProbability, 0.56);
+    sideAProbability = winningSide === sideA ? rawWinningProbability : Number((1 - rawWinningProbability).toFixed(3));
+  }
   const band = selectBinaryBand(
     rawWinningProbability,
     safeText(options?.publicationState, "limited"),
@@ -903,7 +1048,7 @@ function buildBinaryContract(rawBinaryContract = {}, queryPlan = {}, rawProbabil
     (1 - winningProbability) * 100
   )}`;
 
-  return {
+  const contract = {
     question_side_a: sideA,
     question_side_b: sideB,
     question_side_a_probability: questionSideAProbability,
@@ -914,6 +1059,7 @@ function buildBinaryContract(rawBinaryContract = {}, queryPlan = {}, rawProbabil
     display_call: displayCall,
     flip_conditions: normalizeTextList(rawBinaryContract?.flip_conditions || rawBinaryContract?.what_would_flip, 4),
   };
+  return isBinaryContractReady(contract) ? contract : null;
 }
 
 function normalizeProbabilitySplit(rawProbabilitySplit, queryPlan = {}, rawPrimaryCall = "", fallbackProbability = null, options = {}) {
@@ -1027,6 +1173,7 @@ function finalizeScorecard(rawScorecard = {}, evidenceBundle = {}, queryPlan = {
       evidenceQuality,
     }
   );
+  const binaryQuestion = Boolean(queryPlan?.binary_frame?.asks_binary_question || (queryPlan?.question_side_a && queryPlan?.question_side_b));
   const probabilitySplit = normalizeProbabilitySplit(
     rawScorecard.probability_split,
     queryPlan,
@@ -1077,6 +1224,9 @@ function finalizeScorecard(rawScorecard = {}, evidenceBundle = {}, queryPlan = {
 
   if (!primaryCall) {
     publicationState = "blocked";
+  }
+  if (binaryQuestion && !binaryContract) {
+    publicationState = publicationState === "blocked" ? "blocked" : "limited";
   }
   if (
     binaryContract &&
@@ -1145,6 +1295,7 @@ module.exports = {
   normalizeProbabilitySplit,
   buildBinaryContract,
   buildCompatibleProbabilitySplit,
+  isBinaryContractReady,
   inferIntentShape,
   inferResolutionFrame,
   extractBinaryFrame,

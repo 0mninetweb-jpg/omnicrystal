@@ -51,6 +51,14 @@ const STAGE_RETRY_POLICY = {
   dossier: { retries: 2, baseDelayMs: 1500, timeoutMs: 24 * 1000 },
   verbalizer: { retries: 2, baseDelayMs: 1200, timeoutMs: 18 * 1000 },
 };
+const EVIDENCE_STAGE_TIMEOUT_MS = 32 * 1000;
+const SIMULATION_STAGE_POLICY = {
+  retries: 1,
+  baseDelayMs: 1000,
+  timeoutMs: 12 * 1000,
+  minimumBudgetMs: 6 * 1000,
+  reserveForFinalizationMs: 14 * 1000,
+};
 const RUNTIME_IMPLEMENTED_SOURCE_IDS = [
   "open_meteo",
   "polymarket_public",
@@ -298,6 +306,62 @@ function ensureExecutionBudget(deadlineAt, stage) {
   if (Date.now() > deadlineAt) {
     throw createStageTimeoutError(stage || "execution_budget", EXECUTION_BUDGET_MS);
   }
+}
+
+function getRemainingExecutionBudgetMs(deadlineAt) {
+  return Math.max(0, Number(deadlineAt) - Date.now());
+}
+
+function buildSimulationBypassContract(gate = {}, options = {}) {
+  const status = safeText(options?.status, "skipped");
+  const summary = safeText(
+    options?.summary,
+    status === "degraded"
+      ? "Simulation evidence degraded, so Crystal finalized this run from dossier, fusion, and calibration only."
+      : "Simulation evidence was skipped to preserve runtime reliability."
+  );
+  const note = safeText(
+    options?.note,
+    status === "degraded" ? "Simulation degraded and Crystal continued with the non-simulation stack." : "Simulation skipped."
+  );
+  const base =
+    buildMiroFishOutputContract(null, {
+      enabled: false,
+      reasons: Array.isArray(gate?.reasons) ? gate.reasons : [],
+    }) || {};
+  const downwardModifiers =
+    status === "degraded"
+      ? uniqueStrings([note, "Simulation evidence was not strong enough to own the final call."]).slice(0, 3)
+      : [];
+
+  return {
+    ...base,
+    simulation_status: {
+      ...(base.simulation_status || {}),
+      status,
+      simulation_mode: status === "degraded" ? "degraded" : "skipped",
+      runtime_summary: summary,
+      completion_quality: status === "degraded" ? 0.2 : 0,
+    },
+    confidence_modifiers: {
+      ...(base.confidence_modifiers || {}),
+      confidence_upward_modifiers: [],
+      confidence_downward_modifiers: downwardModifiers,
+      simulation_reliability_notes: uniqueStrings(
+        []
+          .concat(Array.isArray(base?.confidence_modifiers?.simulation_reliability_notes) ? base.confidence_modifiers.simulation_reliability_notes : [])
+          .concat(note ? [note] : [])
+      ).slice(0, 3),
+      uncertainty_pressure: status === "degraded" ? 0.18 : 0,
+    },
+    simulation_summary_for_fusion: {
+      ...(base.simulation_summary_for_fusion || {}),
+      simulation_summary: summary,
+      recommended_fusion_weight: 0,
+    },
+    gate_reasons: Array.isArray(gate?.reasons) ? gate.reasons : [],
+    degradation_reason: safeText(options?.reason),
+  };
 }
 
 async function writeRunPatch(db, admin, runId, patch = {}) {
@@ -1030,7 +1094,13 @@ function buildFallbackDossierPrediction({
   let recommendedPosture = "";
 
   if (binaryFrame?.asks_binary_question && primarySide && secondarySide) {
-    const questionSideAProbability = dominantLean === "down" ? 0.44 : dominantLean === "up" ? 0.56 : 0.52;
+    const deterministicWinner = chooseDeterministicBinaryFallbackWinner({
+      primarySide,
+      secondarySide,
+      dominantLean,
+    });
+    const questionSideAProbability =
+      deterministicWinner === secondarySide ? 0.44 : deterministicWinner === primarySide ? 0.56 : 0.52;
     binaryContract = buildBinaryContract(
       {
         question_side_a: primarySide,
@@ -1044,7 +1114,7 @@ function buildFallbackDossierPrediction({
         question_side_b: secondarySide,
       },
       null,
-      dominantLean === "down" ? secondarySide : primarySide,
+      deterministicWinner,
       {
         publicationState: "limited",
         confidenceScore: clamp01(evidenceQuality?.coverage_score, 0.56),
@@ -1340,6 +1410,57 @@ function buildStakeLevel(domainId = "") {
   return /safety|geopolitics|governance|health/.test(safeText(domainId)) ? "high" : "medium";
 }
 
+function normalizeBinaryLabelForHeuristics(value = "") {
+  return safeText(value)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function chooseDeterministicBinaryFallbackWinner({ primarySide = "", secondarySide = "", dominantLean = "flat" }) {
+  const primary = safeText(primarySide, "Primary");
+  const secondary = safeText(secondarySide, "Alternative");
+  const primaryNorm = normalizeBinaryLabelForHeuristics(primary);
+  const secondaryNorm = normalizeBinaryLabelForHeuristics(secondary);
+
+  if (dominantLean === "up") return primary;
+  if (dominantLean === "down") return secondary;
+
+  const prudencePattern = /\b(wait|hold off|delay|later|pause|not yet|aspetta|aspettare|rimanda|rinvia)\b/;
+  const immediatePattern = /\b(act now|now|do it now|book now|buy now|rent now|move now|start now|agisci subito|subito)\b/;
+  const survivePattern = /\b(survive|sopravvivera|survival)\b/;
+  const failPattern = /\b(fail|failure|die|chiude|fallisce)\b/;
+
+  if (prudencePattern.test(primaryNorm) && immediatePattern.test(secondaryNorm)) return primary;
+  if (prudencePattern.test(secondaryNorm) && immediatePattern.test(primaryNorm)) return secondary;
+  if (prudencePattern.test(primaryNorm)) return primary;
+  if (prudencePattern.test(secondaryNorm)) return secondary;
+
+  if (survivePattern.test(primaryNorm) && failPattern.test(secondaryNorm)) return primary;
+  if (survivePattern.test(secondaryNorm) && failPattern.test(primaryNorm)) return secondary;
+
+  return primary;
+}
+
+function shouldUseDeterministicDossierFallback({ normalizedQuery = {}, verifiedEvidencePack = {} }) {
+  const binaryFrame = normalizedQuery?.binary_frame || {};
+  if (!binaryFrame?.asks_binary_question) return false;
+
+  const domainId = safeText(normalizedQuery?.primary_domain_id);
+  const sourceCount = Number(verifiedEvidencePack?.evidence_quality?.source_count || 0);
+  const missingness = Array.isArray(verifiedEvidencePack?.missingness_map) ? verifiedEvidencePack.missingness_map : [];
+  const thinCoverage =
+    sourceCount <= 0 &&
+    missingness.some((item) => safeText(item).includes("thin")) &&
+    missingness.some((item) => safeText(item).includes("light"));
+
+  if (!thinCoverage) return false;
+
+  return domainId === "B.3.8.personal_decisions_and_tradeoffs" || domainId === "B.3.5.business_idea_outcomes";
+}
+
 function normalizeQueryPlanPayload(payload = {}, options = {}) {
   const routingHints = options?.routingHints || {};
   const fallbackDomain = safeText(options?.fallbackDomain, GENERAL_FORECAST_DOMAIN);
@@ -1435,7 +1556,7 @@ Candidate domains:
 ${candidateLines || "- none"}
 
 Return one JSON object only with keys:
-primary_domain_id, intent_shape, resolution_frame, mode, question_side_a, question_side_b.
+primary_domain_id, intent_shape, resolution_frame, mode, question_side_a, question_side_b, event_date, jurisdiction, governing_entity.
 
 Rules:
 - Choose a concrete domain whenever possible.
@@ -1483,7 +1604,8 @@ Rules:
 - Publish a directional thesis when evidence has orientation.
 - Keep structured_dossier compact.
 - raw_prediction must include primary_call, confidence_score, key_drivers, counter_signals, invalidators, historical_anchors, why_this_side, recommended_posture.
-- If the question is binary, include probability_split with explicit side labels and binary_contract with question_side_a, question_side_b, winning_side, winning_probability and flip_conditions.
+- If the question is binary, include probability_split with explicit side labels and binary_contract with question_side_a, question_side_b, winning_side, winning_probability, flip_conditions, and keep winning_side explicit.
+- For binary calls, set why_this_side, winning_side, and losing_side so the winner never has to be inferred from prose.
 - Do not leave the winner implicit in the prose.
 - No markdown. No commentary. No wrapper keys.`;
 }
@@ -1728,6 +1850,42 @@ function buildBaselineConsensusPack({ verifiedEvidencePack = {}, normalizedQuery
   };
 }
 
+function buildFallbackVerifiedEvidencePack({ normalizedQuery = {}, variableSelectionPack = {}, engine = "extended", reason = "" }) {
+  const domainConfig = getDomain(normalizedQuery.primary_domain_id, GENERAL_FORECAST_DOMAIN);
+  const fallbackPack = {
+    historical_baseline: "",
+    historical_baseline_20y: "",
+    live_signals: [],
+    source_ledger: [],
+    source_trust_map: [],
+    conflict_map: [],
+    missingness_map: ["historical_baseline_thin", "live_signal_coverage_light", "consensus_reference_thin"],
+    consensus_inputs: [],
+    verification_summary: "Evidence retrieval degraded, so Crystal completed this run with a conservative evidence pack.",
+    entity_resolution: {
+      resolved: Array.isArray(normalizedQuery?.entities) && normalizedQuery.entities.length > 0,
+      entities: Array.isArray(normalizedQuery?.entities) ? normalizedQuery.entities.map((entity) => entity.label).filter(Boolean) : [],
+    },
+    event_resolution: {
+      resolved: Boolean(
+        safeText(normalizedQuery?.question_side_a) || safeText(normalizedQuery?.event_date) || safeText(normalizedQuery?.jurisdiction)
+      ),
+      event_date: safeText(normalizedQuery?.event_date),
+      governing_entity: safeText(normalizedQuery?.governing_entity),
+      jurisdiction: safeText(normalizedQuery?.jurisdiction),
+    },
+    prediction_market_frame: null,
+    selected_variables: Array.isArray(variableSelectionPack?.selected_variables) ? variableSelectionPack.selected_variables : [],
+    adapter_activation_map: Array.isArray(variableSelectionPack?.adapter_activation_map) ? variableSelectionPack.adapter_activation_map : [],
+    notes: uniqueStrings([
+      "Evidence retrieval degraded and Crystal fell back to a conservative verified evidence pack.",
+      safeText(reason),
+    ]).slice(0, 4),
+  };
+  fallbackPack.evidence_quality = computeEvidenceQuality(fallbackPack, domainConfig, engine || "extended");
+  return fallbackPack;
+}
+
 async function buildVerifiedEvidencePack(context, { runId, queryText, normalizedQuery, variableSelectionPack, engine }) {
   const { db, admin, llmRuntime, fetchJson, ai } = context;
   const domainConfig = getDomain(normalizedQuery.primary_domain_id, GENERAL_FORECAST_DOMAIN);
@@ -1846,7 +2004,9 @@ async function buildVerifiedEvidencePack(context, { runId, queryText, normalized
     predictionMarketFrame,
   });
   const sourceLedger = uniqueStrings(
-    sourceTrustMap.map((item) => item.source_id).concat(Array.isArray(domainConfig.source_allowlist) ? domainConfig.source_allowlist : [])
+    []
+      .concat(sourceTrustMap.map((item) => item.source_id))
+      .concat(mainBaseline ? ["historical-cache"] : [])
   );
 
   const verifiedEvidencePack = {
@@ -2015,21 +2175,59 @@ async function executeForecastRun(context, payload = {}) {
     await writeArtifact(db, admin, runId, "variable_selection_pack", variable_selection_pack);
 
     await ensureRunActive(db, runId);
+    await writeRunPatch(db, admin, runId, {
+      current_stage: "evidence_verification_agent",
+    });
     ensureExecutionBudget(runDeadlineAt, "evidence_verification_agent");
     const evidenceStageStartedAt = Date.now();
-    const verifiedEvidencePack = await buildVerifiedEvidencePack(context, {
-      runId,
-      queryText,
-      normalizedQuery,
-      variableSelectionPack: variable_selection_pack,
-      engine,
-    });
+    let verifiedEvidencePack;
+    let evidenceFallbackActivated = false;
+    try {
+      verifiedEvidencePack = await runWithStageTimeout(
+        () =>
+          buildVerifiedEvidencePack(context, {
+            runId,
+            queryText,
+            normalizedQuery,
+            variableSelectionPack: variable_selection_pack,
+            engine,
+          }),
+        EVIDENCE_STAGE_TIMEOUT_MS,
+        "evidence_verification_agent"
+      );
+    } catch (error) {
+      evidenceFallbackActivated = true;
+      verifiedEvidencePack = buildFallbackVerifiedEvidencePack({
+        normalizedQuery,
+        variableSelectionPack: variable_selection_pack,
+        engine,
+        reason: error instanceof Error ? error.message : "Evidence verification degraded.",
+      });
+      await writeArtifact(db, admin, runId, "verified_evidence_fallback", {
+        activated: true,
+        message: error instanceof Error ? error.message : "Evidence verification degraded.",
+        code: safeText(error?.code, "evidence-fallback"),
+        details: error?.details || null,
+      });
+      logCoreEvent("stage_degraded", {
+        runId,
+        stage: "evidence_verification_agent",
+        duration_ms: Date.now() - evidenceStageStartedAt,
+        error_code: safeText(error?.code, "evidence-fallback"),
+      });
+    }
     logCoreEvent("stage_completed", {
       runId,
       stage: "evidence_verification_agent",
       duration_ms: Date.now() - evidenceStageStartedAt,
       source_count: Number(verifiedEvidencePack?.evidence_quality?.source_count || 0),
     });
+    if (evidenceFallbackActivated) {
+      await writeArtifact(db, admin, runId, "verified_evidence_pack", {
+        ...verifiedEvidencePack,
+        fallback_used: true,
+      });
+    }
     const baselineConsensusPack = buildBaselineConsensusPack({
       verifiedEvidencePack,
       normalizedQuery,
@@ -2043,7 +2241,16 @@ async function executeForecastRun(context, payload = {}) {
       ensureExecutionBudget(runDeadlineAt, "dossier_prediction_agent");
       let dossierPredictionPayload;
       let dossierFallbackActivated = false;
+      const forceDeterministicDossierFallback = shouldUseDeterministicDossierFallback({
+        normalizedQuery,
+        verifiedEvidencePack,
+      });
       try {
+        if (forceDeterministicDossierFallback) {
+          throw Object.assign(new Error("Deterministic dossier fallback activated for thin binary coverage."), {
+            code: "dossier-deterministic-fallback",
+          });
+        }
         const dossierStageStartedAt = Date.now();
         dossierPredictionPayload = await withRetry(
           () =>
@@ -2100,9 +2307,15 @@ async function executeForecastRun(context, payload = {}) {
         });
         await writeArtifact(db, admin, runId, "dossier_prediction_fallback", {
           activated: true,
+          deterministic: forceDeterministicDossierFallback,
           message: error instanceof Error ? error.message : "Dossier generation failed.",
           code: safeText(error?.code, "dossier-fallback"),
           details: error?.details || null,
+        });
+        logCoreEvent(forceDeterministicDossierFallback ? "stage_skipped" : "stage_degraded", {
+          runId,
+          stage: "dossier_prediction_agent",
+          error_code: safeText(error?.code, forceDeterministicDossierFallback ? "dossier-deterministic-fallback" : "dossier-fallback"),
         });
       }
       const dossierPrediction = normalizeDossierStagePayload(dossierPredictionPayload, {
@@ -2129,31 +2342,111 @@ async function executeForecastRun(context, payload = {}) {
     let simulationDigest = null;
     let simulationContract = buildMiroFishOutputContract(null, simulationGate);
     if (simulationGate.enabled) {
-      await ensureRunActive(db, runId);
-      ensureExecutionBudget(runDeadlineAt, "simulation_decision_gate");
-      const simulationStageStartedAt = Date.now();
-      simulationDigest = await getWorldSimDigest({
-        ai: context.ai,
-        db,
-        admin,
-        withRetry,
-        fetchJson: context.fetchJson,
-        queryText,
-        queryPlan: normalizedQuery,
-        userContext: payload.userContext || null,
-        engine: "oracle",
-        plan,
-        sidecarBaseUrl: process.env.MIROFISH_BASE_URL || "",
-        sidecarApiKey: process.env.MIROFISH_API_KEY || "",
-      });
-      simulationContract = buildMiroFishOutputContract(simulationDigest, simulationGate);
-      await writeArtifact(db, admin, runId, "mirofish_output_contract", simulationContract);
-      logCoreEvent("stage_completed", {
-        runId,
-        stage: "simulation_decision_gate",
-        duration_ms: Date.now() - simulationStageStartedAt,
-        simulation_status: safeText(simulationContract?.simulation_status, "completed"),
-      });
+      const remainingBudgetMs = getRemainingExecutionBudgetMs(runDeadlineAt);
+      if (remainingBudgetMs <= SIMULATION_STAGE_POLICY.minimumBudgetMs + SIMULATION_STAGE_POLICY.reserveForFinalizationMs) {
+        simulationContract = buildSimulationBypassContract(simulationGate, {
+          status: "skipped",
+          reason: "simulation_budget_too_thin",
+          summary: "Simulation was skipped to preserve enough budget for final fusion, calibration, and card generation.",
+          note: `Remaining execution budget was ${remainingBudgetMs}ms, below the safe simulation threshold.`,
+        });
+        await writeArtifact(db, admin, runId, "simulation_bypass", {
+          activated: true,
+          status: "skipped",
+          reason: safeText(simulationContract?.degradation_reason, "simulation_budget_too_thin"),
+          budget_ms_remaining: remainingBudgetMs,
+        });
+        await writeArtifact(db, admin, runId, "mirofish_output_contract", simulationContract);
+        logCoreEvent("stage_skipped", {
+          runId,
+          stage: "simulation_decision_gate",
+          reason: safeText(simulationContract?.degradation_reason, "simulation_budget_too_thin"),
+          budget_ms_remaining: remainingBudgetMs,
+        });
+      } else {
+        await ensureRunActive(db, runId);
+        ensureExecutionBudget(runDeadlineAt, "simulation_decision_gate");
+        const simulationStageStartedAt = Date.now();
+        const simulationTimeoutMs = Math.max(
+          SIMULATION_STAGE_POLICY.minimumBudgetMs,
+          Math.min(
+            SIMULATION_STAGE_POLICY.timeoutMs,
+            remainingBudgetMs - SIMULATION_STAGE_POLICY.reserveForFinalizationMs
+          )
+        );
+        try {
+          simulationDigest = await withRetry(
+            () =>
+              runWithStageTimeout(
+                () =>
+                  getWorldSimDigest({
+                    ai: context.ai,
+                    db,
+                    admin,
+                    withRetry,
+                    fetchJson: context.fetchJson,
+                    queryText,
+                    queryPlan: normalizedQuery,
+                    userContext: payload.userContext || null,
+                    engine: "oracle",
+                    plan,
+                    sidecarBaseUrl: process.env.MIROFISH_BASE_URL || "",
+                    sidecarApiKey: process.env.MIROFISH_API_KEY || "",
+                  }),
+                simulationTimeoutMs,
+                "simulation_decision_gate"
+              ),
+            {
+              retries: SIMULATION_STAGE_POLICY.retries,
+              baseDelayMs: SIMULATION_STAGE_POLICY.baseDelayMs,
+              timeoutMs: null,
+              label: "simulation",
+              stage: "simulation_decision_gate",
+              onRetry: ({ attempt, error, nextDelayMs }) => {
+                logCoreEvent("stage_retry", {
+                  runId,
+                  stage: "simulation_decision_gate",
+                  attempt,
+                  next_delay_ms: nextDelayMs,
+                  error_code: safeText(error?.code),
+                  provider: safeText(error?.details?.provider),
+                });
+              },
+            }
+          );
+          simulationContract = buildMiroFishOutputContract(simulationDigest, simulationGate);
+          await writeArtifact(db, admin, runId, "mirofish_output_contract", simulationContract);
+          logCoreEvent("stage_completed", {
+            runId,
+            stage: "simulation_decision_gate",
+            duration_ms: Date.now() - simulationStageStartedAt,
+            simulation_status: safeText(simulationContract?.simulation_status?.status, "completed"),
+          });
+        } catch (error) {
+          simulationContract = buildSimulationBypassContract(simulationGate, {
+            status: "degraded",
+            reason: safeText(error?.code, "simulation_degraded"),
+            summary: "Simulation evidence degraded and Crystal continued with dossier, fusion, and calibration only.",
+            note: error instanceof Error ? error.message : "Simulation stage degraded.",
+          });
+          await writeArtifact(db, admin, runId, "simulation_bypass", {
+            activated: true,
+            status: "degraded",
+            reason: safeText(simulationContract?.degradation_reason, "simulation_degraded"),
+            message: error instanceof Error ? error.message : "Simulation stage degraded.",
+            code: safeText(error?.code, "simulation_degraded"),
+            details: error?.details || null,
+          });
+          await writeArtifact(db, admin, runId, "mirofish_output_contract", simulationContract);
+          logCoreEvent("stage_degraded", {
+            runId,
+            stage: "simulation_decision_gate",
+            duration_ms: Date.now() - simulationStageStartedAt,
+            error_code: safeText(error?.code, "simulation_degraded"),
+            provider: safeText(error?.details?.provider),
+          });
+        }
+      }
     }
 
     const rawPrediction = applySimulationFusion(dossierPrediction?.raw_prediction || {}, simulationContract);
@@ -2468,6 +2761,10 @@ function createCrystalCoreRuntime(config = {}) {
           "MacroSpilloverAdapter",
           "EventNewsAdapter",
           "SourceReliabilityAdapter",
+          "PolicyPoliticalRiskAdapter",
+          "MarketsAssetsAdapter",
+          "CitiesHousingTravelAdapter",
+          "CompanyOperationsAdapter",
         ],
         implemented_sources: getImplementedSourceIds(),
         grounding: buildRuntimeGroundingSummary(),
