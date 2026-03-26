@@ -1,6 +1,6 @@
 {
   "summary": {
-    "generated_at": "2026-03-26T18:50:07.715Z",
+    "generated_at": "2026-03-26T19:58:24.714Z",
     "report_date": "2026-03-26",
     "total_cases": 6,
     "top3_miss_count": 0,
@@ -9,7 +9,8 @@
     "mobility_structure_failures": 0,
     "public_data_structure_failures": 0,
     "runtime_provider_count": 19,
-    "runtime_config_blocker_count": 4,
+    "runtime_config_blocker_count": 1,
+    "runtime_optional_missing_count": 1,
     "runtime_state_source": "live_health",
     "synthetic_smoke_verdict": "connector-ready",
     "runtime_config_verdict": "needs-config",
@@ -127,13 +128,11 @@
       "category": "mobility",
       "access_profile": "public",
       "implementation_status": "implemented",
-      "configured": false,
-      "available": false,
-      "status": "optional_source_missing",
-      "feed_count": 0,
-      "notes": [
-        "GTFS_STATIC_FEEDS_JSON is empty, so GTFS Static is implemented but not configured."
-      ]
+      "configured": true,
+      "available": true,
+      "status": "available",
+      "feed_count": 1,
+      "notes": []
     },
     {
       "source_id": "gtfs_realtime",
@@ -141,13 +140,11 @@
       "category": "mobility",
       "access_profile": "public",
       "implementation_status": "implemented",
-      "configured": false,
-      "available": false,
-      "status": "optional_source_missing",
-      "feed_count": 0,
-      "notes": [
-        "GTFS_REALTIME_FEEDS_JSON is empty, so GTFS Realtime is implemented but not configured."
-      ]
+      "configured": true,
+      "available": true,
+      "status": "available",
+      "feed_count": 1,
+      "notes": []
     },
     {
       "source_id": "opensky",
@@ -158,7 +155,7 @@
       "configured": true,
       "available": true,
       "status": "available",
-      "auth_mode": "credentialed",
+      "auth_mode": "anonymous_public",
       "base_url": "https://opensky-network.org/api"
     },
     {
@@ -213,10 +210,12 @@
       "category": "energy",
       "access_profile": "public",
       "implementation_status": "implemented",
-      "configured": true,
-      "available": true,
-      "status": "available",
-      "notes": []
+      "configured": false,
+      "available": false,
+      "status": "config_missing",
+      "notes": [
+        "EIA_API_KEY is required to activate EIA in runtime."
+      ]
     },
     {
       "source_id": "api_football_optional",
@@ -224,12 +223,14 @@
       "category": "sports",
       "access_profile": "optional_non_default",
       "implementation_status": "implemented",
-      "configured": true,
-      "available": true,
-      "status": "available",
+      "configured": false,
+      "available": false,
+      "status": "config_missing",
       "provider": "api-football",
       "base_url": "https://v3.football.api-sports.io",
-      "notes": []
+      "notes": [
+        "API_FOOTBALL_KEY is not configured in this runtime."
+      ]
     }
   ],
   "runtime_config_blockers": [
@@ -241,25 +242,9 @@
       "notes": [
         "FRED_API_KEY is required to activate FRED in runtime."
       ]
-    },
-    {
-      "source_id": "gtfs_static",
-      "status": "optional_source_missing",
-      "configured": false,
-      "available": false,
-      "notes": [
-        "GTFS_STATIC_FEEDS_JSON is empty, so GTFS Static is implemented but not configured."
-      ]
-    },
-    {
-      "source_id": "gtfs_realtime",
-      "status": "optional_source_missing",
-      "configured": false,
-      "available": false,
-      "notes": [
-        "GTFS_REALTIME_FEEDS_JSON is empty, so GTFS Realtime is implemented but not configured."
-      ]
-    },
+    }
+  ],
+  "runtime_optional_missing": [
     {
       "source_id": "openaq",
       "status": "config_missing",
@@ -394,7 +379,7 @@
             "configured": true,
             "available": true,
             "status": "available",
-            "feed_count": 3,
+            "feed_count": 1,
             "notes": [],
             "required_for_query": false,
             "optional_for_query": true,
@@ -409,7 +394,7 @@
             "configured": true,
             "available": true,
             "status": "available",
-            "feed_count": 3,
+            "feed_count": 1,
             "notes": [],
             "required_for_query": false,
             "optional_for_query": true,
@@ -588,7 +573,7 @@
             "configured": true,
             "available": true,
             "status": "used",
-            "feed_count": 3,
+            "feed_count": 1,
             "notes": [],
             "required_for_query": false,
             "optional_for_query": true,
@@ -603,7 +588,7 @@
             "configured": true,
             "available": true,
             "status": "used",
-            "feed_count": 3,
+            "feed_count": 1,
             "notes": [],
             "required_for_query": false,
             "optional_for_query": true,
@@ -677,7 +662,7 @@
     },
     {
       "cluster": "travel",
-      "query": "Travel disruption risk in Tokyo next 90 days",
+      "query": "Travel disruption risk in Rome next 90 days",
       "expectedDomains": [
         "A.9.travel_flows_and_disruption"
       ],
@@ -805,7 +790,7 @@
             "configured": true,
             "available": true,
             "status": "used",
-            "feed_count": 3,
+            "feed_count": 1,
             "notes": [],
             "required_for_query": false,
             "optional_for_query": true,
@@ -820,7 +805,7 @@
             "configured": true,
             "available": true,
             "status": "used",
-            "feed_count": 3,
+            "feed_count": 1,
             "notes": [],
             "required_for_query": false,
             "optional_for_query": true,
@@ -856,14 +841,14 @@
       },
       "location_structure": {
         "resolved_place": {
-          "display_name": "Tokyo, Japan",
-          "lat": 35.6762,
-          "lon": 139.6503,
+          "display_name": "Rome, Italy",
+          "lat": 41.8933,
+          "lon": 12.4829,
           "type": "city"
         },
         "poi_context": {
           "source_id": "overpass",
-          "display_name": "Tokyo, Japan",
+          "display_name": "Rome, Italy",
           "poi_count": 128,
           "transit_poi_count": 24,
           "hospitality_poi_count": 38

@@ -22,7 +22,7 @@
 | Dovrei aspettare prima di affittare a Roma? | completed | completed | B.3.8.personal_decisions_and_tradeoffs | B.3.8.personal_decisions_and_tradeoffs | Wait | Wait | limited | limited | 0 |
 
 ## Blockers
-- sports provider grounding unavailable on local_core: Inter vs Juventus
-- sports provider grounding unavailable on remote: Inter vs Juventus
+- sports provider grounding unavailable on local_core: Inter vs Juventus (configured=False, fixture_resolved=False, reason=)
+- sports provider grounding unavailable on remote: Inter vs Juventus (configured=False, fixture_resolved=False, reason=)
 - missing binary contract on binary benchmark
 - sports probe is not provider-grounded and parity-ready

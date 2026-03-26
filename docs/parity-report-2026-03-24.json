@@ -1,5 +1,5 @@
 ﻿{
-    "generated_at":  "2026-03-26T19:57:56.3978958+01:00",
+    "generated_at":  "2026-03-26T21:06:01.1051819+01:00",
     "local_api_base":  "https://api-paaqyfwena-ew.a.run.app",
     "remote_service_url":  "https://crystal-core-paaqyfwena-ew.a.run.app",
     "queries":  [
@@ -28,6 +28,12 @@
                         "remote_side_a":  "",
                         "local_side_b":  "",
                         "remote_side_b":  "",
+                        "local_provider_configured":  false,
+                        "remote_provider_configured":  false,
+                        "local_fixture_resolved":  false,
+                        "remote_fixture_resolved":  false,
+                        "local_sports_reason":  "",
+                        "remote_sports_reason":  "",
                         "expects_binary":  true,
                         "timeout":  false
                     },
@@ -38,7 +44,7 @@
                         "local_domain":  "A.29.sports_performance_and_outcomes",
                         "remote_domain":  "A.29.sports_performance_and_outcomes",
                         "local_call":  "Crystal needs a live sports provider before it can publish a grounded match pick.",
-                        "remote_call":  "Crystal could not resolve the sports fixture cleanly enough to publish a grounded match pick.",
+                        "remote_call":  "Crystal needs a live sports provider before it can publish a grounded match pick.",
                         "local_winner":  "",
                         "remote_winner":  "",
                         "local_band":  "",
@@ -56,6 +62,12 @@
                         "remote_side_a":  "",
                         "local_side_b":  "",
                         "remote_side_b":  "",
+                        "local_provider_configured":  false,
+                        "remote_provider_configured":  false,
+                        "local_fixture_resolved":  false,
+                        "remote_fixture_resolved":  false,
+                        "local_sports_reason":  "",
+                        "remote_sports_reason":  "",
                         "expects_binary":  true,
                         "timeout":  false
                     },
@@ -65,8 +77,8 @@
                         "remote_status":  "completed",
                         "local_domain":  "A.23.markets_and_asset_regimes",
                         "remote_domain":  "A.23.markets_and_asset_regimes",
-                        "local_call":  "Bitcoin is likely to trade within a defined range over the next 30 days with moderate volatility and no clear directional breakout.",
-                        "remote_call":  "Bitcoin is likely to trade within a moderate range with mild upward bias over the next 30 days",
+                        "local_call":  "Bitcoin is likely to trade within a defined range with moderate volatility over the next 30 days, lacking a clear directional breakout.",
+                        "remote_call":  "Bitcoin is likely to trade within a defined range over the next 30 days with moderate volatility and no clear directional breakout.",
                         "local_winner":  "",
                         "remote_winner":  "",
                         "local_band":  "",
@@ -84,6 +96,12 @@
                         "remote_side_a":  "",
                         "local_side_b":  "",
                         "remote_side_b":  "",
+                        "local_provider_configured":  false,
+                        "remote_provider_configured":  false,
+                        "local_fixture_resolved":  false,
+                        "remote_fixture_resolved":  false,
+                        "local_sports_reason":  "",
+                        "remote_sports_reason":  "",
                         "expects_binary":  false,
                         "timeout":  false
                     },
@@ -112,6 +130,12 @@
                         "remote_side_a":  "",
                         "local_side_b":  "",
                         "remote_side_b":  "",
+                        "local_provider_configured":  false,
+                        "remote_provider_configured":  false,
+                        "local_fixture_resolved":  false,
+                        "remote_fixture_resolved":  false,
+                        "local_sports_reason":  "",
+                        "remote_sports_reason":  "",
                         "expects_binary":  true,
                         "timeout":  false
                     },
@@ -140,6 +164,12 @@
                         "remote_side_a":  "",
                         "local_side_b":  "",
                         "remote_side_b":  "",
+                        "local_provider_configured":  false,
+                        "remote_provider_configured":  false,
+                        "local_fixture_resolved":  false,
+                        "remote_fixture_resolved":  false,
+                        "local_sports_reason":  "",
+                        "remote_sports_reason":  "",
                         "expects_binary":  true,
                         "timeout":  false
                     }
@@ -154,8 +184,8 @@
                     "sports_probe_ready":  false,
                     "verdict":  "hold at 0/0",
                     "blockers":  [
-                                     "sports provider grounding unavailable on local_core: Inter vs Juventus",
-                                     "sports provider grounding unavailable on remote: Inter vs Juventus",
+                                     "sports provider grounding unavailable on local_core: Inter vs Juventus (configured=False, fixture_resolved=False, reason=)",
+                                     "sports provider grounding unavailable on remote: Inter vs Juventus (configured=False, fixture_resolved=False, reason=)",
                                      "missing binary contract on binary benchmark",
                                      "sports probe is not provider-grounded and parity-ready"
                                  ]
