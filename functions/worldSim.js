@@ -4,13 +4,16 @@ const { attachPolymarketToWorldSimDigest } = require("./polymarket");
 
 const WORLD_SIM_CACHE_VERSION = "oracle-world-sim-v1";
 const WORLD_SIM_CACHE_TTL_HOURS = 24;
-const SUPPORTED_DOMAIN_PREFIXES = [
-  "A.1.macro",
-  "A.2.markets",
-  "A.7.city_pulse",
-  "A.10.consumer",
-  "A.11.geopolitics",
-];
+const CATALOG_NATIVE_WORLD_SIM_FAMILIES = {
+  "A.24.governance_policy_and_public_timeline": "governance_timeline",
+  "A.25.geopolitics_and_conflict_dynamics": "geopolitics_conflict",
+  "A.26.human_history_and_long_run_analogs": "long_run_analog",
+  "A.30.culture_events_and_attention": "culture_event_pressure",
+  "B.3.8.personal_decisions_and_tradeoffs": "personal_tradeoff",
+  "C.1.attention_waves": "attention_narrative",
+  "C.3.hype_curve_tracker": "attention_narrative",
+  "C.4.global_quote_stream": "attention_narrative",
+};
 
 function clamp01(value, fallback = 0.5) {
   const num = Number(value);
@@ -32,7 +35,7 @@ function toNullableNumber(value) {
   return Number.isFinite(next) ? next : null;
 }
 
-function createWorldSimCacheKey(queryText, queryPlan = {}, plan = "free", engine = "standard") {
+function createWorldSimCacheKey(queryText, queryPlan = {}, plan = "free", engine = "standard", simulationContext = null) {
   const payload = {
     version: WORLD_SIM_CACHE_VERSION,
     queryText: safeText(queryText),
@@ -47,6 +50,14 @@ function createWorldSimCacheKey(queryText, queryPlan = {}, plan = "free", engine
     constraints: queryPlan?.constraints || {},
     plan,
     engine,
+    simulation_context: simulationContext
+      ? {
+          domain_family: safeText(simulationContext?.domain_family),
+          horizon: safeText(simulationContext?.horizon),
+          decision_frame: safeText(simulationContext?.decision_frame),
+          entity_event_location: simulationContext?.entity_event_location || {},
+        }
+      : null,
   };
 
   return crypto.createHash("sha256").update(JSON.stringify(payload)).digest("hex");
@@ -58,36 +69,49 @@ function matchesWorldSimKeywords(queryText = "") {
   );
 }
 
-function resolveWorldSimTemplate(queryPlan = {}, queryText = "") {
+function resolveWorldSimFamily(queryPlan = {}, queryText = "", simulationContext = null) {
+  const fromContext = safeText(simulationContext?.domain_family);
+  if (fromContext) return fromContext;
+
   const domain = safeText(queryPlan?.domain || queryPlan?.domain_id).toLowerCase();
   const corpus = `${domain} ${queryText}`.toLowerCase();
 
-  if (domain.startsWith("a.11.") || /(election|government|coalition|war|geopolit|sanction|tariff|border|public opinion|elezion|governo|coalizione|guerra|sanzion|dazi)/i.test(corpus)) {
-    return "geopolitics-public-opinion";
+  const exactDomainId = safeText(queryPlan?.domain || queryPlan?.domain_id);
+  if (CATALOG_NATIVE_WORLD_SIM_FAMILIES[exactDomainId]) {
+    return CATALOG_NATIVE_WORLD_SIM_FAMILIES[exactDomainId];
   }
 
-  if (domain.startsWith("a.1.") || domain.startsWith("a.2.") || /(market|macro|inflation|rates|bond|equity|crypto|oil|energy|pil|inflazione|tassi|borsa|energia)/i.test(corpus)) {
-    return "macro-markets";
+  if (/(election|government|coalition|referendum|budget vote|policy timeline|public timeline|elezion|governo|coalizione)/i.test(corpus)) {
+    return "governance_timeline";
   }
-
-  if (domain.startsWith("a.7.") || /(city|urban|mobility|tourism|rent|housing|crime|roma|milano|citta|mobilita|turismo|affitti)/i.test(corpus)) {
-    return "city-local";
+  if (/(war|geopolit|sanction|tariff|border|force posture|taiwan|ukraine|ceasefire|conflitto|sanzion|dazi)/i.test(corpus)) {
+    return "geopolitics_conflict";
   }
-
-  if (domain.startsWith("a.10.") || /(culture|media|attention|creator|audience|streaming|viral|narrative|cultura|media|attenzione|streaming)/i.test(corpus)) {
-    return "culture-media";
+  if (/(historical analog|historical analogue|long-run analog|long run analog|regime similarity|recurrence)/i.test(corpus)) {
+    return "long_run_analog";
   }
-
-  return "public-discourse";
+  if (/(culture|festival|concert|event pressure|crowding|venue|tourism pressure|cultura|evento)/i.test(corpus)) {
+    return "culture_event_pressure";
+  }
+  if (/(attention|narrative|quote stream|hype|momentum|audience|viral|media breadth|attenzione|quote)/i.test(corpus)) {
+    return "attention_narrative";
+  }
+  if (/(should i move|buy now or wait|tradeoff|opportunity cost|reversibility|wait six months)/i.test(corpus)) {
+    return "personal_tradeoff";
+  }
+  return "";
 }
 
-function supportsWorldSim(queryPlan = {}, queryText = "", engine = "standard", plan = "free") {
-  const domain = queryPlan?.domain || queryPlan?.domain_id || "";
-  const supportedDomain = SUPPORTED_DOMAIN_PREFIXES.some((prefix) => domain.startsWith(prefix));
+function resolveWorldSimTemplate(queryPlan = {}, queryText = "", simulationContext = null) {
+  return safeText(resolveWorldSimFamily(queryPlan, queryText, simulationContext), "public_discourse");
+}
+
+function supportsWorldSim(queryPlan = {}, queryText = "", engine = "standard", plan = "free", simulationContext = null) {
+  const supportedFamily = Boolean(resolveWorldSimFamily(queryPlan, queryText, simulationContext));
   if (!["free", "plus", "pro"].includes(plan)) {
     return false;
   }
-  return supportedDomain || matchesWorldSimKeywords(queryText);
+  return supportedFamily || matchesWorldSimKeywords(queryText);
 }
 
 function createEmptyDigest(defaults = {}) {
@@ -111,6 +135,12 @@ function createEmptyDigest(defaults = {}) {
       graph_summary: "",
       community_summaries: [],
       tensions: [],
+      regime_shift_risk: 0,
+      actor_dependency: 0,
+      cascade_pressure: 0,
+      trigger_map: [],
+      invalidation_map: [],
+      scenario_split_cause: [],
       simulation_id: null,
       cache_status: "miss",
       notes: [],
@@ -200,6 +230,12 @@ function normalizeWorldSimDigest(raw = {}, defaults = {}) {
     graph_summary: safeText(raw?.graph_summary, defaults.graph_summary || ""),
     community_summaries: sanitizeList(raw?.community_summaries).slice(0, 4),
     tensions: sanitizeList(raw?.tensions).slice(0, 4),
+    regime_shift_risk: clamp01(raw?.regime_shift_risk, defaults.regime_shift_risk || 0.42),
+    actor_dependency: clamp01(raw?.actor_dependency, defaults.actor_dependency || 0.44),
+    cascade_pressure: clamp01(raw?.cascade_pressure, defaults.cascade_pressure || 0.4),
+    trigger_map: sanitizeList(raw?.trigger_map).slice(0, 5),
+    invalidation_map: sanitizeList(raw?.invalidation_map).slice(0, 5),
+    scenario_split_cause: sanitizeList(raw?.scenario_split_cause).slice(0, 4),
     simulation_id: safeText(raw?.simulation_id, defaults.simulation_id || null),
     cache_status: safeText(raw?.cache_status, defaults.cache_status || "miss"),
     notes: sanitizeList(raw?.notes).slice(0, 5),
@@ -254,7 +290,7 @@ async function saveWorldSimDigest(db, admin, cacheKey, digest, metadata = {}) {
   );
 }
 
-async function buildGraphSeedPack({ ai, queryText, queryPlan, userContext, withRetry, template }) {
+async function buildGraphSeedPack({ ai, queryText, queryPlan, userContext, withRetry, template, simulationContext = null }) {
   const contextString = userContext
     ? `
 CONTESTO UTENTE:
@@ -271,6 +307,7 @@ Devi creare un world seed pack grounded per una simulazione di tipo "${template 
 
 QUERY: "${queryText}"
 QUERY PLAN: ${JSON.stringify(queryPlan)}
+SIMULATION CONTEXT: ${JSON.stringify(simulationContext || {})}
 ${contextString}
 
 REGOLE:
@@ -339,7 +376,7 @@ Restituisci JSON con:
   return JSON.parse(response.text || "{}");
 }
 
-async function simulateWithGemini({ ai, queryText, queryPlan, seedPack, withRetry, simulationMode, template }) {
+async function simulateWithGemini({ ai, queryText, queryPlan, seedPack, withRetry, simulationMode, template, simulationContext = null }) {
   const response = await withRetry(async () =>
     ai.models.generateContent({
       model: "gemini-3.1-pro-preview",
@@ -350,6 +387,7 @@ QUERY: "${queryText}"
 QUERY PLAN: ${JSON.stringify(queryPlan)}
 TEMPLATE: ${template || "public-discourse"}
 SIMULATION MODE: ${simulationMode}
+SIMULATION CONTEXT: ${JSON.stringify(simulationContext || {})}
 WORLD SEED PACK: ${JSON.stringify(seedPack)}
 
 REGOLE:
@@ -358,6 +396,7 @@ REGOLE:
 3. Se la copertura del grafo e debole, abbassa quality_score e non spostare il numero finale.
 4. probability_delta deve restare tra -0.05 e +0.05.
 5. confidence_delta deve restare tra -0.08 e +0.08.
+6. Se il template è catalog-native, restituisci anche campi strutturati coerenti con il family type.
 
 OUTPUT JSON con:
 - enabled
@@ -378,6 +417,12 @@ OUTPUT JSON con:
 - graph_summary
 - community_summaries
 - tensions
+- regime_shift_risk
+- actor_dependency
+- cascade_pressure
+- trigger_map
+- invalidation_map
+- scenario_split_cause
 - notes`,
       config: {
         responseMimeType: "application/json",
@@ -429,6 +474,12 @@ OUTPUT JSON con:
             graph_summary: { type: Type.STRING },
             community_summaries: { type: Type.ARRAY, items: { type: Type.STRING } },
             tensions: { type: Type.ARRAY, items: { type: Type.STRING } },
+            regime_shift_risk: { type: Type.NUMBER },
+            actor_dependency: { type: Type.NUMBER },
+            cascade_pressure: { type: Type.NUMBER },
+            trigger_map: { type: Type.ARRAY, items: { type: Type.STRING } },
+            invalidation_map: { type: Type.ARRAY, items: { type: Type.STRING } },
+            scenario_split_cause: { type: Type.ARRAY, items: { type: Type.STRING } },
             notes: { type: Type.ARRAY, items: { type: Type.STRING } },
           },
         },
@@ -466,15 +517,16 @@ async function getWorldSimDigest({
   userContext,
   engine,
   plan,
+  simulationContext,
   sidecarBaseUrl,
   sidecarApiKey,
 }) {
-  if (!supportsWorldSim(queryPlan, queryText, engine, plan)) {
+  if (!supportsWorldSim(queryPlan, queryText, engine, plan, simulationContext)) {
     return null;
   }
 
-  const template = resolveWorldSimTemplate(queryPlan, queryText);
-  const cacheKey = createWorldSimCacheKey(queryText, queryPlan, plan, engine);
+  const template = resolveWorldSimTemplate(queryPlan, queryText, simulationContext);
+  const cacheKey = createWorldSimCacheKey(queryText, queryPlan, plan, engine, simulationContext);
   const { digest: freshDigest, snapshot } = await getCachedDigest(db, cacheKey);
 
   if (freshDigest) {
@@ -506,6 +558,7 @@ async function getWorldSimDigest({
         query: queryText,
         query_plan: queryPlan,
         user_context: userContext,
+        simulation_context: simulationContext,
         simulation_mode: simulationMode,
         template,
       },
@@ -518,6 +571,7 @@ async function getWorldSimDigest({
       userContext,
       withRetry,
       template,
+      simulationContext,
     });
     rawDigest = await simulateWithGemini({
       ai,
@@ -527,6 +581,7 @@ async function getWorldSimDigest({
       withRetry,
       simulationMode,
       template,
+      simulationContext,
     });
   }
 
@@ -551,6 +606,7 @@ async function getWorldSimDigest({
     engine,
     plan,
     template,
+    simulation_context: simulationContext || null,
   });
 
   return enrichedDigest;
@@ -829,6 +885,7 @@ module.exports = {
   WORLD_SIM_CACHE_TTL_HOURS,
   WORLD_SIM_CACHE_VERSION,
   supportsWorldSim,
+  resolveWorldSimFamily,
   resolveWorldSimTemplate,
   getWorldSimDigest,
   enhanceCardWithWorldSim,

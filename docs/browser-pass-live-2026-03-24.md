@@ -65,3 +65,30 @@
 - Public forecast surfaces now use timed fetches plus local cache fallback, so `Forecast Gallery` and public forecast detail can degrade to a readable state instead of sitting on loading skeletons indefinitely.
 - The signed-in pass is still not certifiable from this terminal-only workflow. Week 4 therefore requires a manual Edge non-headless pass on the live local profile, with captures stored in `C:\Users\Fiorenza\OneDrive\Desktop\Codex\qa-captures\week4`.
 - Until that pass is complete, the operational recommendation stays unchanged: **hold at `0/0`**.
+
+## Manual Re-Test on 2026-03-28
+- Browser: Microsoft Edge with a real signed-in profile.
+- Verdict: **signed-in QA certified, with one P2 note**.
+- Route coverage completed:
+  - `/forecast`
+  - `/forecast-gallery`
+  - public forecast detail
+  - `/gallery`
+  - `/sim`
+
+## 2026-03-28 Results
+- Guest `save/follow` gating now redirects correctly to `/signin` with a `next` param that returns the user to the current forecast.
+- Signed-in `follow` now flips to a visible confirmed state (`Updates enabled`) without requiring a reload.
+- Gallery `FRESHNESS` now renders human-readable text instead of raw ISO timestamps.
+- `Compare versions` now explains why it is disabled when there is only one saved version.
+- The loop `ask -> save -> follow -> gallery -> proof` is now functioning end-to-end without a blocking UX regression.
+
+## Remaining Issue Matrix
+| Priority | Surface | Issue | Status |
+|---|---|---|---|
+| P2 | `/forecast-gallery` and linked discovery surfaces | One forecast title/topic string still shows corrupted source data (`COSA PASSER◆`) instead of the expected accented character. The issue appears to originate in stored content, not the rendering flow. | Accepted in backlog. |
+
+## Updated Decision
+- There are **no open P0 or P1 issues** in the signed-in/browser flow after the 2026-03-28 re-test.
+- Browser QA is now **certified for release readiness**, with a single non-blocking P2 data-cleanup note.
+- This browser result removes the Week 4 signed-in QA blocker, but it does **not** by itself reopen the rollout because the canary decision is now deferred until after the cross-domain prediction quality sprint.

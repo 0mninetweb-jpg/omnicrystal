@@ -12,6 +12,7 @@ type ResultStackProps = {
   isAuthenticated: boolean;
   isSaved: boolean;
   isSaving: boolean;
+  isFollowed: boolean;
   isFollowing: boolean;
   onSave: () => void;
   onFollow: () => void;
@@ -25,6 +26,7 @@ export function ResultStack({
   isAuthenticated,
   isSaved,
   isSaving,
+  isFollowed,
   isFollowing,
   onSave,
   onFollow,
@@ -45,6 +47,7 @@ export function ResultStack({
               item={item}
               isSaved={isSaved}
               isSaving={isSaving}
+              isFollowed={isFollowed}
               isFollowing={isFollowing}
               onSave={onSave}
               onFollow={onFollow}

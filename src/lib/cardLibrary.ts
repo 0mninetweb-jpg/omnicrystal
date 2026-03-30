@@ -1,7 +1,11 @@
-import { collection, doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
+import { addDoc, collection, doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import type { CardData } from '../types/crystal';
 import type { ForecastResolvedContext } from '../types/forecastV1';
+
+type CardLibraryEventOptions = {
+  sourceView?: string;
+};
 
 function simpleHash(input: string) {
   let hash = 0;
@@ -23,6 +27,10 @@ export function createForecastLineageId(query: string, context: ForecastResolved
   return `lineage_${simpleHash(seed)}`;
 }
 
+export function createForecastFollowId(context: ForecastResolvedContext) {
+  return `follow_${simpleHash(`${context.entity}|${context.domainId}|${context.geography}`)}`;
+}
+
 function buildCardRecord(card: CardData, query: string, context: ForecastResolvedContext, lineageId: string) {
   return {
     ...card,
@@ -39,7 +47,24 @@ function buildCardRecord(card: CardData, query: string, context: ForecastResolve
   };
 }
 
-export async function saveForecastCardToLibrary(userId: string, query: string, context: ForecastResolvedContext, card: CardData) {
+async function recordProductEvent(userId: string, payload: Record<string, unknown>) {
+  try {
+    await addDoc(collection(db, 'users', userId, 'product_events'), {
+      ...payload,
+      createdAt: serverTimestamp(),
+    });
+  } catch (error) {
+    console.warn('Crystal product telemetry write failed.', error);
+  }
+}
+
+export async function saveForecastCardToLibrary(
+  userId: string,
+  query: string,
+  context: ForecastResolvedContext,
+  card: CardData,
+  options: CardLibraryEventOptions = {}
+) {
   const lineageId = createForecastLineageId(query, context);
   const cardRef = doc(db, 'users', userId, 'cards', lineageId);
   const versionId = card.card_id || `${Date.now()}`;
@@ -62,9 +87,24 @@ export async function saveForecastCardToLibrary(userId: string, query: string, c
       createdAt: serverTimestamp(),
       parent_lineage_id: lineageId,
       version_saved_at: serverTimestamp(),
-    },
+      },
     { merge: true }
   );
+
+  await recordProductEvent(userId, {
+    event_type: 'save',
+    event_scope: snapshot.exists() ? 'version_update' : 'new_lineage',
+    source_view: options.sourceView || 'forecast',
+    lineage_id: lineageId,
+    version_id: versionId,
+    public_slug: card.public_slug || '',
+    domain_id: context.domainId,
+    entity: context.entity,
+    geography: context.geography,
+    horizon: context.horizon,
+    card_state_ui: card.card_state === 'blocked' ? 'coverage_gap' : card.card_state || 'published',
+    query_text: query,
+  });
 
   return lineageId;
 }
@@ -75,8 +115,8 @@ export async function isForecastCardSaved(userId: string, query: string, context
   return snapshot.exists();
 }
 
-export async function followForecastEntity(userId: string, context: ForecastResolvedContext) {
-  const followId = `follow_${simpleHash(`${context.entity}|${context.domainId}|${context.geography}`)}`;
+export async function followForecastEntity(userId: string, context: ForecastResolvedContext, options: CardLibraryEventOptions = {}) {
+  const followId = createForecastFollowId(context);
   const followRef = doc(db, 'users', userId, 'watchlist', followId);
   const snapshot = await getDoc(followRef);
 
@@ -105,9 +145,26 @@ export async function followForecastEntity(userId: string, context: ForecastReso
       : {
           ...payload,
           createdAt: serverTimestamp(),
-        },
+      },
     { merge: true }
   );
 
+  await recordProductEvent(userId, {
+    event_type: 'follow',
+    event_scope: snapshot.exists() ? 'follow_refresh' : 'new_follow',
+    source_view: options.sourceView || 'forecast',
+    follow_id: followId,
+    domain_id: context.domainId,
+    entity: context.entity,
+    geography: context.geography,
+    horizon: context.horizon,
+  });
+
   return followId;
+}
+
+export async function isForecastEntityFollowed(userId: string, context: ForecastResolvedContext) {
+  const followId = createForecastFollowId(context);
+  const snapshot = await getDoc(doc(db, 'users', userId, 'watchlist', followId));
+  return snapshot.exists();
 }

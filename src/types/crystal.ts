@@ -108,6 +108,21 @@ export interface PublicationBasis {
   notes?: string[];
 }
 
+export interface ResolvedTimeWindow {
+  label: string;
+  start_date: string;
+  end_date: string;
+}
+
+export interface TemporalContext {
+  as_of_utc: string;
+  as_of_timezone: string;
+  as_of_local_date: string;
+  uses_relative_time: boolean;
+  relative_phrase?: string;
+  resolved_time_window?: ResolvedTimeWindow | null;
+}
+
 export interface ResolutionTarget {
   resolution_id: string;
   target_type: 'binary_outcome' | 'directional_range';
@@ -187,6 +202,12 @@ export interface CardData {
   title: string;
   summary: string;
   verdict?: string;
+  temporal_context?: TemporalContext | null;
+  run_as_of_utc?: string;
+  run_as_of_timezone?: string;
+  run_as_of_local_date?: string;
+  relative_time_phrase?: string;
+  resolved_time_window?: ResolvedTimeWindow | null;
   primary_call?: string;
   binary_contract?: BinaryContract | null;
   probability_split?: ProbabilitySplit | null;

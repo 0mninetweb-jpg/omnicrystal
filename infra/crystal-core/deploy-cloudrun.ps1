@@ -18,6 +18,7 @@ param(
   [string]$LlmModelCopy = "",
   [string]$SportsProvider = "",
   [string]$SportsProviderBaseUrl = "",
+  [string]$TheSportsDbApiKey = "",
   [string]$ApiFootballKey = "",
   [string]$FredApiKey = "",
   [string]$NominatimBaseUrl = "https://nominatim.openstreetmap.org",
@@ -56,9 +57,19 @@ function Get-GcloudExecutable {
 
 function Invoke-GcloudChecked {
   param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Args)
-  & $gcloud @Args
-  if ($LASTEXITCODE -ne 0) {
-    throw "gcloud command failed: gcloud $($Args -join ' ')"
+  $previousPreference = $ErrorActionPreference
+  try {
+    $ErrorActionPreference = "Continue"
+    $output = & $gcloud @Args 2>&1
+    $exitCode = $LASTEXITCODE
+    if ($output) {
+      $output | ForEach-Object { Write-Host $_ }
+    }
+    if ($exitCode -ne 0) {
+      throw "gcloud command failed: gcloud $($Args -join ' ')"
+    }
+  } finally {
+    $ErrorActionPreference = $previousPreference
   }
 }
 
@@ -141,6 +152,7 @@ $serviceEnvEntries = @{
   "LLM_MODEL_COPY" = $LlmModelCopy
   "SPORTS_PROVIDER" = $SportsProvider
   "SPORTS_PROVIDER_BASE_URL" = $SportsProviderBaseUrl
+  "THE_SPORTS_DB_API_KEY" = $TheSportsDbApiKey
   "API_FOOTBALL_KEY" = $ApiFootballKey
   "FRED_API_KEY" = $FredApiKey
   "NOMINATIM_BASE_URL" = $NominatimBaseUrl
@@ -219,6 +231,7 @@ $jobEnvEntries = @{
   "LLM_MODEL_COPY" = $LlmModelCopy
   "SPORTS_PROVIDER" = $SportsProvider
   "SPORTS_PROVIDER_BASE_URL" = $SportsProviderBaseUrl
+  "THE_SPORTS_DB_API_KEY" = $TheSportsDbApiKey
   "API_FOOTBALL_KEY" = $ApiFootballKey
   "FRED_API_KEY" = $FredApiKey
   "NOMINATIM_BASE_URL" = $NominatimBaseUrl
@@ -284,3 +297,4 @@ Write-Host "  CRYSTAL_CORE_INVOKER_AUDIENCE=$serviceUrl"
 Write-Host "  CRYSTAL_CORE_EVAL_JOB_NAME=$JobName"
 Write-Host "  SPORTS_PROVIDER=$SportsProvider"
 Write-Host "  SPORTS_PROVIDER_BASE_URL=$SportsProviderBaseUrl"
+Write-Host "  THE_SPORTS_DB_API_KEY=$(if ($TheSportsDbApiKey) { '[set]' } else { '[default-or-empty]' })"

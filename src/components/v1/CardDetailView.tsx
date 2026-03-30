@@ -1,5 +1,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
+import { sanitizeDisplayText } from '../../lib/displayText';
+import { getForecastMetaCopy } from '../../lib/forecastV1';
 import type { GalleryCardRecord, GalleryVersionRecord } from './galleryTypes';
 import { TrustStrip } from './TrustStrip';
 import { EvidenceDrawer } from './EvidenceDrawer';
@@ -19,25 +21,38 @@ export function CardDetailView({ card, versions, onOpenCompare }: CardDetailView
     );
   }
 
+  const meta = getForecastMetaCopy(card);
+  const title = sanitizeDisplayText(card.title, 'Crystal forecast');
+  const summary = sanitizeDisplayText(card.summary, 'No summary available yet.');
+  const primaryOutcome = sanitizeDisplayText(card.verdict || card.summary, summary);
+
   return (
     <section className="space-y-5">
       <article className="rounded-[32px] border border-slate-200 bg-white p-6 shadow-[0_18px_44px_rgba(15,23,42,0.05)]">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-              {card.entity_label || 'Auto'} · {card.horizon_label || '30 days'}
+              {sanitizeDisplayText(card.entity_label, 'Auto')} / {sanitizeDisplayText(card.horizon_label, '30 days')}
             </div>
-            <h2 className="mt-3 text-2xl font-semibold tracking-[-0.03em] text-slate-950">{card.title}</h2>
-            <p className="mt-3 text-sm leading-7 text-slate-600">{card.summary}</p>
+            {meta.runDateSummary ? <div className="mt-2 text-sm font-medium text-slate-600">Forecast run {meta.runDateSummary}</div> : null}
+            {meta.relativeTimeSummary ? <div className="mt-1 text-sm text-slate-500">{meta.relativeTimeSummary}</div> : null}
+            <h2 className="mt-3 text-2xl font-semibold tracking-[-0.03em] text-slate-950">{title}</h2>
+            <p className="mt-3 text-sm leading-7 text-slate-600">{summary}</p>
           </div>
-          <button
-            type="button"
-            onClick={onOpenCompare}
-            disabled={versions.length < 2}
-            className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:opacity-50"
-          >
-            Compare versions
-          </button>
+          <div className="flex flex-col items-end gap-2">
+            <button
+              type="button"
+              onClick={onOpenCompare}
+              disabled={versions.length < 2}
+              title={versions.length < 2 ? 'Save at least two versions to compare changes.' : 'Compare the two latest saved versions.'}
+              className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Compare versions
+            </button>
+            {versions.length < 2 ? (
+              <div className="text-xs font-medium text-slate-500">Save at least two versions to unlock compare.</div>
+            ) : null}
+          </div>
         </div>
 
         {card.public_slug ? (
@@ -58,14 +73,15 @@ export function CardDetailView({ card, versions, onOpenCompare }: CardDetailView
 
         <div className="mt-5 rounded-[28px] bg-slate-950 p-5 text-white">
           <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-300">Primary outcome</div>
-          <div className="mt-3 text-xl font-semibold tracking-[-0.03em]">{card.verdict || card.summary}</div>
+          <div className="mt-3 text-xl font-semibold tracking-[-0.03em]">{primaryOutcome}</div>
         </div>
 
         <TrustStrip
           className="mt-5"
           trustLayer={card.trust_layer}
-          freshnessSummary={card.evidence_drawer?.freshness_summary?.as_of_utc || undefined}
-          provenanceSummary={card.trust_layer?.provenance_summary?.verification_level}
+          freshnessSummary={meta.freshnessSummary}
+          provenanceSummary={meta.provenanceSummary}
+          runDateSummary={meta.runDateSummary}
         />
 
         <div className="mt-5">
@@ -91,7 +107,7 @@ export function CardDetailView({ card, versions, onOpenCompare }: CardDetailView
                   {(version.card_state_ui || version.card_state || 'published').replace(/_/g, ' ')}
                 </div>
               </div>
-              <div className="mt-2 text-sm leading-7 text-slate-700">{version.summary}</div>
+              <div className="mt-2 text-sm leading-7 text-slate-700">{sanitizeDisplayText(version.summary, 'No summary available yet.')}</div>
             </div>
           ))}
         </div>

@@ -4,11 +4,20 @@ function uniqueStrings(values = []) {
   return [...new Set((Array.isArray(values) ? values : []).filter((item) => typeof item === "string" && item.trim()))];
 }
 
+const FUSION_ELIGIBILITY_THRESHOLDS = {
+  quality_score: 0.72,
+  graph_coverage: 0.68,
+  agent_convergence: 0.62,
+};
+
 function shouldRunSimulationDecisionGate({ normalizedQuery = {}, variableSelectionPack = {}, verifiedEvidencePack = {} }) {
+  const simulationContext = verifiedEvidencePack?.simulation_context || {};
   const domainCorpus = [
     safeText(normalizedQuery.primary_domain_id),
     safeText(normalizedQuery.resolution_frame),
     safeText(normalizedQuery.original_query),
+    safeText(simulationContext.domain_family),
+    safeText(simulationContext.decision_frame),
   ]
     .join(" ")
     .toLowerCase();
@@ -22,6 +31,9 @@ function shouldRunSimulationDecisionGate({ normalizedQuery = {}, variableSelecti
   const liveSignalCount = Array.isArray(verifiedEvidencePack.live_signals) ? verifiedEvidencePack.live_signals.length : 0;
 
   const reasons = [];
+  if (/governance_timeline|geopolitics_conflict|long_run_analog|attention_narrative|culture_event_pressure|personal_tradeoff/.test(domainCorpus)) {
+    reasons.push("typed_scenario_family");
+  }
   if (/governance|policy|geopolit|public_timeline|media|city|housing|travel/.test(domainCorpus)) {
     reasons.push("domain_system_dynamics");
   }
@@ -116,6 +128,15 @@ function buildMiroFishOutputContract(digest = {}, gate = { enabled: false, reaso
         top_3_watch_items: [],
         recommended_fusion_weight: 0,
       },
+      typed_output: {
+        regime_shift_risk: 0,
+        actor_dependency: 0,
+        cascade_pressure: 0,
+        trigger_map: [],
+        invalidation_map: [],
+        scenario_split_cause: [],
+      },
+      fusion_eligible: false,
     };
   }
 
@@ -126,6 +147,18 @@ function buildMiroFishOutputContract(digest = {}, gate = { enabled: false, reaso
       0.28
     ).toFixed(3)
   );
+  const fusionEligible =
+    clamp01(digest.quality_score, 0) >= FUSION_ELIGIBILITY_THRESHOLDS.quality_score &&
+    clamp01(digest.graph_coverage, 0) >= FUSION_ELIGIBILITY_THRESHOLDS.graph_coverage &&
+    clamp01(digest.agent_convergence, 0) >= FUSION_ELIGIBILITY_THRESHOLDS.agent_convergence;
+  const typedOutput = {
+    regime_shift_risk: Number(clamp01(digest.regime_shift_risk, fragilityScore).toFixed(3)),
+    actor_dependency: Number(clamp01(digest.actor_dependency, 0.48).toFixed(3)),
+    cascade_pressure: Number(clamp01(digest.cascade_pressure, uncertaintyPressure).toFixed(3)),
+    trigger_map: uniqueStrings(digest.trigger_map || []).slice(0, 5),
+    invalidation_map: uniqueStrings(digest.invalidation_map || []).slice(0, 5),
+    scenario_split_cause: uniqueStrings(digest.scenario_split_cause || []).slice(0, 4),
+  };
 
   return {
     simulation_status: {
@@ -171,11 +204,11 @@ function buildMiroFishOutputContract(digest = {}, gate = { enabled: false, reaso
     },
     confidence_modifiers: {
       confidence_upward_modifiers:
-        digest.confidence_delta > 0
+        fusionEligible && digest.confidence_delta > 0
           ? [`Simulation convergence improved confidence by ${Math.round(digest.confidence_delta * 100)} points.`]
           : [],
       confidence_downward_modifiers:
-        digest.confidence_delta < 0 || uncertaintyPressure > 0.4
+        fusionEligible && (digest.confidence_delta < 0 || uncertaintyPressure > 0.4)
           ? uniqueStrings([
               digest.confidence_delta < 0 ? `Simulation reduced confidence by ${Math.round(Math.abs(digest.confidence_delta) * 100)} points.` : "",
               uncertaintyPressure > 0.4 ? "Scenario branching remains fragile." : "",
@@ -189,8 +222,12 @@ function buildMiroFishOutputContract(digest = {}, gate = { enabled: false, reaso
       top_3_takeaways: uniqueStrings(digest.pivotal_actors || []).slice(0, 3),
       top_3_risks: uniqueStrings(digest.tensions || []).slice(0, 3),
       top_3_watch_items: uniqueStrings(digest.intervention_points || []).slice(0, 3),
-      recommended_fusion_weight: Number(clamp01(digest.quality_score * 0.6 + digest.graph_coverage * 0.4, 0.42).toFixed(3)),
+      recommended_fusion_weight: fusionEligible
+        ? Number(clamp01(digest.quality_score * 0.6 + digest.graph_coverage * 0.4, 0.42).toFixed(3))
+        : 0,
     },
+    typed_output: typedOutput,
+    fusion_eligible: fusionEligible,
   };
 }
 
@@ -200,9 +237,11 @@ function applySimulationFusion(rawPrediction = {}, simulationContract = null) {
   }
 
   const confidencePressure =
-    (simulationContract.confidence_modifiers?.confidence_upward_modifiers?.length || 0) * 0.03 -
-    (simulationContract.confidence_modifiers?.confidence_downward_modifiers?.length || 0) * 0.04 -
-    clamp01(simulationContract.confidence_modifiers?.uncertainty_pressure, 0) * 0.05;
+    simulationContract.fusion_eligible === true
+      ? (simulationContract.confidence_modifiers?.confidence_upward_modifiers?.length || 0) * 0.03 -
+        (simulationContract.confidence_modifiers?.confidence_downward_modifiers?.length || 0) * 0.04 -
+        clamp01(simulationContract.confidence_modifiers?.uncertainty_pressure, 0) * 0.05
+      : 0;
 
   const next = {
     ...rawPrediction,
@@ -225,6 +264,7 @@ function applySimulationFusion(rawPrediction = {}, simulationContract = null) {
       ...((Array.isArray(simulationContract.trigger_points) ? simulationContract.trigger_points : []).slice(0, 3)),
     ]).slice(0, 4),
     simulation_summary_for_fusion: simulationContract.simulation_summary_for_fusion,
+    simulation_typed_output: simulationContract.typed_output,
     confidence_score:
       rawPrediction.confidence_score == null
         ? undefined

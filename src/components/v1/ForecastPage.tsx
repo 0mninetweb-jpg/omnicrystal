@@ -16,7 +16,7 @@ import {
   resolveForecastContext,
 } from '../../lib/forecastV1';
 import { isFeatureEnabled } from '../../lib/featureFlags';
-import { followForecastEntity, isForecastCardSaved, saveForecastCardToLibrary } from '../../lib/cardLibrary';
+import { followForecastEntity, isForecastCardSaved, isForecastEntityFollowed, saveForecastCardToLibrary } from '../../lib/cardLibrary';
 import {
   compileQuery,
   compileQueryPublic,
@@ -52,6 +52,7 @@ export function ForecastPage({ user, onLogin }: ForecastPageProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
+  const [isFollowed, setIsFollowed] = useState(false);
   const [isFollowing, setIsFollowing] = useState(false);
   const initialRunRef = useRef(false);
 
@@ -75,6 +76,15 @@ export function ForecastPage({ user, onLogin }: ForecastPageProps) {
 
     void isForecastCardSaved(user.uid, query, context).then(setIsSaved).catch(() => setIsSaved(false));
   }, [context, currentCard, query, user?.uid]);
+
+  useEffect(() => {
+    if (!context || !user?.uid) {
+      setIsFollowed(false);
+      return;
+    }
+
+    void isForecastEntityFollowed(user.uid, context).then(setIsFollowed).catch(() => setIsFollowed(false));
+  }, [context, user?.uid]);
 
   useEffect(() => {
     if (!initialQuery || initialRunRef.current) return;
@@ -284,7 +294,7 @@ export function ForecastPage({ user, onLogin }: ForecastPageProps) {
     }
     setIsSaving(true);
     try {
-      await saveForecastCardToLibrary(user.uid, query, context, currentCard);
+      await saveForecastCardToLibrary(user.uid, query, context, currentCard, { sourceView: 'forecast' });
       setIsSaved(true);
     } finally {
       setIsSaving(false);
@@ -299,7 +309,8 @@ export function ForecastPage({ user, onLogin }: ForecastPageProps) {
     }
     setIsFollowing(true);
     try {
-      await followForecastEntity(user.uid, context);
+      await followForecastEntity(user.uid, context, { sourceView: 'forecast' });
+      setIsFollowed(true);
     } finally {
       setIsFollowing(false);
     }
@@ -390,6 +401,7 @@ export function ForecastPage({ user, onLogin }: ForecastPageProps) {
             isAuthenticated={isAuthenticated}
             isSaved={isSaved}
             isSaving={isSaving}
+            isFollowed={isFollowed}
             isFollowing={isFollowing}
             onSave={handleSave}
             onFollow={handleFollow}

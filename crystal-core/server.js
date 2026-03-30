@@ -69,6 +69,7 @@ function buildRunSeedPatch(runId, payload = {}) {
     query_text: queryText,
     query_plan: queryPlan,
     user_context: payload.userContext || null,
+    request_time_zone: safeText(payload.requestTimeZone || payload.timeZone),
     engine: safeText(payload.engine, "extended"),
     plan: safeText(payload.plan, "free"),
     runtime_transport: safeText(payload.runtimeTransport, "remote"),
@@ -115,6 +116,7 @@ function sanitizeRun(runDoc = {}) {
     current_stage: safeText(runDoc.current_stage, "created"),
     query_text: safeText(runDoc.query_text),
     query_plan: serializeApiValue(runDoc.query_plan || null),
+    request_time_zone: safeText(runDoc.request_time_zone),
     source_view: safeText(runDoc.source_view),
     engine: safeText(runDoc.engine, "extended"),
     plan: safeText(runDoc.plan, "free"),
@@ -174,6 +176,9 @@ async function prepareRunForEnqueue(runId, payload = {}, existingRun = null) {
   }
   if (!safeText(existingRun.plan) && safeText(seedPatch.plan)) {
     mergePatch.plan = seedPatch.plan;
+  }
+  if (!safeText(existingRun.request_time_zone) && safeText(seedPatch.request_time_zone)) {
+    mergePatch.request_time_zone = seedPatch.request_time_zone;
   }
   if (!existingRun.created_at) {
     mergePatch.created_at = seedPatch.created_at;
@@ -361,6 +366,7 @@ async function enqueueForecastRun(req, runDoc = {}) {
       queryText: runDoc.query_text,
       queryPlan: runDoc.query_plan || {},
       userContext: runDoc.user_context || null,
+      requestTimeZone: safeText(runDoc.request_time_zone),
       uid: runDoc.uid || null,
       visibility: safeText(runDoc.visibility, "private"),
       publicAccessToken: runDoc.access_token || null,
@@ -455,7 +461,10 @@ app.get("/health", async (req, res) => {
 app.post("/v1/compile", async (req, res) => {
   try {
     const queryText = typeof req.body?.query === "string" ? req.body.query : "";
-    const queryPlan = await runtime.compileQuery(queryText);
+    const queryPlan = await runtime.compileQuery(queryText, {
+      timeZone: safeText(req.body?.timeZone),
+      asOfUtc: safeText(req.body?.asOfUtc),
+    });
     res.json({
       ok: true,
       query_plan: queryPlan,
@@ -564,6 +573,7 @@ app.post("/v1/internal/execute/:runId", async (req, res) => {
       queryText: runDoc.query_text,
       queryPlan: runDoc.query_plan || {},
       userContext: runDoc.user_context || null,
+      requestTimeZone: safeText(runDoc.request_time_zone),
       uid: runDoc.uid || null,
       visibility: safeText(runDoc.visibility, "private"),
       publicAccessToken: runDoc.access_token || null,

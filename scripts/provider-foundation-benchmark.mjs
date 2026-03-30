@@ -69,6 +69,7 @@ const TARGET_RUNTIME_PROVIDER_IDS = [
   "polymarket_public",
   "open_meteo",
   "fred_api",
+  "thesportsdb_public",
   "api_football_optional",
   "nominatim",
   "overpass",

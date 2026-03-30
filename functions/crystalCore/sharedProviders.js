@@ -3,7 +3,7 @@ const gtfsRealtimeBindings = require("gtfs-realtime-bindings");
 const Papa = require("papaparse");
 
 const { clamp01, safeText } = require("../predictionCore");
-const { getSportsRuntimeHealth } = require("../sportsData");
+const { getSportsProviderStates } = require("../sportsData");
 
 const DEFAULT_NOMINATIM_BASE_URL = "https://nominatim.openstreetmap.org";
 const DEFAULT_OVERPASS_BASE_URL = "https://overpass-api.de/api/interpreter";
@@ -33,6 +33,9 @@ const SHARED_IMPLEMENTED_SOURCE_IDS = [
   "eurostat_api",
   "oecd_api",
   "eia_api",
+  "acled",
+  "private_listing_feed",
+  "thesportsdb_public",
   "api_football_optional",
 ];
 
@@ -77,6 +80,21 @@ function buildQueryCorpus(queryText = "", normalizedQuery = {}, domainConfig = {
       normalizedQuery?.governing_entity,
       domainConfig?.domain_id,
       domainConfig?.summary,
+      ...(Array.isArray(normalizedQuery?.entities) ? normalizedQuery.entities.map((entity) => safeText(entity?.label)) : []),
+    ]
+      .filter(Boolean)
+      .join(" ")
+  );
+}
+
+function buildIntentCorpus(queryText = "", normalizedQuery = {}) {
+  return normalizeText(
+    [
+      queryText,
+      normalizedQuery?.original_query,
+      normalizedQuery?.resolution_frame,
+      normalizedQuery?.jurisdiction,
+      normalizedQuery?.governing_entity,
       ...(Array.isArray(normalizedQuery?.entities) ? normalizedQuery.entities.map((entity) => safeText(entity?.label)) : []),
     ]
       .filter(Boolean)
@@ -201,21 +219,35 @@ function buildPublicProviderStatus(sourceId, overrides = {}) {
 }
 
 function getProviderRuntimeStatus(sourceId) {
+  if (sourceId === "thesportsdb_public") {
+    return (
+      getSportsProviderStates().find((provider) => provider.source_id === "thesportsdb_public") || {
+        source_id: sourceId,
+        title: "TheSportsDB",
+        category: "sports",
+        access_profile: "public",
+        implementation_status: "implemented",
+        configured: true,
+        available: true,
+        status: "available",
+      }
+    );
+  }
+
   if (sourceId === "api_football_optional") {
-    const sportsHealth = getSportsRuntimeHealth();
-    return {
-      source_id: sourceId,
-      title: "API-Football",
-      category: "sports",
-      access_profile: "optional_non_default",
-      implementation_status: "implemented",
-      configured: sportsHealth.configured === true,
-      available: sportsHealth.available === true,
-      status: sportsHealth.configured ? "available" : "config_missing",
-      provider: safeText(sportsHealth.provider),
-      base_url: safeText(sportsHealth.base_url),
-      notes: sportsHealth.configured ? [] : ["API_FOOTBALL_KEY is not configured in this runtime."],
-    };
+    return (
+      getSportsProviderStates().find((provider) => provider.source_id === "api_football_optional") || {
+        source_id: sourceId,
+        title: "API-Football",
+        category: "sports",
+        access_profile: "optional_non_default",
+        implementation_status: "implemented",
+        configured: false,
+        available: false,
+        status: "config_missing",
+        notes: ["API_FOOTBALL_KEY is optional now and only used as a sports enhancer when configured."],
+      }
+    );
   }
 
   if (sourceId === "fred_api") {
@@ -260,6 +292,40 @@ function getProviderRuntimeStatus(sourceId) {
       available: configured,
       status: configured ? "available" : "config_missing",
       notes: configured ? [] : ["EIA_API_KEY is required to activate EIA in runtime."],
+    };
+  }
+
+  if (sourceId === "acled") {
+    const configured = Boolean(readConfiguredCredential(process.env.ACLED_API_KEY));
+    return {
+      source_id: sourceId,
+      title: "ACLED",
+      category: "geopolitics",
+      access_profile: "targeted_optional",
+      implementation_status: "scaffolded",
+      configured,
+      available: configured,
+      status: configured ? "available" : "optional_source_missing",
+      notes: configured ? [] : ["ACLED_API_KEY is optional in Batch 3 and only used for geopolitics depth when configured."],
+    };
+  }
+
+  if (sourceId === "private_listing_feed") {
+    const configured = Boolean(
+      readConfiguredCredential(process.env.PRIVATE_LISTING_FEED_TOKEN) || safeText(process.env.PRIVATE_LISTING_FEED_URL)
+    );
+    return {
+      source_id: sourceId,
+      title: "Private Listing Feed",
+      category: "housing",
+      access_profile: "private_optional",
+      implementation_status: "scaffolded",
+      configured,
+      available: configured,
+      status: configured ? "available" : "optional_source_missing",
+      notes: configured
+        ? []
+        : ["PRIVATE_LISTING_FEED_TOKEN or PRIVATE_LISTING_FEED_URL can be added later for housing and personal-finance depth."],
     };
   }
 
@@ -377,33 +443,103 @@ function buildProviderStatesForUsage({ requiredSources = [], optionalSources = [
 }
 
 function isGeoLikeQuery(queryText = "", normalizedQuery = {}, domainConfig = {}) {
-  const corpus = buildQueryCorpus(queryText, normalizedQuery, domainConfig);
-  return /city|housing|travel|mobility|tourism|rome|roma|milan|tokyo|neighborhood|zone|district|urban|visit|trip|airport/.test(corpus);
+  const corpus = buildIntentCorpus(queryText, normalizedQuery);
+  const hasLocationToken = /\b(rome|roma|milan|tokyo|lisbon|italy|italia|france|germany|spain|europe|eu)\b/.test(corpus);
+  const hasGeoIntent = /\b(city|housing|rent|rents|rental|real estate|property|travel|mobility|tourism|transit|accessibility|commute|neighborhood|zone|district|urban|visit|trip|airport|stadium|safety|incident|culture|event|crowding|venue|infrastructure|logistics|corridor|network|connectivity|public health|hydrology|watershed|river basin|basin|station area|flood plain|shoreline)\b|air quality|pollution|exposure|event pressure|san siro/.test(
+    corpus
+  );
+  return hasGeoIntent || (hasLocationToken && (/\b(travel|mobility|tourism|transit|accessibility|commute|housing|rent|rental|real estate|urban|stadium|safety|incident|culture|event|crowding|venue|infrastructure|logistics|corridor|network|connectivity|public health|hydrology|watershed|river basin|basin|station area)\b/.test(corpus) || /air quality|pollution|exposure|event pressure|san siro/.test(corpus)));
 }
 
 function isMobilityLikeQuery(queryText = "", normalizedQuery = {}, domainConfig = {}) {
-  const corpus = buildQueryCorpus(queryText, normalizedQuery, domainConfig);
-  return /mobility|traffic|congestion|commute|transit|metro|bus|tram|train|gtfs|airport|flight|travel|corridor|accessibility/.test(corpus);
+  const corpus = buildIntentCorpus(queryText, normalizedQuery);
+  return /\b(mobility|traffic|congestion|commute|transit|metro|bus|tram|train|gtfs|airport|flight|travel|corridor|accessibility|infrastructure|logistics|reliability|network)\b|san siro/.test(corpus);
 }
 
 function isTravelLikeQuery(queryText = "", normalizedQuery = {}, domainConfig = {}) {
-  const corpus = buildQueryCorpus(queryText, normalizedQuery, domainConfig);
-  return /travel|trip|visit|tourism|airport|flight|hotel|destination|crowding|delay/.test(corpus);
+  const corpus = buildIntentCorpus(queryText, normalizedQuery);
+  return /\b(travel|trip|visit|tourism|airport|flight|hotel|destination|crowding|delay|window)\b|best time/.test(corpus);
 }
 
 function isMacroPublicDataQuery(queryText = "", normalizedQuery = {}, domainConfig = {}) {
-  const corpus = buildQueryCorpus(queryText, normalizedQuery, domainConfig);
-  return /macro|inflation|jobs|labor|unemployment|cost of living|housing|demographics|migration|industry|economy|gdp|wages|affordability/.test(corpus);
+  const corpus = buildIntentCorpus(queryText, normalizedQuery);
+  return /\b(macro|inflation|job|jobs|offer|career|labor|labour|unemployment|demographics|migration|industry|economy|gdp|wages|salary|salaries|affordability|trade|supply|manufacturing|productivity|rates|yield|liquidity|cpi|ppi|rent|rents|housing|mortgage|sector|shipping|bottleneck|bottlenecks)\b|cost of living|household price pressure|business cycle|food security|grocery basket|food prices|staple price|staple prices|central bank|supply chain/.test(
+    corpus
+  );
 }
 
 function isEnergyLikeQuery(queryText = "", normalizedQuery = {}, domainConfig = {}) {
-  const corpus = buildQueryCorpus(queryText, normalizedQuery, domainConfig);
-  return /energy|oil|gas|electricity|utility|utilities|power|grid/.test(corpus);
+  const corpus = buildIntentCorpus(queryText, normalizedQuery);
+  return /\b(energy|oil|gas|electricity|utility|utilities|power|grid|tariff|outage)\b|utility bill|utility price|power price/.test(corpus);
 }
 
 function isEnvironmentLikeQuery(queryText = "", normalizedQuery = {}, domainConfig = {}) {
-  const corpus = buildQueryCorpus(queryText, normalizedQuery, domainConfig);
-  return /air quality|pollution|pm2|pm10|exposure|public health|heat|allergen|smog|environment/.test(corpus);
+  const corpus = buildIntentCorpus(queryText, normalizedQuery);
+  return /\b(pm2|pm10|exposure|heat|allergen|smog|environment)\b|air quality|pollution|public health/.test(corpus);
+}
+
+function isWeatherBackboneDomain(domainId = "") {
+  return [
+    "A.1.weather_and_atmosphere",
+    "A.2.climate_hazards_and_disaster_risk",
+    "A.3.water_and_hydrology_signals",
+    "A.6.agriculture_and_seasonal_production",
+  ].includes(safeText(domainId));
+}
+
+function isAttentionStackDomain(domainId = "") {
+  return [
+    "A.0.general.general_forecast",
+    "A.16.consumer_sentiment_and_attention_economics",
+    "A.17.technology_adoption_and_digital_pulse",
+    "A.18.education_system_and_skills_pipeline",
+    "B.3.1.love_and_social_outcomes",
+    "B.3.2.study_and_exams_outcomes",
+    "C.1.attention_waves",
+    "C.3.hype_curve_tracker",
+    "C.4.global_quote_stream",
+  ].includes(safeText(domainId));
+}
+
+function isDerivedDecisionDomain(domainId = "") {
+  return [
+    "B.3.3.work_and_career_outcomes",
+    "B.3.4.personal_finance_outcomes",
+    "B.3.5.business_idea_outcomes",
+    "B.3.7.travel_personal_outcomes",
+    "B.3.8.personal_decisions_and_tradeoffs",
+  ].includes(safeText(domainId));
+}
+
+function getMacroPrimaryPublicBackbone(corpus = "", domainId = "") {
+  const normalizedDomainId = safeText(domainId);
+  if (/demographic|migration|population|development|global|world|cross-country|emerging/.test(corpus) || normalizedDomainId === "A.19.demographics_and_migration_pressure") {
+    return "world_bank_api";
+  }
+  if (/jobs|labor|labour|unemployment|salary|wage|industry|manufacturing|business cycle|productivity/.test(corpus) && !/\bitaly|italia|europe|eu|euro area|eurozone|france|germany|spain\b/.test(corpus)) {
+    return "oecd_api";
+  }
+  if (
+    /\b(italy|italia|rome|roma|milan|europe|eu|euro area|eurozone|france|germany|spain|ecb)\b/.test(corpus) ||
+    [
+      "A.11.cost_of_living_and_price_pressure",
+      "A.12.housing_and_real_estate_signals",
+      "A.14.macro_economy_and_cycles",
+      "A.15.jobs_and_labor_market_signals",
+      "A.21.trade_supply_and_disruption_signals",
+      "A.22.industry_and_business_cycles",
+    ].includes(normalizedDomainId)
+  ) {
+    return "eurostat_api";
+  }
+  if (/jobs|labor|labour|unemployment|salary|wage|industry|manufacturing|business cycle|productivity/.test(corpus)) {
+    return "oecd_api";
+  }
+  return "world_bank_api";
+}
+
+function isLiveProviderAvailable(sourceId = "") {
+  return getProviderRuntimeStatus(sourceId).available === true;
 }
 
 function buildRequiredSourcesForQuery({
@@ -423,10 +559,77 @@ function buildRequiredSourcesForQuery({
   const macroLike = isMacroPublicDataQuery(queryText, normalizedQuery, domainConfig);
   const energyLike = isEnergyLikeQuery(queryText, normalizedQuery, domainConfig);
   const environmentLike = isEnvironmentLikeQuery(queryText, normalizedQuery, domainConfig);
-  const corpus = buildQueryCorpus(queryText, normalizedQuery, domainConfig);
+  const corpus = buildIntentCorpus(queryText, normalizedQuery);
+  const domainId = safeText(domainConfig?.domain_id);
+  const primaryLocation = getPrimaryLocation(normalizedQuery);
+  const weatherBackboneDomain = isWeatherBackboneDomain(domainId);
+  const attentionStackDomain = isAttentionStackDomain(domainId);
+  const derivedDecisionDomain = isDerivedDecisionDomain(domainId);
+  const macroPrimaryBackbone = getMacroPrimaryPublicBackbone(corpus, domainId);
+  const foodLike = domainId === "A.5.food_security_and_staple_prices" || /\b(food security|staple price|staple prices|grocery basket|food prices|affordability shock|households)\b/.test(corpus);
+  const housingLike = domainId === "A.12.housing_and_real_estate_signals" || /\b(rent|rents|rental|housing|real estate|property|mortgage|apartment)\b/.test(corpus);
+  const infrastructureLike = domainId === "A.20.infrastructure_and_logistics_reliability" || /\b(infrastructure|logistics|corridor|freight|network outage|connectivity reliability|connectivity|network quality)\b/.test(corpus);
+  const geopoliticalConflictLike = domainId === "A.25.geopolitics_and_conflict_dynamics" || /\b(conflict|war|ceasefire|sanction|military|ukraine|russia|taiwan|geopolitic|escalat)\b/.test(corpus);
+  const analogLike = domainId === "A.26.human_history_and_long_run_analogs" || /\b(historical analog|historical analogue|analog for|analogue for|long-run analog|long run analog|recurrence|regime similarity)\b/.test(corpus);
+  const publicHealthLike = domainId === "A.28.public_health_and_environmental_exposure" || /\b(public health|illness|hospital|virus|flu|winter risk|exposure burden)\b/.test(corpus);
+  const governanceTimelineLike =
+    domainId === "A.24.governance_policy_and_public_timeline" ||
+    /\b(election volatility|budget vote|coalition|referendum|policy timeline|government survive|public timeline|governance)\b/.test(corpus);
+  const weatherAtmosphereLike =
+    domainId === "A.1.weather_and_atmosphere" ||
+    /\b(rain|rainy|storm|temperature|forecast|weekend weather|wind|humidity|heatwave|cold snap)\b/.test(corpus);
+  const climateHazardLike =
+    domainId === "A.2.climate_hazards_and_disaster_risk" ||
+    /\b(flood|wildfire|drought|hazard window|disaster risk|heatwave risk|storm surge|landslide)\b/.test(corpus);
+  const waterHydrologyLike =
+    domainId === "A.3.water_and_hydrology_signals" ||
+    /\b(water stress|hydrology|watershed|reservoir|river basin|po basin|aquifer|runoff)\b/.test(corpus);
+  const environmentExposureLike =
+    domainId === "A.4.environment_and_exposure" ||
+    /\b(air quality exposure|pollution exposure|heat island|environmental exposure|smog)\b/.test(corpus);
+  const demographicMigrationLike =
+    domainId === "A.19.demographics_and_migration_pressure" ||
+    /\b(demographic|migration|population|aging|fertility|urbanization|age dependency|demographic pressure)\b/.test(corpus);
+  const safetyIncidentLike =
+    domainId === "A.27.safety_and_incident_risk" ||
+    /\b(safety risk|incident risk|station area|crime risk|crowd safety|incident pressure)\b/.test(corpus);
+  const connectivityReliabilityLike =
+    domainId === "A.10.connectivity_and_network_quality_signals" ||
+    /\b(connectivity reliability|network outage|network quality|signal outage|coverage reliability)\b/.test(corpus);
+  const workCareerLike = domainId === "B.3.3.work_and_career_outcomes" || /\b(job offer|new job|career move|salary trajectory|accept this offer|changing company|change my job)\b/.test(corpus);
+  const personalFinanceLike = domainId === "B.3.4.personal_finance_outcomes" || /\b(bitcoin|crypto|savings|mortgage|buy now|lock a mortgage|personal finance)\b/.test(corpus);
+  const businessIdeaLike = domainId === "B.3.5.business_idea_outcomes" || /\b(startup|start-up|runway|open a cafe|open a business|business idea|survive the next)\b/.test(corpus);
+  const personalTradeoffLike = domainId === "B.3.8.personal_decisions_and_tradeoffs" || /\b(should i move|move to|tradeoff|buy now or wait|rent now or wait|wait before)\b/.test(corpus);
+  const mobilityAccessibilityLike = domainId === "A.8.mobility_congestion_and_accessibility" || /\b(transit accessibility|accessibility pressure|mobility congestion|commute reliability)\b/.test(corpus);
+  const eventPressureLike = domainId === "C.2.event_pressure_forecast" || /\b(event pressure|concert crowding|stadium pressure|weekend event|queue|sold out|venue pressure|san siro)\b/.test(corpus);
+  const cultureEventLike = domainId === "A.30.culture_events_and_attention" || /\b(cultural buzz|culture buzz|festival buzz|concert buzz|event attention)\b/.test(corpus);
+  const householdPriceLike = domainId === "A.11.cost_of_living_and_price_pressure" || /\b(household price pressure|household bills|household affordability|cost of living)\b/.test(corpus);
+  const supplyTradeLike = domainId === "A.21.trade_supply_and_disruption_signals" || /\b(shipping|bottleneck|bottlenecks|supply chain|port congestion|freight)\b/.test(corpus);
+  const industryCycleLike = domainId === "A.22.industry_and_business_cycles" || /\b(business cycle|sector pressure|tech sector|industry demand)\b/.test(corpus);
+  const gtfsStaticLive = isLiveProviderAvailable("gtfs_static");
+  const gtfsRealtimeLive = isLiveProviderAvailable("gtfs_realtime");
+  const openskyLive = isLiveProviderAvailable("opensky");
+  const fredLive = isLiveProviderAvailable("fred_api");
+  const eiaLive = isLiveProviderAvailable("eia_api");
+  const openaqLive = isLiveProviderAvailable("openaq");
+  const acledLive = isLiveProviderAvailable("acled");
+  const privateListingLive = isLiveProviderAvailable("private_listing_feed");
+
+  if (
+    weatherBackboneDomain ||
+    /\b(weather|rain|storm|temperature|climate|hazard|flood|drought|seasonal|agriculture|wildfire)\b|water stress|crop stress|crop yield/.test(corpus)
+  ) {
+    requiredSources.push("open_meteo");
+  }
+  if (weatherAtmosphereLike && primaryLocation) {
+    optionalSources.push("nominatim");
+  }
 
   if (policyLike) {
     requiredSources.push("wikidata", "gdelt", "rss_allowlist");
+    if (governanceTimelineLike) {
+      requiredSources.push("google_trends");
+    }
     if (normalizedQuery?.binary_frame?.asks_binary_question) {
       requiredSources.push("polymarket_public");
     }
@@ -437,8 +640,8 @@ function buildRequiredSourcesForQuery({
     if (predictionMarketFrame) {
       requiredSources.push("polymarket_public");
     }
-    if (/rates|inflation|ecb|fed|macro|eurusd|fx|yield|liquidity/.test(corpus)) {
-      if (readConfiguredCredential(process.env.FRED_API_KEY)) {
+    if (/\b(rates|inflation|ecb|fed|macro|eurusd|fx|yield|liquidity|cpi|ppi)\b/.test(corpus)) {
+      if (fredLive) {
         requiredSources.push("fred_api");
       } else {
         optionalSources.push("fred_api");
@@ -450,26 +653,109 @@ function buildRequiredSourcesForQuery({
     requiredSources.push("nominatim", "overpass");
   }
 
-  if (mobilityLike) {
-    optionalSources.push("gtfs_static", "gtfs_realtime");
+  if (mobilityLike || mobilityAccessibilityLike || eventPressureLike || cultureEventLike || connectivityReliabilityLike) {
+    if (gtfsStaticLive) {
+      requiredSources.push("gtfs_static");
+    } else {
+      optionalSources.push("gtfs_static");
+    }
+    if ((connectivityReliabilityLike || infrastructureLike) && gtfsRealtimeLive) {
+      requiredSources.push("gtfs_realtime");
+    } else {
+      optionalSources.push("gtfs_realtime");
+    }
   }
 
   if (travelLike) {
-    requiredSources.push("opensky");
-    optionalSources.push("gtfs_static", "gtfs_realtime");
+    if (openskyLive) {
+      requiredSources.push("opensky");
+    } else {
+      optionalSources.push("opensky");
+    }
+    if (gtfsStaticLive) {
+      optionalSources.push("gtfs_static");
+    }
+    optionalSources.push("gtfs_realtime");
   }
 
   if (macroLike) {
-    requiredSources.push("world_bank_api", "eurostat_api", "oecd_api");
-    if (readConfiguredCredential(process.env.FRED_API_KEY)) {
+    requiredSources.push(macroPrimaryBackbone);
+    if (/\b(rates|inflation|liquidity|yield|ecb|fed|cpi|ppi|eurusd|fx|macro)\b/.test(corpus)) {
+      if (fredLive) {
+        requiredSources.push("fred_api");
+      } else {
+        optionalSources.push("fred_api");
+      }
+    }
+    ["world_bank_api", "eurostat_api", "oecd_api"]
+      .filter((sourceId) => sourceId !== macroPrimaryBackbone)
+      .forEach((sourceId) => optionalSources.push(sourceId));
+  }
+
+  if (foodLike) {
+    requiredSources.push("google_trends", macroPrimaryBackbone);
+    optionalSources.push("rss_allowlist", "open_meteo");
+  }
+
+  if (climateHazardLike) {
+    optionalSources.push("rss_allowlist", "google_trends");
+    if (primaryLocation) {
+      optionalSources.push("nominatim");
+    }
+  }
+
+  if (householdPriceLike) {
+    requiredSources.push("google_trends", macroPrimaryBackbone);
+    optionalSources.push("rss_allowlist", "yahoo_finance");
+  }
+
+  if (housingLike) {
+    requiredSources.push(macroPrimaryBackbone);
+    if (privateListingLive) {
+      optionalSources.push("private_listing_feed");
+    }
+  }
+
+  if (infrastructureLike) {
+    requiredSources.push("nominatim", "overpass");
+    if (gtfsStaticLive) {
+      requiredSources.push("gtfs_static");
+    } else {
+      optionalSources.push("gtfs_static");
+    }
+    if (gtfsRealtimeLive) {
+      requiredSources.push("gtfs_realtime");
+    } else {
+      optionalSources.push("gtfs_realtime");
+    }
+  }
+
+  if (geopoliticalConflictLike) {
+    requiredSources.push("wikidata", "gdelt", "rss_allowlist", "google_trends");
+    if (acledLive) {
+      optionalSources.push("acled");
+    }
+  }
+
+  if (analogLike) {
+    requiredSources.push("wikidata", "gdelt");
+    optionalSources.push("rss_allowlist", macroPrimaryBackbone);
+  }
+
+  if (publicHealthLike) {
+    requiredSources.push("open_meteo", "rss_allowlist", "google_trends");
+    optionalSources.push("wikidata");
+    optionalSources.push("openaq");
+  }
+
+  if (energyLike) {
+    requiredSources.push("yahoo_finance", "google_trends");
+    if (fredLive) {
       requiredSources.push("fred_api");
     } else {
       optionalSources.push("fred_api");
     }
-  }
-
-  if (energyLike) {
-    if (safeText(process.env.EIA_API_KEY)) {
+    if (eiaLive) {
       requiredSources.push("eia_api");
     } else {
       optionalSources.push("eia_api");
@@ -477,15 +763,103 @@ function buildRequiredSourcesForQuery({
   }
 
   if (environmentLike) {
-    if (readConfiguredCredential(process.env.OPENAQ_API_KEY)) {
+    if (openaqLive) {
       requiredSources.push("openaq");
     } else {
       optionalSources.push("openaq");
     }
   }
 
+  if (waterHydrologyLike || environmentExposureLike) {
+    requiredSources.push("nominatim", "overpass");
+  }
+
+  if (environmentExposureLike) {
+    requiredSources.push("open_meteo");
+    optionalSources.push("google_trends");
+  }
+
+  if (waterHydrologyLike) {
+    optionalSources.push("rss_allowlist");
+  }
+
+  if (demographicMigrationLike) {
+    requiredSources.push(macroPrimaryBackbone, "google_trends");
+    ["world_bank_api", "eurostat_api", "oecd_api"]
+      .filter((sourceId) => sourceId !== macroPrimaryBackbone)
+      .forEach((sourceId) => optionalSources.push(sourceId));
+    optionalSources.push("rss_allowlist");
+  }
+
+  if (safetyIncidentLike) {
+    requiredSources.push("rss_allowlist", "gdelt");
+    optionalSources.push("google_trends");
+  }
+
+  if (attentionStackDomain) {
+    requiredSources.push("wikidata", "gdelt", "rss_allowlist", "google_trends");
+  }
+
+  if (derivedDecisionDomain) {
+    if (/\b(relationship|love|social|friend|friendship|dating|exam|study|attention|quote|hype)\b|quote stream/.test(corpus)) {
+      requiredSources.push("wikidata", "gdelt", "rss_allowlist", "google_trends");
+    }
+  }
+
+  if (workCareerLike) {
+    requiredSources.push("google_trends", macroPrimaryBackbone);
+    optionalSources.push("eurostat_api", "oecd_api", "world_bank_api");
+  }
+
+  if (personalFinanceLike) {
+    requiredSources.push("yahoo_finance", "google_trends");
+    optionalSources.push("eurostat_api");
+    if (/\b(mortgage|housing|rent|home|property)\b/.test(corpus)) {
+      if (privateListingLive) {
+        optionalSources.push("private_listing_feed");
+      }
+    }
+  }
+
+  if (businessIdeaLike) {
+    requiredSources.push("google_trends", macroPrimaryBackbone);
+    optionalSources.push("eurostat_api", "oecd_api", "rss_allowlist");
+  }
+
+  if (personalTradeoffLike) {
+    requiredSources.push("nominatim", "overpass");
+    optionalSources.push(macroPrimaryBackbone, "google_trends");
+    if (gtfsStaticLive && /\b(move|relocat|rome|roma|milan|milano)\b/.test(corpus)) {
+      optionalSources.push("gtfs_static");
+    }
+  }
+
+  if (supplyTradeLike) {
+    requiredSources.push(macroPrimaryBackbone, "rss_allowlist");
+    optionalSources.push("google_trends", "world_bank_api", "oecd_api");
+  }
+
+  if (industryCycleLike) {
+    requiredSources.push(macroPrimaryBackbone, "google_trends");
+    optionalSources.push("yahoo_finance", "oecd_api", "eurostat_api");
+  }
+
+  if (cultureEventLike) {
+    requiredSources.push("google_trends", "rss_allowlist");
+    if (gtfsStaticLive) {
+      optionalSources.push("gtfs_static");
+    }
+    if (gtfsRealtimeLive) {
+      optionalSources.push("gtfs_realtime");
+    }
+    if (openskyLive && /\b(travel|visit|tourism|flight|airport)\b/.test(corpus)) {
+      optionalSources.push("opensky");
+    }
+  }
+
   if (sportsLike) {
-    requiredSources.push("api_football_optional");
+    requiredSources.push("thesportsdb_public");
+    optionalSources.push("api_football_optional");
   }
 
   return {

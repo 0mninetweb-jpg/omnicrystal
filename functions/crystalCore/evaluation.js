@@ -19,6 +19,15 @@ const DEFAULT_PUBLISH_THRESHOLDS = {
   published_min_coverage: 0.58,
   max_conflict_for_published: 0.42,
 };
+const ROLLOUT_STAGE_PRESETS = [
+  { name: "baseline", signed_in_percent: 0, guest_percent: 0, kill_switch: false },
+  { name: "canary-10-0", signed_in_percent: 10, guest_percent: 0, kill_switch: false },
+  { name: "canary-10-10", signed_in_percent: 10, guest_percent: 10, kill_switch: false },
+  { name: "rollout-25-25", signed_in_percent: 25, guest_percent: 25, kill_switch: false },
+  { name: "rollout-50-50", signed_in_percent: 50, guest_percent: 50, kill_switch: false },
+  { name: "rollout-100-100", signed_in_percent: 100, guest_percent: 100, kill_switch: false },
+  { name: "hard-rollback", signed_in_percent: 0, guest_percent: 0, kill_switch: true },
+];
 
 function normalizeBinaryLabel(value) {
   return safeText(value).trim().toLowerCase().replace(/ì/g, "i");
@@ -282,8 +291,16 @@ async function loadActiveCalibration(db, domainId) {
 
 function applyCalibrationToScorecard(scorecard = {}, calibrationDoc = null) {
   if (!calibrationDoc) {
+    const nextScorecard = {
+      ...scorecard,
+      publication_basis: {
+        ...(scorecard?.publication_basis || {}),
+        threshold_source: "static_defaults",
+        confidence_source: "static_defaults",
+      },
+    };
     return {
-      scorecard,
+      scorecard: nextScorecard,
       calibration_snapshot: {
         active: false,
         calibration_version: null,
@@ -405,6 +422,8 @@ function applyCalibrationToScorecard(scorecard = {}, calibrationDoc = null) {
   )}% to ${Math.round(calibratedProbability * 100)}%.`;
   nextScorecard.publication_basis = {
     ...(nextScorecard.publication_basis || {}),
+    threshold_source: "domain_calibration",
+    confidence_source: "domain_calibration",
     notes: uniqueStrings([...(Array.isArray(nextScorecard?.publication_basis?.notes) ? nextScorecard.publication_basis.notes : []), calibrationNote]).slice(0, 5),
   };
 
@@ -619,6 +638,193 @@ async function listRecentRuns(db, sinceDate, limit = 400) {
       const referenceDate = completedAt || updatedAt;
       return referenceDate && !Number.isNaN(referenceDate.getTime()) && referenceDate >= sinceDate;
     });
+}
+
+function normalizePercent(value, fallback = 0) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(0, Math.min(100, Math.round(parsed)));
+}
+
+function normalizeRolloutConfig(raw = {}) {
+  return {
+    enabled: raw?.enabled !== false,
+    transport: safeText(raw?.transport, "remote") === "local" ? "local" : "remote",
+    signed_in_percent: normalizePercent(raw?.signed_in_percent, 0),
+    guest_percent: normalizePercent(raw?.guest_percent, 0),
+    salt: safeText(raw?.salt),
+    kill_switch: raw?.kill_switch === true,
+    updated_at: toSerializable(raw?.updated_at),
+  };
+}
+
+function inferRolloutStage(config = {}) {
+  const normalized = normalizeRolloutConfig(config);
+  const matched = ROLLOUT_STAGE_PRESETS.find(
+    (preset) =>
+      preset.signed_in_percent === normalized.signed_in_percent &&
+      preset.guest_percent === normalized.guest_percent &&
+      preset.kill_switch === normalized.kill_switch
+  );
+  return matched?.name || "custom";
+}
+
+function pathUserId(path = "") {
+  const match = safeText(path).match(/^users\/([^/]+)\//);
+  return match ? safeText(match[1]) : "";
+}
+
+function summarizeCountsBy(values = [], keyFn = () => "") {
+  return values.reduce((accumulator, value) => {
+    const key = safeText(keyFn(value), "unknown");
+    accumulator[key] = (accumulator[key] || 0) + 1;
+    return accumulator;
+  }, {});
+}
+
+async function safeCollectionQuery(load) {
+  try {
+    const snapshot = await load();
+    return {
+      docs: snapshot.docs.map((doc) => ({ id: doc.id, path: doc.ref.path, ...(doc.data() || {}) })),
+      error: null,
+    };
+  } catch (error) {
+    return {
+      docs: [],
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+async function loadRuntimeRolloutState(db) {
+  try {
+    const snapshot = await db.collection("system_config").doc("runtime_rollout").get();
+    const raw = snapshot.exists ? snapshot.data()?.crystal_core || {} : {};
+    const rollout = normalizeRolloutConfig(raw);
+    return {
+      ...rollout,
+      stage: inferRolloutStage(rollout),
+      fetch_error: null,
+    };
+  } catch (error) {
+    return {
+      ...normalizeRolloutConfig({}),
+      stage: "unavailable",
+      fetch_error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+function buildProductEventSummary(events = []) {
+  const saveEvents = events.filter((event) => safeText(event?.event_type) === "save");
+  const followEvents = events.filter((event) => safeText(event?.event_type) === "follow");
+
+  return {
+    total_events: events.length,
+    save_events_total: saveEvents.length,
+    follow_events_total: followEvents.length,
+    unique_save_users: new Set(saveEvents.map((event) => pathUserId(event?.path)).filter(Boolean)).size,
+    unique_follow_users: new Set(followEvents.map((event) => pathUserId(event?.path)).filter(Boolean)).size,
+    unique_saved_lineages: new Set(saveEvents.map((event) => safeText(event?.lineage_id)).filter(Boolean)).size,
+    unique_follow_entities: new Set(followEvents.map((event) => safeText(event?.follow_id)).filter(Boolean)).size,
+    save_by_source_view: summarizeCountsBy(saveEvents, (event) => event?.source_view),
+    follow_by_source_view: summarizeCountsBy(followEvents, (event) => event?.source_view),
+  };
+}
+
+function buildVersionActivitySummary({ versionDocs = [], privateCards = [], publicLedgerDocs = [] } = {}) {
+  const privateVersions = versionDocs.filter((doc) => safeText(doc?.path).startsWith("users/"));
+  const publicVersions = versionDocs.filter((doc) => safeText(doc?.path).startsWith("forecast_ledger/"));
+
+  return {
+    total_version_writes: versionDocs.length,
+    private_version_writes: privateVersions.length,
+    public_version_writes: publicVersions.length,
+    private_card_updates: privateCards.length,
+    private_card_users: new Set(privateCards.map((doc) => pathUserId(doc?.path)).filter(Boolean)).size,
+    public_ledger_updates: publicLedgerDocs.length,
+    public_lineages_touched: new Set(publicLedgerDocs.map((doc) => safeText(doc?.lineage_id, doc?.id)).filter(Boolean)).size,
+  };
+}
+
+function buildResolutionSummary({ recentRuns = [], resolutionDocs = [] } = {}) {
+  const statusBreakdown = recentRuns.reduce((accumulator, runDoc) => {
+    const status = safeText(runDoc?.resolution_status, "untracked");
+    accumulator[status] = (accumulator[status] || 0) + 1;
+    return accumulator;
+  }, {});
+  const evaluationEligibleRuns = recentRuns.filter(
+    (runDoc) => runDoc?.evaluation_eligible === true || runDoc?.resolution_target?.evaluation_eligible === true
+  ).length;
+  const scoredResolutions = resolutionDocs.filter((doc) => doc?.scored === true).length;
+
+  return {
+    evaluation_eligible_runs: evaluationEligibleRuns,
+    resolution_status_breakdown: statusBreakdown,
+    resolved_outcomes: resolutionDocs.length,
+    scored_outcomes: scoredResolutions,
+  };
+}
+
+function buildCalibrationDriftWatch(domainSummaries = []) {
+  const flaggedDomains = domainSummaries
+    .map((item) => ({
+      domain_id: safeText(item?.domain_id),
+      brier_score: Number(item?.brier_score),
+      coverage_gap_rate: Number(item?.coverage_gap_rate),
+      activation_reason: safeText(item?.activation_reason, "hold_static_thresholds"),
+    }))
+    .filter((item) => item.domain_id && Number.isFinite(item.brier_score) && item.brier_score >= 0.24)
+    .sort((left, right) => right.brier_score - left.brier_score)
+    .slice(0, 5)
+    .map((item) => ({
+      domain_id: item.domain_id,
+      brier_score: Number(item.brier_score.toFixed(4)),
+      coverage_gap_rate: Number.isFinite(item.coverage_gap_rate) ? Number(item.coverage_gap_rate.toFixed(4)) : null,
+      activation_reason: item.activation_reason,
+    }));
+
+  return {
+    high_brier_domain_count: flaggedDomains.length,
+    flagged_domains: flaggedDomains,
+  };
+}
+
+async function buildProductSystemSummary({ db, sinceDate, recentRuns = [], domainSummaries = [] }) {
+  const [rollout, productEventResult, privateCardResult, versionResult, publicLedgerResult, resolutionResult] = await Promise.all([
+    loadRuntimeRolloutState(db),
+    safeCollectionQuery(() => db.collectionGroup("product_events").where("createdAt", ">=", sinceDate).limit(800).get()),
+    safeCollectionQuery(() => db.collectionGroup("cards").where("updatedAt", ">=", sinceDate).limit(800).get()),
+    safeCollectionQuery(() => db.collectionGroup("versions").where("version_saved_at", ">=", sinceDate).limit(1200).get()),
+    safeCollectionQuery(() => db.collection("forecast_ledger").where("updatedAt", ">=", sinceDate).limit(800).get()),
+    safeCollectionQuery(() => db.collection("forecast_resolutions").where("resolved_at", ">=", sinceDate).limit(800).get()),
+  ]);
+
+  const remoteRuns = recentRuns.filter((runDoc) => safeText(runDoc?.runtime_transport).startsWith("remote"));
+
+  return {
+    rollout,
+    remote_volume: {
+      remote_completed_total: remoteRuns.filter((runDoc) => safeText(runDoc?.status) === "completed").length,
+      remote_completed_signed_in: remoteRuns.filter((runDoc) => safeText(runDoc?.status) === "completed" && safeText(runDoc?.uid)).length,
+      remote_completed_guest: remoteRuns.filter((runDoc) => safeText(runDoc?.status) === "completed" && !safeText(runDoc?.uid)).length,
+      remote_pending_total: remoteRuns.filter((runDoc) => safeText(runDoc?.status) === "pending").length,
+      remote_fallback_total: recentRuns.filter((runDoc) => safeText(runDoc?.runtime_transport) === "local_fallback").length,
+    },
+    usage: buildProductEventSummary(productEventResult.docs),
+    versioning: buildVersionActivitySummary({
+      versionDocs: versionResult.docs,
+      privateCards: privateCardResult.docs,
+      publicLedgerDocs: publicLedgerResult.docs,
+    }),
+    resolution: buildResolutionSummary({
+      recentRuns,
+      resolutionDocs: resolutionResult.docs,
+    }),
+    calibration_drift_watch: buildCalibrationDriftWatch(domainSummaries),
+    fetch_errors: [rollout.fetch_error, productEventResult.error, privateCardResult.error, versionResult.error, publicLedgerResult.error, resolutionResult.error].filter(Boolean),
+  };
 }
 
 function getParityKey(runDoc = {}) {
@@ -993,6 +1199,12 @@ async function generateEvaluationReport(context, options = {}) {
       : null;
   const binaryParitySummary = buildBinaryParitySummary(recentRuns);
   const calibrationReadiness = buildCalibrationReadiness(domainSummaries);
+  const productSystem = await buildProductSystemSummary({
+    db,
+    sinceDate,
+    recentRuns,
+    domainSummaries,
+  });
 
   const rolloutRecommendation = buildRolloutRecommendation({
     remoteErrorRate: remoteErrors,
@@ -1022,6 +1234,39 @@ async function generateEvaluationReport(context, options = {}) {
     `Markets calibration: ${calibrationReadiness.targets.find((item) => item.domain_id === "A.23.markets_and_asset_regimes")?.activation_reason || "hold_static_thresholds"}`,
     `Calibration recommendation: ${calibrationReadiness.recommendation}`,
     "",
+    "## Product System",
+    `- Rollout stage: ${productSystem.rollout.stage} (${productSystem.rollout.signed_in_percent}/${productSystem.rollout.guest_percent}) | transport=${productSystem.rollout.transport} | kill_switch=${productSystem.rollout.kill_switch === true ? "on" : "off"}`,
+    `- Remote completed runs: ${productSystem.remote_volume.remote_completed_total} | signed-in=${productSystem.remote_volume.remote_completed_signed_in} | guest=${productSystem.remote_volume.remote_completed_guest}`,
+    `- Save/follow events: save=${productSystem.usage.save_events_total} | follow=${productSystem.usage.follow_events_total} | unique_saved_lineages=${productSystem.usage.unique_saved_lineages}`,
+    `- Version activity: private_versions=${productSystem.versioning.private_version_writes} | public_versions=${productSystem.versioning.public_version_writes} | public_ledger_updates=${productSystem.versioning.public_ledger_updates}`,
+    `- Resolution/outcome: eligible_runs=${productSystem.resolution.evaluation_eligible_runs} | resolved=${productSystem.resolution.resolved_outcomes} | scored=${productSystem.resolution.scored_outcomes}`,
+    `- Calibration drift watch: ${
+      productSystem.calibration_drift_watch.flagged_domains.length > 0
+        ? productSystem.calibration_drift_watch.flagged_domains.map((item) => `${item.domain_id} (${item.brier_score})`).join(", ")
+        : "none"
+    }`,
+    ...(productSystem.fetch_errors.length > 0
+      ? ["- Product system fetch errors: " + productSystem.fetch_errors.join(" | ")]
+      : []),
+    "",
+    "## Vertical Readiness",
+    ...calibrationReadiness.targets.map(
+      (item) =>
+        `- ${item.domain_id}: active=${item.active_for_runtime === true ? "yes" : "no"} | sample=${item.sample_size} | freshness_ok=${
+          item.freshness_ok === true ? "yes" : "no"
+        } | reason=${item.activation_reason}`
+    ),
+    "",
+    "## Binary Parity By Domain",
+    ...Object.entries(binaryParitySummary.by_domain || {})
+      .slice(0, 8)
+      .map(
+        ([domainId, summary]) =>
+          `- ${domainId}: pairs=${summary.comparable_pairs} | winner_mismatch=${Math.round(
+            Number(summary.winner_mismatch_rate || 0) * 100
+          )}% | median_delta=${Math.round(Number(summary.median_probability_delta || 0) * 100)} pts`
+      ),
+    "",
     `Recommendation: ${rolloutRecommendation.next_step}`,
   ];
 
@@ -1040,7 +1285,12 @@ async function generateEvaluationReport(context, options = {}) {
       general_fallback_rate: generalRate,
       binary_parity: binaryParitySummary,
     },
+    product_system: productSystem,
     vertical_calibration: calibrationReadiness,
+    vertical_sections: {
+      policy: calibrationReadiness.targets.find((item) => item.domain_id === "A.24.governance_policy_and_public_timeline") || null,
+      markets: calibrationReadiness.targets.find((item) => item.domain_id === "A.23.markets_and_asset_regimes") || null,
+    },
     domain_summaries: domainSummaries.slice(0, 25),
     regressions: rolloutRecommendation.blockers,
     calibration_recommendation: calibrationReadiness.recommendation,

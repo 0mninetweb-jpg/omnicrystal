@@ -7,13 +7,16 @@ import {
   fetchPublicForecastCollection,
   fetchPublicForecastPageData,
   formatPublicForecastDate,
+  formatPublicForecastRunDate,
+  formatRelativeTimeInterpretation,
   getPublicForecastState,
   rankTrendingForecasts,
   resolvePublicForecastContext,
   toSortNumber,
   type PublicForecastRecord,
 } from '../../lib/publicForecasts';
-import { followForecastEntity, isForecastCardSaved, saveForecastCardToLibrary } from '../../lib/cardLibrary';
+import { sanitizeDisplayText } from '../../lib/displayText';
+import { followForecastEntity, isForecastCardSaved, isForecastEntityFollowed, saveForecastCardToLibrary } from '../../lib/cardLibrary';
 import { ResultStack } from './ResultStack';
 
 type ForecastGallerySharedProps = {
@@ -41,6 +44,8 @@ function sortBestCalls(records: PublicForecastRecord[]) {
 
 function PublicForecastLinkCard({ record }: { record: PublicForecastRecord }) {
   const state = getPublicForecastState(record);
+  const title = sanitizeDisplayText(record.title, 'Crystal forecast');
+  const summary = sanitizeDisplayText(record.summary, 'No summary available yet.');
   const badgeTone =
     state === 'published'
       ? 'bg-emerald-50 text-emerald-700'
@@ -61,10 +66,10 @@ function PublicForecastLinkCard({ record }: { record: PublicForecastRecord }) {
           {state.replace(/_/g, ' ')}
         </div>
       </div>
-      <h3 className="mt-3 text-lg font-semibold tracking-[-0.03em] text-slate-950">{record.title}</h3>
-      <p className="mt-3 text-sm leading-7 text-slate-600">{record.summary}</p>
+      <h3 className="mt-3 text-lg font-semibold tracking-[-0.03em] text-slate-950">{title}</h3>
+      <p className="mt-3 text-sm leading-7 text-slate-600">{summary}</p>
       <div className="mt-4 flex flex-wrap items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-        <span>{record.topic_label || record.domain_label || record.domain}</span>
+        <span>{sanitizeDisplayText(record.topic_label || record.domain_label || record.domain, record.domain)}</span>
         <span>{Math.round((record.trust_confidence || record.trust_layer?.confidence_score || 0) * 100)}%</span>
         <span>{formatPublicForecastDate(record.published_at || record.updatedAt)}</span>
       </div>
@@ -483,6 +488,7 @@ export function PublicForecastPage({ user, onLogin }: ForecastGallerySharedProps
   const [loadWarning, setLoadWarning] = useState<string | null>(null);
   const [isSaved, setIsSaved] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isFollowed, setIsFollowed] = useState(false);
   const [isFollowing, setIsFollowing] = useState(false);
 
   useEffect(() => {
@@ -526,15 +532,30 @@ export function PublicForecastPage({ user, onLogin }: ForecastGallerySharedProps
       .catch(() => setIsSaved(false));
   }, [context, record, user?.uid]);
 
+  useEffect(() => {
+    if (!context || !user?.uid) {
+      setIsFollowed(false);
+      return;
+    }
+
+    void isForecastEntityFollowed(user.uid, context).then(setIsFollowed).catch(() => setIsFollowed(false));
+  }, [context, user?.uid]);
+
+  const redirectGuestToSignin = () => {
+    navigate(`/signin?next=${encodeURIComponent(`/forecast-gallery/forecast/${slug}`)}`);
+  };
+
   const handleSave = async () => {
     if (!record || !context) return;
     if (!user?.uid) {
-      onLogin();
+      redirectGuestToSignin();
       return;
     }
     setIsSaving(true);
     try {
-      await saveForecastCardToLibrary(user.uid, record.query_text || record.query_origin || record.title, context, record);
+      await saveForecastCardToLibrary(user.uid, record.query_text || record.query_origin || record.title, context, record, {
+        sourceView: 'forecast-gallery-public',
+      });
       setIsSaved(true);
     } finally {
       setIsSaving(false);
@@ -544,12 +565,13 @@ export function PublicForecastPage({ user, onLogin }: ForecastGallerySharedProps
   const handleFollow = async () => {
     if (!context) return;
     if (!user?.uid) {
-      onLogin();
+      redirectGuestToSignin();
       return;
     }
     setIsFollowing(true);
     try {
-      await followForecastEntity(user.uid, context);
+      await followForecastEntity(user.uid, context, { sourceView: 'forecast-gallery-public' });
+      setIsFollowed(true);
     } finally {
       setIsFollowing(false);
     }
@@ -559,8 +581,8 @@ export function PublicForecastPage({ user, onLogin }: ForecastGallerySharedProps
     const shareUrl = `${window.location.origin}/forecast-gallery/forecast/${slug}`;
     if (navigator.share) {
       await navigator.share({
-        title: record?.title || 'Crystal public forecast',
-        text: record?.summary || record?.verdict || '',
+        title: sanitizeDisplayText(record?.title, 'Crystal public forecast'),
+        text: sanitizeDisplayText(record?.summary || record?.verdict, ''),
         url: shareUrl,
       });
       return;
@@ -577,6 +599,10 @@ export function PublicForecastPage({ user, onLogin }: ForecastGallerySharedProps
   }
 
   const state = getPublicForecastState(record);
+  const recordTitle = sanitizeDisplayText(record.title, 'Crystal forecast');
+  const recordSummary = sanitizeDisplayText(record.summary, 'No summary available yet.');
+  const runDateSummary = formatPublicForecastRunDate(record);
+  const relativeTimeSummary = formatRelativeTimeInterpretation(record);
 
   return (
     <div className="space-y-6">
@@ -586,11 +612,13 @@ export function PublicForecastPage({ user, onLogin }: ForecastGallerySharedProps
             <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">
               Forecast Page · {record.entity_label || 'General'} · {record.horizon_label || '30 days'}
             </div>
-            <h1 className="mt-4 text-4xl font-semibold tracking-[-0.05em] text-slate-950 md:text-5xl">{record.title}</h1>
-            <p className="mt-4 text-base leading-8 text-slate-600">
-              Engine-generated public card. Published {formatPublicForecastDate(record.published_at || record.updatedAt)} with
-              visible confidence, drivers, and card state.
-            </p>
+            <h1 className="mt-4 text-4xl font-semibold tracking-[-0.05em] text-slate-950 md:text-5xl">{recordTitle}</h1>
+            <p className="mt-4 max-w-3xl text-base leading-8 text-slate-600">{recordSummary}</p>
+            <div className="mt-4 space-y-1 text-sm leading-7 text-slate-600">
+              {runDateSummary ? <p>{runDateSummary}</p> : null}
+              <p>Published {formatPublicForecastDate(record.published_at || record.updatedAt)}</p>
+              {relativeTimeSummary ? <p>{relativeTimeSummary}</p> : null}
+            </div>
           </div>
           <div
             className={`rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] ${
@@ -617,10 +645,14 @@ export function PublicForecastPage({ user, onLogin }: ForecastGallerySharedProps
             type="button"
             onClick={handleFollow}
             disabled={isFollowing}
-            className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:opacity-60"
+            className={`inline-flex items-center gap-2 rounded-full border px-5 py-3 text-sm font-semibold transition disabled:opacity-60 ${
+              user && isFollowed
+                ? 'border-slate-950 bg-slate-950 text-white hover:bg-slate-900'
+                : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:text-slate-950'
+            }`}
           >
             <Bell className="h-4 w-4" />
-            {user ? (isFollowing ? 'Following...' : 'Get updates if it changes') : 'Sign in to follow'}
+            {user ? (isFollowing ? 'Enabling updates...' : isFollowed ? 'Updates enabled' : 'Get updates if it changes') : 'Sign in to follow'}
           </button>
           <button
             type="button"
@@ -646,6 +678,7 @@ export function PublicForecastPage({ user, onLogin }: ForecastGallerySharedProps
         isAuthenticated={Boolean(user)}
         isSaved={isSaved}
         isSaving={isSaving}
+        isFollowed={isFollowed}
         isFollowing={isFollowing}
         onSave={handleSave}
         onFollow={handleFollow}

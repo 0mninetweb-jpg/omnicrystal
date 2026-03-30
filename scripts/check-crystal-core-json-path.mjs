@@ -28,7 +28,7 @@ if (!process.env.LLM_PROVIDER) {
 }
 
 const { createLlmRuntime } = require("../functions/llmRuntime.js");
-const { buildRoutingHints, finalizeScorecard } = require("../functions/predictionCore.js");
+const { buildRoutingHints, buildTemporalContext, finalizeScorecard } = require("../functions/predictionCore.js");
 const { createCrystalCoreRuntime, __testables } = require("../functions/crystalCore/runtime.js");
 
 const queries = [
@@ -70,6 +70,38 @@ const runtime = createCrystalCoreRuntime({
   getGeminiApiKey: () => process.env.GEMINI_API_KEY || "",
   withRetry: async (fn) => fn(),
 });
+
+const fixedAsOfUtc = "2026-03-30T10:00:00.000Z";
+const todayContext = buildTemporalContext("oggi piovera a Roma?", {
+  asOfUtc: fixedAsOfUtc,
+  timeZone: "Europe/Rome",
+});
+assert.equal(todayContext.as_of_local_date, "2026-03-30", "Temporal context should keep the run local date.");
+assert.equal(todayContext.uses_relative_time, true, '"oggi" should be normalized as relative time.');
+assert.equal(todayContext.relative_phrase.toLowerCase(), "oggi", '"oggi" should be preserved as the matched relative phrase.');
+assert.equal(todayContext.resolved_time_window?.start_date, "2026-03-30", '"oggi" should resolve to the current local date.');
+
+const weekendContext = buildTemporalContext("Will Rome stay rainy this weekend?", {
+  asOfUtc: fixedAsOfUtc,
+  timeZone: "Europe/Rome",
+});
+assert.equal(weekendContext.uses_relative_time, true, '"this weekend" should be detected as relative time.');
+assert.ok(weekendContext.resolved_time_window?.label, '"this weekend" should produce an absolute label.');
+
+const nextQuarterContext = buildTemporalContext("What happens next quarter for Italy?", {
+  asOfUtc: fixedAsOfUtc,
+  timeZone: "Europe/Rome",
+});
+assert.equal(nextQuarterContext.relative_phrase.toLowerCase(), "next quarter", '"next quarter" should be preserved.');
+assert.equal(nextQuarterContext.resolved_time_window?.start_date, "2026-04-01", '"next quarter" should start on Apr 1, 2026.');
+assert.equal(nextQuarterContext.resolved_time_window?.end_date, "2026-06-30", '"next quarter" should end on Jun 30, 2026.');
+
+const explicitDateContext = buildTemporalContext("Will it rain on 2026-06-01 in Rome?", {
+  asOfUtc: fixedAsOfUtc,
+  timeZone: "Europe/Rome",
+  eventDate: "2026-06-01",
+});
+assert.equal(explicitDateContext.uses_relative_time, false, "Explicit dates should not be overridden by relative normalization.");
 
 if (!hasOpenRouterKey && !hasGeminiKey) {
   console.log("Structured output probe skipped: no OPENROUTER_API_KEY or GEMINI_API_KEY configured locally.");

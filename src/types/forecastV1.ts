@@ -91,6 +91,7 @@ export interface ForecastCoverageStackItem extends ForecastBaseStackItem {
   alternateSuggestions: string[];
   trustLayer?: TrustLayer;
   evidenceDrawer?: EvidenceDrawer;
+  card?: CardData;
 }
 
 export type ForecastStackItem =

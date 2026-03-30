@@ -2,6 +2,7 @@ import React from 'react';
 import { Bookmark, GitBranch, Share2, Sparkles } from 'lucide-react';
 import type { ForecastPrimaryStackItem } from '../../types/forecastV1';
 import { getForecastMetaCopy } from '../../lib/forecastV1';
+import { sanitizeDisplayText } from '../../lib/displayText';
 import { TrustStrip } from './TrustStrip';
 import { EvidenceDrawer } from './EvidenceDrawer';
 
@@ -9,6 +10,7 @@ type PredictionCardProps = {
   item: ForecastPrimaryStackItem;
   isSaved: boolean;
   isSaving: boolean;
+  isFollowed: boolean;
   isFollowing: boolean;
   onSave: () => void;
   onFollow: () => void;
@@ -20,6 +22,7 @@ export function PredictionCard({
   item,
   isSaved,
   isSaving,
+  isFollowed,
   isFollowing,
   onSave,
   onFollow,
@@ -33,6 +36,9 @@ export function PredictionCard({
       ? `${item.probabilitySplit.primary_label} ${Math.round(item.probabilitySplit.primary_probability * 100)}% | ${item.probabilitySplit.secondary_label} ${Math.round(item.probabilitySplit.secondary_probability * 100)}%`
       : null;
   const heroCall = item.binaryContract?.display_call || item.primaryCall || item.primaryOutcome;
+  const title = sanitizeDisplayText(item.title, 'Crystal forecast');
+  const summary = sanitizeDisplayText(item.summary, 'No summary available yet.');
+  const heroCallLabel = sanitizeDisplayText(heroCall, summary);
 
   return (
     <article className="rounded-[32px] border border-slate-200 bg-white p-6 shadow-[0_18px_44px_rgba(15,23,42,0.06)]">
@@ -41,7 +47,9 @@ export function PredictionCard({
           <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
             {item.entity} | {item.domainId} | {item.horizon}
           </div>
-          <h3 className="mt-3 text-2xl font-semibold tracking-[-0.03em] text-slate-950">{item.title}</h3>
+          {meta.runDateSummary ? <div className="mt-2 text-sm font-medium text-slate-600">Forecast run {meta.runDateSummary}</div> : null}
+          {meta.relativeTimeSummary ? <div className="mt-1 text-sm text-slate-500">{meta.relativeTimeSummary}</div> : null}
+          <h3 className="mt-3 text-2xl font-semibold tracking-[-0.03em] text-slate-950">{title}</h3>
         </div>
         <div className="rounded-full bg-emerald-50 px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">
           Published
@@ -50,9 +58,9 @@ export function PredictionCard({
 
       <div className="mt-6 rounded-[28px] bg-slate-950 p-6 text-white">
         <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-300">Primary call</div>
-        <div className="mt-3 text-2xl font-semibold tracking-[-0.03em]">{heroCall}</div>
+        <div className="mt-3 text-2xl font-semibold tracking-[-0.03em]">{heroCallLabel}</div>
         {probabilityLabel ? <div className="mt-3 text-sm font-semibold text-sky-200">{probabilityLabel}</div> : null}
-        <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">{item.summary}</p>
+        <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">{summary}</p>
       </div>
 
       <div className="mt-5 grid gap-4 md:grid-cols-3">
@@ -113,6 +121,7 @@ export function PredictionCard({
         trustLayer={item.trustLayer}
         freshnessSummary={meta.freshnessSummary}
         provenanceSummary={meta.provenanceSummary}
+        runDateSummary={meta.runDateSummary}
       />
 
       <div className="mt-5 flex flex-wrap gap-3">
@@ -129,10 +138,14 @@ export function PredictionCard({
           type="button"
           onClick={onFollow}
           disabled={isFollowing}
-          className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:opacity-60"
+          className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold transition disabled:opacity-60 ${
+            isFollowed
+              ? 'border-slate-950 bg-slate-950 text-white hover:bg-slate-900'
+              : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:text-slate-950'
+          }`}
         >
           <Sparkles className="h-4 w-4" />
-          {isFollowing ? 'Following...' : 'Follow'}
+          {isFollowing ? 'Enabling updates...' : isFollowed ? 'Updates enabled' : 'Follow'}
         </button>
         <button
           type="button"

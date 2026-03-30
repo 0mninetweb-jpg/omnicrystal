@@ -81,6 +81,24 @@ service cloud.firestore {
         data.analysis.historical_parallel is string;
     }
 
+    function isValidProductEvent(data) {
+      return hasRequiredFields(data, ['event_type', 'source_view', 'createdAt']) &&
+        data.event_type is string &&
+        data.source_view is string &&
+        data.createdAt is timestamp &&
+        (!('event_scope' in data) || data.event_scope is string) &&
+        (!('lineage_id' in data) || data.lineage_id is string) &&
+        (!('version_id' in data) || data.version_id is string) &&
+        (!('follow_id' in data) || data.follow_id is string) &&
+        (!('public_slug' in data) || data.public_slug is string) &&
+        (!('domain_id' in data) || data.domain_id is string) &&
+        (!('entity' in data) || data.entity is string) &&
+        (!('geography' in data) || data.geography is string) &&
+        (!('horizon' in data) || data.horizon is string) &&
+        (!('card_state_ui' in data) || data.card_state_ui is string) &&
+        (!('query_text' in data) || data.query_text is string);
+    }
+
     match /test/connection {
       allow read: if true;
     }
@@ -200,6 +218,14 @@ service cloud.firestore {
         allow create: if isOwner(userId) && isValidSavedQuote(request.resource.data);
         allow update: if isOwner(userId) && isValidSavedQuote(request.resource.data) &&
           request.resource.data.savedAt == resource.data.savedAt;
+        allow delete: if isOwner(userId);
+      }
+
+      match /product_events/{eventId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidProductEvent(request.resource.data);
+        allow update: if isOwner(userId) && isValidProductEvent(request.resource.data) &&
+          request.resource.data.createdAt == resource.data.createdAt;
         allow delete: if isOwner(userId);
       }
 

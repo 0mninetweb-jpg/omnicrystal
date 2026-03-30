@@ -1,0 +1,238 @@
+{
+  "generated_at": "2026-03-30T17:10:22.865Z",
+  "report_type": "daily",
+  "lookback_days": 1,
+  "window_start": "2026-03-29T17:10:22.865Z",
+  "window_end": "2026-03-30T17:10:22.865Z",
+  "rollout": {
+    "enabled": true,
+    "transport": "remote",
+    "signed_in_percent": 10,
+    "guest_percent": 0,
+    "salt": "pdmq37s0p01u08v6jvr3vafosthi2zcx",
+    "kill_switch": false,
+    "updated_at": "2026-03-30T12:34:17.178Z",
+    "stage": "canary-10-0"
+  },
+  "matrix_summary": {
+    "total_domains": 43,
+    "total_rows": 86,
+    "top1_hit_rate": 0.9302,
+    "top3_miss_count": 0,
+    "silent_general_fallback_count": 0,
+    "publishable_canonical_domains": 43,
+    "domains_with_blocker_reason": 0,
+    "ready_domain_count": 43,
+    "provider_gap_domain_count": 0,
+    "quality_follow_up_domain_count": 0,
+    "thin_evidence_coverage_count": 0,
+    "edge_publishable_count": 40,
+    "edge_quality_follow_up_count": 2,
+    "edge_top1_hit_rate": 0.907,
+    "edge_blocker_reason_counts": [
+      {
+        "reason": "none",
+        "count": 41
+      },
+      {
+        "reason": "provider_required_no_pick",
+        "count": 2
+      }
+    ],
+    "edge_thin_evidence_coverage_count": 0,
+    "edge_thin_signal_convergence_count": 0,
+    "edge_directional_signal_not_publish_ready_count": 0,
+    "edge_provider_required_no_pick_count": 2,
+    "rows_with_registry_only_sources": 8,
+    "weak_domain_count": 2,
+    "blocker_reason_counts": [
+      {
+        "reason": "none",
+        "count": 43
+      }
+    ],
+    "week1_baseline": {
+      "date": "2026-03-28",
+      "top1_hit_rate": 0.59,
+      "publishable_canonical_domains": 4,
+      "provider_gap_domain_count": 30,
+      "silent_general_fallback_count": 0
+    },
+    "week1_targets": {
+      "top1_hit_rate": 0.65,
+      "publishable_canonical_domains": 8,
+      "domains_with_blocker_reason": 30,
+      "provider_gap_domain_count": 24,
+      "silent_general_fallback_count": 0
+    },
+    "week1_delta": {
+      "baseline_date": "2026-03-28",
+      "top1_hit_rate_delta": 0.3402,
+      "publishable_canonical_domains_delta": 39,
+      "provider_gap_domain_count_delta": -30,
+      "silent_general_fallback_delta": 0
+    },
+    "batch3_baseline": {
+      "date": "2026-03-28",
+      "top1_hit_rate": 0.71,
+      "publishable_canonical_domains": 32,
+      "thin_evidence_coverage_count": 10,
+      "provider_gap_domain_count": 0,
+      "silent_general_fallback_count": 0
+    },
+    "batch3_targets": {
+      "top1_hit_rate": 0.74,
+      "publishable_canonical_domains": 36,
+      "thin_evidence_coverage_count": 4,
+      "provider_gap_domain_count": 0,
+      "silent_general_fallback_count": 0
+    },
+    "batch3_delta": {
+      "baseline_date": "2026-03-28",
+      "top1_hit_rate_delta": 0.2202,
+      "publishable_canonical_domains_delta": 11,
+      "thin_evidence_coverage_count_delta": -10,
+      "provider_gap_domain_count_delta": 0,
+      "silent_general_fallback_delta": 0
+    },
+    "week2_baseline": {
+      "date": "2026-03-28",
+      "edge_publishable_count": 2,
+      "edge_quality_follow_up_count": 41,
+      "edge_top1_hit_rate": 0.6279,
+      "thin_evidence_coverage_count": 15,
+      "thin_signal_convergence_count": 19,
+      "directional_signal_not_publish_ready_count": 3,
+      "provider_required_no_pick_count": 2
+    },
+    "week2_targets": {
+      "edge_publishable_count": 6,
+      "edge_quality_follow_up_count": 35,
+      "edge_top1_hit_rate": 0.67,
+      "thin_evidence_coverage_count": 10,
+      "thin_signal_convergence_count": 14,
+      "directional_signal_not_publish_ready_count": 3,
+      "provider_required_no_pick_count": 2
+    },
+    "week2_delta": {
+      "baseline_date": "2026-03-28",
+      "edge_publishable_count_delta": 38,
+      "edge_quality_follow_up_count_delta": -39,
+      "edge_top1_hit_rate_delta": 0.2791,
+      "thin_evidence_coverage_count_delta": -15,
+      "thin_signal_convergence_count_delta": -19,
+      "directional_signal_not_publish_ready_count_delta": -3,
+      "provider_required_no_pick_count_delta": 0
+    },
+    "week3_baseline": {
+      "date": "2026-03-28",
+      "publishable_canonical_domains": 42,
+      "edge_publishable_count": 15,
+      "edge_quality_follow_up_count": 27,
+      "edge_top1_hit_rate": 0.7209,
+      "edge_thin_evidence_coverage_count": 7,
+      "edge_thin_signal_convergence_count": 13,
+      "provider_gap_domain_count": 0,
+      "silent_general_fallback_count": 0
+    },
+    "week3_targets": {
+      "publishable_canonical_domains": 43,
+      "edge_publishable_count": 22,
+      "edge_quality_follow_up_count": 18,
+      "edge_top1_hit_rate": 0.78,
+      "edge_thin_evidence_coverage_count": 3,
+      "edge_thin_signal_convergence_count": 8,
+      "provider_gap_domain_count": 0,
+      "silent_general_fallback_count": 0
+    },
+    "week3_delta": {
+      "baseline_date": "2026-03-28",
+      "publishable_canonical_domains_delta": 1,
+      "edge_publishable_count_delta": 25,
+      "edge_quality_follow_up_count_delta": -25,
+      "edge_top1_hit_rate_delta": 0.1861,
+      "edge_thin_evidence_coverage_count_delta": -7,
+      "edge_thin_signal_convergence_count_delta": -13,
+      "provider_gap_domain_count_delta": 0,
+      "silent_general_fallback_delta": 0
+    },
+    "batch2_gate_verdict": "week1_batch2_on_track",
+    "batch3_gate_verdict": "week1_batch3_on_track",
+    "week2_gate_verdict": "week2_provider_depth_on_track",
+    "week3_gate_verdict": "week3_edge_predictive_lift_ready",
+    "verdict": "sprint_matrix_ready"
+  },
+  "parity_summary": {
+    "remote_max_completed_streak": 5,
+    "binary_comparable_count": 4,
+    "binary_winner_mismatch_rate": 0,
+    "median_probability_delta": 0,
+    "missing_binary_contract_rate": 0,
+    "direct_api_502_count": 0,
+    "sports_probe_ready": true,
+    "verdict": "10% ready",
+    "blockers": []
+  },
+  "phase_closeout": {
+    "sports_parity_closed": true,
+    "sports_probe_ready": true,
+    "winner_mismatch_rate": 0,
+    "missing_binary_contract_rate": 0,
+    "fred_api_available": true,
+    "gtfs_static_ready": true,
+    "gtfs_realtime_ready": true,
+    "policy_benchmark_green": true,
+    "markets_benchmark_green": true,
+    "rollout_frozen": false,
+    "rollout_stage": "10/0",
+    "checks_green": true,
+    "parity_direct_api_soft_fail": false,
+    "manual_signed_in_qa": "certified",
+    "entry_gate_green": true
+  },
+  "remote_volume": {
+    "remote_completed_total": 48,
+    "remote_completed_signed_in": 0,
+    "remote_completed_guest": 48,
+    "remote_pending_total": 0,
+    "remote_fallback_total": 0
+  },
+  "usage": {
+    "total_events": 0,
+    "save_events_total": 0,
+    "follow_events_total": 0,
+    "unique_save_users": 0,
+    "unique_follow_users": 0,
+    "unique_saved_lineages": 0,
+    "unique_follow_entities": 0,
+    "save_by_source_view": {},
+    "follow_by_source_view": {}
+  },
+  "versioning": {
+    "total_version_writes": 52,
+    "private_version_writes": 0,
+    "public_version_writes": 52,
+    "private_card_updates": 0,
+    "private_card_users": 0,
+    "public_ledger_updates": 6,
+    "public_lineages_touched": 6
+  },
+  "resolution": {
+    "evaluation_eligible_runs": 101,
+    "resolution_status_breakdown": {
+      "pending": 101,
+      "untracked": 1
+    },
+    "resolved_outcomes": 0,
+    "scored_outcomes": 0
+  },
+  "calibration_drift_watch": {
+    "high_brier_domain_count": 0,
+    "flagged_domains": []
+  },
+  "source_docs": {
+    "phase_closeout_path": "C:\\Users\\Fiorenza\\OneDrive\\Desktop\\Codex\\crystal-review-0316\\docs\\phase-a-closeout-2026-03-30.json",
+    "parity_path": "C:\\Users\\Fiorenza\\OneDrive\\Desktop\\Codex\\crystal-review-0316\\docs\\parity-report-2026-03-24.json",
+    "domain_matrix_path": "C:\\Users\\Fiorenza\\OneDrive\\Desktop\\Codex\\crystal-review-0316\\docs\\domain-quality-matrix-2026-03-30.json"
+  }
+}

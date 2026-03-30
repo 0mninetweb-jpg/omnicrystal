@@ -1,0 +1,1884 @@
+{
+  "summary": {
+    "generated_at": "2026-03-29T09:51:24.259Z",
+    "report_date": "2026-03-29",
+    "total_cases": 10,
+    "binary_cases": 8,
+    "top3_miss_count": 0,
+    "general_fallback_rate": 0,
+    "policy_adapter_missing_count": 0,
+    "missing_metadata_count": 0,
+    "source_coverage_failures": 0,
+    "missing_binary_contract_count": 0,
+    "ambiguous_winner_count": 0,
+    "split_inconsistency_count": 0,
+    "verdict": "policy-ready"
+  },
+  "clusters": {
+    "referendum": {
+      "cases": 2,
+      "used_sources": [
+        "wikidata",
+        "polymarket_public",
+        "gdelt",
+        "rss_allowlist",
+        "google_trends",
+        "historical-cache"
+      ],
+      "missing_required_sources": []
+    },
+    "policy_risk": {
+      "cases": 3,
+      "used_sources": [
+        "wikidata",
+        "polymarket_public",
+        "gdelt",
+        "rss_allowlist",
+        "google_trends",
+        "historical-cache"
+      ],
+      "missing_required_sources": []
+    },
+    "regulatory_decision": {
+      "cases": 3,
+      "used_sources": [
+        "wikidata",
+        "polymarket_public",
+        "gdelt",
+        "rss_allowlist",
+        "google_trends",
+        "historical-cache"
+      ],
+      "missing_required_sources": []
+    },
+    "public_timeline": {
+      "cases": 2,
+      "used_sources": [
+        "wikidata",
+        "gdelt",
+        "rss_allowlist",
+        "historical-cache",
+        "google_trends"
+      ],
+      "missing_required_sources": []
+    }
+  },
+  "cases": [
+    {
+      "cluster": "referendum",
+      "query": "Cosa passera al referendum costituzionale di marzo in Italia? si o no",
+      "expectedDomains": [
+        "A.24.governance_policy_and_public_timeline"
+      ],
+      "binary": true,
+      "requiredMetadata": [
+        "event_date",
+        "jurisdiction",
+        "governing_entity"
+      ],
+      "preferredWinner": "b",
+      "requiredSources": [
+        "wikidata",
+        "gdelt",
+        "rss_allowlist",
+        "polymarket_public"
+      ],
+      "primary_domain_id": "A.24.governance_policy_and_public_timeline",
+      "candidate_domains_top3": [
+        "A.24.governance_policy_and_public_timeline",
+        "A.25.geopolitics_and_conflict_dynamics",
+        "A.0.general.general_forecast"
+      ],
+      "top3_hit": true,
+      "intent_shape": "binary_outcome",
+      "resolution_frame": "policy",
+      "question_side_a": "Si",
+      "question_side_b": "No",
+      "event_date": "March",
+      "jurisdiction": "Italy",
+      "governing_entity": "Voters",
+      "selected_variable_labels": [
+        "Institutional calendar and governing body incentives",
+        "Polling, public pressure, and regulatory momentum",
+        "Legislative path, veto points, and approval bottlenecks",
+        "Entity identity: Italy",
+        "Recent event flow and live narrative shifts",
+        "Market-implied probability",
+        "Horizon regime: 30d",
+        "20-year analogs and regime shifts",
+        "Source reliability and conflict pressure",
+        "Macro spillovers and second-order pressure"
+      ],
+      "selected_adapter_ids": [
+        "policy_risk",
+        "entity_resolution",
+        "event_news",
+        "consensus_baseline",
+        "temporal_horizon",
+        "historical_baseline",
+        "source_reliability",
+        "macro_spillover"
+      ],
+      "policy_adapter_selected": true,
+      "used_sources": [
+        "wikidata",
+        "polymarket_public",
+        "gdelt",
+        "rss_allowlist",
+        "google_trends",
+        "historical-cache"
+      ],
+      "source_usage": {
+        "policy_like": true,
+        "market_like": false,
+        "sports_like": false,
+        "geo_like": false,
+        "mobility_like": false,
+        "travel_like": false,
+        "macro_public_like": false,
+        "energy_like": false,
+        "environment_like": false,
+        "required_sources": [
+          "wikidata",
+          "gdelt",
+          "rss_allowlist",
+          "polymarket_public"
+        ],
+        "optional_sources": [],
+        "used_sources": [
+          "wikidata",
+          "polymarket_public",
+          "gdelt",
+          "rss_allowlist",
+          "google_trends",
+          "historical-cache"
+        ],
+        "missing_required_sources": [],
+        "missing_optional_sources": [],
+        "provider_states": [
+          {
+            "source_id": "wikidata",
+            "title": "wikidata",
+            "category": "entity_resolution",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "gdelt",
+            "title": "gdelt",
+            "category": "news_attention",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "rss_allowlist",
+            "title": "rss allowlist",
+            "category": "news_attention",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "polymarket_public",
+            "title": "polymarket public",
+            "category": "prediction_market",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "google_trends",
+            "title": "google trends",
+            "category": "attention",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": false,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "historical-cache",
+            "title": "historical-cache",
+            "category": "runtime",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": false,
+            "optional_for_query": false,
+            "used_in_run": true
+          }
+        ]
+      },
+      "missing_required_sources": [],
+      "missing_metadata": [],
+      "primary_call": "Lean No 58/42",
+      "card_state": "limited",
+      "binary_winning_side": "No",
+      "binary_band": "limited",
+      "binary_winning_probability": 0.58,
+      "binary_contract_missing": false,
+      "binary_winner_ambiguous": false,
+      "binary_split_inconsistent": false
+    },
+    {
+      "cluster": "referendum",
+      "query": "Will the new Italian constitutional referendum pass?",
+      "expectedDomains": [
+        "A.24.governance_policy_and_public_timeline"
+      ],
+      "binary": true,
+      "requiredMetadata": [
+        "jurisdiction",
+        "governing_entity"
+      ],
+      "preferredWinner": "b",
+      "requiredSources": [
+        "wikidata",
+        "gdelt",
+        "rss_allowlist",
+        "polymarket_public"
+      ],
+      "primary_domain_id": "A.24.governance_policy_and_public_timeline",
+      "candidate_domains_top3": [
+        "A.24.governance_policy_and_public_timeline",
+        "A.25.geopolitics_and_conflict_dynamics",
+        "A.6.agriculture_and_seasonal_production"
+      ],
+      "top3_hit": true,
+      "intent_shape": "binary_outcome",
+      "resolution_frame": "policy",
+      "question_side_a": "Si",
+      "question_side_b": "No",
+      "event_date": "",
+      "jurisdiction": "Italy",
+      "governing_entity": "Voters",
+      "selected_variable_labels": [
+        "Institutional calendar and governing body incentives",
+        "Polling, public pressure, and regulatory momentum",
+        "Legislative path, veto points, and approval bottlenecks",
+        "Entity identity: Italy",
+        "Recent event flow and live narrative shifts",
+        "Market-implied probability",
+        "Horizon regime: 30d",
+        "20-year analogs and regime shifts",
+        "Source reliability and conflict pressure",
+        "Macro spillovers and second-order pressure"
+      ],
+      "selected_adapter_ids": [
+        "policy_risk",
+        "entity_resolution",
+        "event_news",
+        "consensus_baseline",
+        "temporal_horizon",
+        "historical_baseline",
+        "source_reliability",
+        "macro_spillover"
+      ],
+      "policy_adapter_selected": true,
+      "used_sources": [
+        "wikidata",
+        "polymarket_public",
+        "gdelt",
+        "rss_allowlist",
+        "google_trends",
+        "historical-cache"
+      ],
+      "source_usage": {
+        "policy_like": true,
+        "market_like": false,
+        "sports_like": false,
+        "geo_like": false,
+        "mobility_like": false,
+        "travel_like": false,
+        "macro_public_like": false,
+        "energy_like": false,
+        "environment_like": false,
+        "required_sources": [
+          "wikidata",
+          "gdelt",
+          "rss_allowlist",
+          "polymarket_public"
+        ],
+        "optional_sources": [],
+        "used_sources": [
+          "wikidata",
+          "polymarket_public",
+          "gdelt",
+          "rss_allowlist",
+          "google_trends",
+          "historical-cache"
+        ],
+        "missing_required_sources": [],
+        "missing_optional_sources": [],
+        "provider_states": [
+          {
+            "source_id": "wikidata",
+            "title": "wikidata",
+            "category": "entity_resolution",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "gdelt",
+            "title": "gdelt",
+            "category": "news_attention",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "rss_allowlist",
+            "title": "rss allowlist",
+            "category": "news_attention",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "polymarket_public",
+            "title": "polymarket public",
+            "category": "prediction_market",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "google_trends",
+            "title": "google trends",
+            "category": "attention",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": false,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "historical-cache",
+            "title": "historical-cache",
+            "category": "runtime",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": false,
+            "optional_for_query": false,
+            "used_in_run": true
+          }
+        ]
+      },
+      "missing_required_sources": [],
+      "missing_metadata": [],
+      "primary_call": "Lean No 58/42",
+      "card_state": "limited",
+      "binary_winning_side": "No",
+      "binary_band": "limited",
+      "binary_winning_probability": 0.58,
+      "binary_contract_missing": false,
+      "binary_winner_ambiguous": false,
+      "binary_split_inconsistent": false
+    },
+    {
+      "cluster": "policy_risk",
+      "query": "Will the coalition government survive the budget vote in Italy?",
+      "expectedDomains": [
+        "A.24.governance_policy_and_public_timeline"
+      ],
+      "binary": true,
+      "requiredMetadata": [
+        "jurisdiction",
+        "governing_entity"
+      ],
+      "preferredWinner": "a",
+      "requiredSources": [
+        "wikidata",
+        "gdelt",
+        "rss_allowlist",
+        "polymarket_public"
+      ],
+      "primary_domain_id": "A.24.governance_policy_and_public_timeline",
+      "candidate_domains_top3": [
+        "A.24.governance_policy_and_public_timeline",
+        "A.25.geopolitics_and_conflict_dynamics",
+        "A.22.industry_and_business_cycles"
+      ],
+      "top3_hit": true,
+      "intent_shape": "binary_outcome",
+      "resolution_frame": "policy",
+      "question_side_a": "Government survives",
+      "question_side_b": "Government falls",
+      "event_date": "",
+      "jurisdiction": "Italy",
+      "governing_entity": "Coalition government",
+      "selected_variable_labels": [
+        "Institutional calendar and governing body incentives",
+        "Polling, public pressure, and regulatory momentum",
+        "Legislative path, veto points, and approval bottlenecks",
+        "Entity identity: Italy",
+        "Recent event flow and live narrative shifts",
+        "Runway, demand health, and operating resilience",
+        "Market-implied probability",
+        "Horizon regime: 30d",
+        "20-year analogs and regime shifts",
+        "Source reliability and conflict pressure"
+      ],
+      "selected_adapter_ids": [
+        "policy_risk",
+        "entity_resolution",
+        "event_news",
+        "company_operations",
+        "consensus_baseline",
+        "temporal_horizon",
+        "historical_baseline",
+        "source_reliability"
+      ],
+      "policy_adapter_selected": true,
+      "used_sources": [
+        "wikidata",
+        "polymarket_public",
+        "gdelt",
+        "rss_allowlist",
+        "google_trends",
+        "historical-cache"
+      ],
+      "source_usage": {
+        "policy_like": true,
+        "market_like": false,
+        "sports_like": false,
+        "geo_like": false,
+        "mobility_like": false,
+        "travel_like": false,
+        "macro_public_like": false,
+        "energy_like": false,
+        "environment_like": false,
+        "required_sources": [
+          "wikidata",
+          "gdelt",
+          "rss_allowlist",
+          "polymarket_public"
+        ],
+        "optional_sources": [],
+        "used_sources": [
+          "wikidata",
+          "polymarket_public",
+          "gdelt",
+          "rss_allowlist",
+          "google_trends",
+          "historical-cache"
+        ],
+        "missing_required_sources": [],
+        "missing_optional_sources": [],
+        "provider_states": [
+          {
+            "source_id": "wikidata",
+            "title": "wikidata",
+            "category": "entity_resolution",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "gdelt",
+            "title": "gdelt",
+            "category": "news_attention",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "rss_allowlist",
+            "title": "rss allowlist",
+            "category": "news_attention",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "polymarket_public",
+            "title": "polymarket public",
+            "category": "prediction_market",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "google_trends",
+            "title": "google trends",
+            "category": "attention",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": false,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "historical-cache",
+            "title": "historical-cache",
+            "category": "runtime",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": false,
+            "optional_for_query": false,
+            "used_in_run": true
+          }
+        ]
+      },
+      "missing_required_sources": [],
+      "missing_metadata": [],
+      "primary_call": "Lean Government survives 58/42",
+      "card_state": "limited",
+      "binary_winning_side": "Government survives",
+      "binary_band": "limited",
+      "binary_winning_probability": 0.58,
+      "binary_contract_missing": false,
+      "binary_winner_ambiguous": false,
+      "binary_split_inconsistent": false
+    },
+    {
+      "cluster": "policy_risk",
+      "query": "Quanto e probabile un cambio di governo in Francia nei prossimi 6 mesi?",
+      "expectedDomains": [
+        "A.24.governance_policy_and_public_timeline"
+      ],
+      "binary": true,
+      "requiredMetadata": [
+        "jurisdiction",
+        "governing_entity",
+        "event_date"
+      ],
+      "preferredWinner": "b",
+      "requiredSources": [
+        "wikidata",
+        "gdelt",
+        "rss_allowlist",
+        "polymarket_public"
+      ],
+      "primary_domain_id": "A.24.governance_policy_and_public_timeline",
+      "candidate_domains_top3": [
+        "A.24.governance_policy_and_public_timeline",
+        "A.25.geopolitics_and_conflict_dynamics",
+        "A.0.general.general_forecast"
+      ],
+      "top3_hit": true,
+      "intent_shape": "binary_outcome",
+      "resolution_frame": "policy",
+      "question_side_a": "Government changes",
+      "question_side_b": "Government holds",
+      "event_date": "Next 6 months",
+      "jurisdiction": "France",
+      "governing_entity": "Government",
+      "selected_variable_labels": [
+        "Institutional calendar and governing body incentives",
+        "Polling, public pressure, and regulatory momentum",
+        "Legislative path, veto points, and approval bottlenecks",
+        "Entity identity: France",
+        "Recent event flow and live narrative shifts",
+        "Market-implied probability",
+        "Horizon regime: 30d",
+        "20-year analogs and regime shifts",
+        "Source reliability and conflict pressure",
+        "Macro spillovers and second-order pressure"
+      ],
+      "selected_adapter_ids": [
+        "policy_risk",
+        "entity_resolution",
+        "event_news",
+        "consensus_baseline",
+        "temporal_horizon",
+        "historical_baseline",
+        "source_reliability",
+        "macro_spillover"
+      ],
+      "policy_adapter_selected": true,
+      "used_sources": [
+        "wikidata",
+        "polymarket_public",
+        "gdelt",
+        "rss_allowlist",
+        "google_trends",
+        "historical-cache"
+      ],
+      "source_usage": {
+        "policy_like": true,
+        "market_like": false,
+        "sports_like": false,
+        "geo_like": false,
+        "mobility_like": false,
+        "travel_like": false,
+        "macro_public_like": false,
+        "energy_like": false,
+        "environment_like": false,
+        "required_sources": [
+          "wikidata",
+          "gdelt",
+          "rss_allowlist",
+          "polymarket_public"
+        ],
+        "optional_sources": [],
+        "used_sources": [
+          "wikidata",
+          "polymarket_public",
+          "gdelt",
+          "rss_allowlist",
+          "google_trends",
+          "historical-cache"
+        ],
+        "missing_required_sources": [],
+        "missing_optional_sources": [],
+        "provider_states": [
+          {
+            "source_id": "wikidata",
+            "title": "wikidata",
+            "category": "entity_resolution",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "gdelt",
+            "title": "gdelt",
+            "category": "news_attention",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "rss_allowlist",
+            "title": "rss allowlist",
+            "category": "news_attention",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "polymarket_public",
+            "title": "polymarket public",
+            "category": "prediction_market",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "google_trends",
+            "title": "google trends",
+            "category": "attention",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": false,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "historical-cache",
+            "title": "historical-cache",
+            "category": "runtime",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": false,
+            "optional_for_query": false,
+            "used_in_run": true
+          }
+        ]
+      },
+      "missing_required_sources": [],
+      "missing_metadata": [],
+      "primary_call": "Lean Government holds 58/42",
+      "card_state": "published",
+      "binary_winning_side": "Government holds",
+      "binary_band": "lean",
+      "binary_winning_probability": 0.58,
+      "binary_contract_missing": false,
+      "binary_winner_ambiguous": false,
+      "binary_split_inconsistent": false
+    },
+    {
+      "cluster": "regulatory_decision",
+      "query": "Will the new regulation be approved by parliament?",
+      "expectedDomains": [
+        "A.24.governance_policy_and_public_timeline"
+      ],
+      "binary": true,
+      "requiredMetadata": [
+        "governing_entity"
+      ],
+      "preferredWinner": "a",
+      "requiredSources": [
+        "wikidata",
+        "gdelt",
+        "rss_allowlist",
+        "polymarket_public"
+      ],
+      "primary_domain_id": "A.24.governance_policy_and_public_timeline",
+      "candidate_domains_top3": [
+        "A.24.governance_policy_and_public_timeline",
+        "A.25.geopolitics_and_conflict_dynamics",
+        "A.0.general.general_forecast"
+      ],
+      "top3_hit": true,
+      "intent_shape": "binary_outcome",
+      "resolution_frame": "policy",
+      "question_side_a": "Approved",
+      "question_side_b": "Blocked",
+      "event_date": "",
+      "jurisdiction": "",
+      "governing_entity": "Parliament",
+      "selected_variable_labels": [
+        "Institutional calendar and governing body incentives",
+        "Polling, public pressure, and regulatory momentum",
+        "Legislative path, veto points, and approval bottlenecks",
+        "Entity identity: Parliament",
+        "Recent event flow and live narrative shifts",
+        "Market-implied probability",
+        "Horizon regime: 30d",
+        "20-year analogs and regime shifts",
+        "Source reliability and conflict pressure",
+        "Macro spillovers and second-order pressure"
+      ],
+      "selected_adapter_ids": [
+        "policy_risk",
+        "entity_resolution",
+        "event_news",
+        "consensus_baseline",
+        "temporal_horizon",
+        "historical_baseline",
+        "source_reliability",
+        "macro_spillover"
+      ],
+      "policy_adapter_selected": true,
+      "used_sources": [
+        "wikidata",
+        "polymarket_public",
+        "gdelt",
+        "rss_allowlist",
+        "google_trends",
+        "historical-cache"
+      ],
+      "source_usage": {
+        "policy_like": true,
+        "market_like": false,
+        "sports_like": false,
+        "geo_like": false,
+        "mobility_like": false,
+        "travel_like": false,
+        "macro_public_like": false,
+        "energy_like": false,
+        "environment_like": false,
+        "required_sources": [
+          "wikidata",
+          "gdelt",
+          "rss_allowlist",
+          "polymarket_public"
+        ],
+        "optional_sources": [],
+        "used_sources": [
+          "wikidata",
+          "polymarket_public",
+          "gdelt",
+          "rss_allowlist",
+          "google_trends",
+          "historical-cache"
+        ],
+        "missing_required_sources": [],
+        "missing_optional_sources": [],
+        "provider_states": [
+          {
+            "source_id": "wikidata",
+            "title": "wikidata",
+            "category": "entity_resolution",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "gdelt",
+            "title": "gdelt",
+            "category": "news_attention",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "rss_allowlist",
+            "title": "rss allowlist",
+            "category": "news_attention",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "polymarket_public",
+            "title": "polymarket public",
+            "category": "prediction_market",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "google_trends",
+            "title": "google trends",
+            "category": "attention",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": false,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "historical-cache",
+            "title": "historical-cache",
+            "category": "runtime",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": false,
+            "optional_for_query": false,
+            "used_in_run": true
+          }
+        ]
+      },
+      "missing_required_sources": [],
+      "missing_metadata": [],
+      "primary_call": "Lean Approved 58/42",
+      "card_state": "limited",
+      "binary_winning_side": "Approved",
+      "binary_band": "limited",
+      "binary_winning_probability": 0.58,
+      "binary_contract_missing": false,
+      "binary_winner_ambiguous": false,
+      "binary_split_inconsistent": false
+    },
+    {
+      "cluster": "regulatory_decision",
+      "query": "Will the senate approve the reform package this quarter?",
+      "expectedDomains": [
+        "A.24.governance_policy_and_public_timeline"
+      ],
+      "binary": true,
+      "requiredMetadata": [
+        "event_date",
+        "governing_entity"
+      ],
+      "preferredWinner": "a",
+      "requiredSources": [
+        "wikidata",
+        "gdelt",
+        "rss_allowlist",
+        "polymarket_public"
+      ],
+      "primary_domain_id": "A.24.governance_policy_and_public_timeline",
+      "candidate_domains_top3": [
+        "A.24.governance_policy_and_public_timeline",
+        "A.25.geopolitics_and_conflict_dynamics",
+        "A.0.general.general_forecast"
+      ],
+      "top3_hit": true,
+      "intent_shape": "binary_outcome",
+      "resolution_frame": "policy",
+      "question_side_a": "Approved",
+      "question_side_b": "Blocked",
+      "event_date": "This quarter",
+      "jurisdiction": "",
+      "governing_entity": "Senate",
+      "selected_variable_labels": [
+        "Institutional calendar and governing body incentives",
+        "Polling, public pressure, and regulatory momentum",
+        "Legislative path, veto points, and approval bottlenecks",
+        "Entity identity: Senate",
+        "Recent event flow and live narrative shifts",
+        "Market-implied probability",
+        "Horizon regime: 30d",
+        "20-year analogs and regime shifts",
+        "Source reliability and conflict pressure",
+        "Macro spillovers and second-order pressure"
+      ],
+      "selected_adapter_ids": [
+        "policy_risk",
+        "entity_resolution",
+        "event_news",
+        "consensus_baseline",
+        "temporal_horizon",
+        "historical_baseline",
+        "source_reliability",
+        "macro_spillover"
+      ],
+      "policy_adapter_selected": true,
+      "used_sources": [
+        "wikidata",
+        "polymarket_public",
+        "gdelt",
+        "rss_allowlist",
+        "google_trends",
+        "historical-cache"
+      ],
+      "source_usage": {
+        "policy_like": true,
+        "market_like": false,
+        "sports_like": false,
+        "geo_like": false,
+        "mobility_like": false,
+        "travel_like": false,
+        "macro_public_like": false,
+        "energy_like": false,
+        "environment_like": false,
+        "required_sources": [
+          "wikidata",
+          "gdelt",
+          "rss_allowlist",
+          "polymarket_public"
+        ],
+        "optional_sources": [],
+        "used_sources": [
+          "wikidata",
+          "polymarket_public",
+          "gdelt",
+          "rss_allowlist",
+          "google_trends",
+          "historical-cache"
+        ],
+        "missing_required_sources": [],
+        "missing_optional_sources": [],
+        "provider_states": [
+          {
+            "source_id": "wikidata",
+            "title": "wikidata",
+            "category": "entity_resolution",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "gdelt",
+            "title": "gdelt",
+            "category": "news_attention",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "rss_allowlist",
+            "title": "rss allowlist",
+            "category": "news_attention",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "polymarket_public",
+            "title": "polymarket public",
+            "category": "prediction_market",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "google_trends",
+            "title": "google trends",
+            "category": "attention",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": false,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "historical-cache",
+            "title": "historical-cache",
+            "category": "runtime",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": false,
+            "optional_for_query": false,
+            "used_in_run": true
+          }
+        ]
+      },
+      "missing_required_sources": [],
+      "missing_metadata": [],
+      "primary_call": "Lean Approved 58/42",
+      "card_state": "limited",
+      "binary_winning_side": "Approved",
+      "binary_band": "limited",
+      "binary_winning_probability": 0.58,
+      "binary_contract_missing": false,
+      "binary_winner_ambiguous": false,
+      "binary_split_inconsistent": false
+    },
+    {
+      "cluster": "public_timeline",
+      "query": "Election volatility in Italy over the next 90 days",
+      "expectedDomains": [
+        "A.24.governance_policy_and_public_timeline"
+      ],
+      "binary": false,
+      "requiredMetadata": [
+        "event_date",
+        "jurisdiction",
+        "governing_entity"
+      ],
+      "requiredSources": [
+        "wikidata",
+        "gdelt",
+        "rss_allowlist"
+      ],
+      "primary_domain_id": "A.24.governance_policy_and_public_timeline",
+      "candidate_domains_top3": [
+        "A.24.governance_policy_and_public_timeline",
+        "A.23.markets_and_asset_regimes",
+        "A.25.geopolitics_and_conflict_dynamics"
+      ],
+      "top3_hit": true,
+      "intent_shape": "directional_range",
+      "resolution_frame": "policy",
+      "question_side_a": "",
+      "question_side_b": "",
+      "event_date": "Next 90 days",
+      "jurisdiction": "Italy",
+      "governing_entity": "Voters",
+      "selected_variable_labels": [
+        "Institutional calendar and governing body incentives",
+        "Polling, public pressure, and regulatory momentum",
+        "Legislative path, veto points, and approval bottlenecks",
+        "Entity identity: Italy",
+        "Recent event flow and live narrative shifts",
+        "Horizon regime: 30d",
+        "20-year analogs and regime shifts",
+        "External consensus reference",
+        "Source reliability and conflict pressure",
+        "Macro spillovers and second-order pressure"
+      ],
+      "selected_adapter_ids": [
+        "policy_risk",
+        "entity_resolution",
+        "event_news",
+        "temporal_horizon",
+        "historical_baseline",
+        "consensus_baseline",
+        "source_reliability",
+        "macro_spillover"
+      ],
+      "policy_adapter_selected": true,
+      "used_sources": [
+        "wikidata",
+        "gdelt",
+        "rss_allowlist",
+        "historical-cache"
+      ],
+      "source_usage": {
+        "policy_like": true,
+        "market_like": false,
+        "sports_like": true,
+        "geo_like": false,
+        "mobility_like": false,
+        "travel_like": false,
+        "macro_public_like": false,
+        "energy_like": false,
+        "environment_like": false,
+        "required_sources": [
+          "wikidata",
+          "gdelt",
+          "rss_allowlist",
+          "thesportsdb_public"
+        ],
+        "optional_sources": [
+          "api_football_optional"
+        ],
+        "used_sources": [
+          "wikidata",
+          "gdelt",
+          "rss_allowlist",
+          "historical-cache"
+        ],
+        "missing_required_sources": [
+          "thesportsdb_public"
+        ],
+        "missing_optional_sources": [
+          "api_football_optional"
+        ],
+        "provider_states": [
+          {
+            "source_id": "wikidata",
+            "title": "wikidata",
+            "category": "entity_resolution",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "gdelt",
+            "title": "gdelt",
+            "category": "news_attention",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "rss_allowlist",
+            "title": "rss allowlist",
+            "category": "news_attention",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "thesportsdb_public",
+            "title": "TheSportsDB",
+            "category": "sports",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "required_not_used",
+            "provider": "thesportsdb",
+            "base_url": "https://www.thesportsdb.com/api/v1/json",
+            "notes": [
+              "Using TheSportsDB free tier (key 123) as the primary sports runtime source."
+            ],
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": false
+          },
+          {
+            "source_id": "api_football_optional",
+            "title": "API-Football",
+            "category": "sports",
+            "access_profile": "optional_non_default",
+            "implementation_status": "implemented",
+            "configured": false,
+            "available": false,
+            "status": "optional_source_missing",
+            "provider": "api-football",
+            "base_url": "https://v3.football.api-sports.io",
+            "notes": [
+              "API_FOOTBALL_KEY is optional now and only used as a sports enhancer when configured."
+            ],
+            "required_for_query": false,
+            "optional_for_query": true,
+            "used_in_run": false
+          },
+          {
+            "source_id": "historical-cache",
+            "title": "historical-cache",
+            "category": "runtime",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": false,
+            "optional_for_query": false,
+            "used_in_run": true
+          }
+        ]
+      },
+      "missing_required_sources": [],
+      "missing_metadata": [],
+      "primary_call": "Policy pressure remains elevated over the selected window.",
+      "card_state": "blocked",
+      "binary_winning_side": "",
+      "binary_band": "",
+      "binary_winning_probability": null,
+      "binary_contract_missing": true,
+      "binary_winner_ambiguous": true,
+      "binary_split_inconsistent": true
+    },
+    {
+      "cluster": "public_timeline",
+      "query": "Policy pressure around EU AI regulation next 90 days",
+      "expectedDomains": [
+        "A.24.governance_policy_and_public_timeline"
+      ],
+      "binary": false,
+      "requiredMetadata": [
+        "event_date",
+        "jurisdiction",
+        "governing_entity"
+      ],
+      "requiredSources": [
+        "wikidata",
+        "gdelt",
+        "rss_allowlist"
+      ],
+      "primary_domain_id": "A.24.governance_policy_and_public_timeline",
+      "candidate_domains_top3": [
+        "A.24.governance_policy_and_public_timeline",
+        "A.11.cost_of_living_and_price_pressure",
+        "A.13.energy_and_utilities_markets"
+      ],
+      "top3_hit": true,
+      "intent_shape": "directional_range",
+      "resolution_frame": "policy",
+      "question_side_a": "",
+      "question_side_b": "",
+      "event_date": "Next 90 days",
+      "jurisdiction": "European Union",
+      "governing_entity": "EU institutions",
+      "selected_variable_labels": [
+        "Institutional calendar and governing body incentives",
+        "Polling, public pressure, and regulatory momentum",
+        "Legislative path, veto points, and approval bottlenecks",
+        "Entity identity: European Union",
+        "Recent event flow and live narrative shifts",
+        "Horizon regime: 30d",
+        "20-year analogs and regime shifts",
+        "External consensus reference",
+        "Source reliability and conflict pressure",
+        "Macro spillovers and second-order pressure"
+      ],
+      "selected_adapter_ids": [
+        "policy_risk",
+        "entity_resolution",
+        "event_news",
+        "temporal_horizon",
+        "historical_baseline",
+        "consensus_baseline",
+        "source_reliability",
+        "macro_spillover"
+      ],
+      "policy_adapter_selected": true,
+      "used_sources": [
+        "wikidata",
+        "gdelt",
+        "rss_allowlist",
+        "google_trends",
+        "historical-cache"
+      ],
+      "source_usage": {
+        "policy_like": true,
+        "market_like": false,
+        "sports_like": false,
+        "geo_like": false,
+        "mobility_like": false,
+        "travel_like": false,
+        "macro_public_like": false,
+        "energy_like": false,
+        "environment_like": false,
+        "required_sources": [
+          "wikidata",
+          "gdelt",
+          "rss_allowlist"
+        ],
+        "optional_sources": [],
+        "used_sources": [
+          "wikidata",
+          "gdelt",
+          "rss_allowlist",
+          "google_trends",
+          "historical-cache"
+        ],
+        "missing_required_sources": [],
+        "missing_optional_sources": [],
+        "provider_states": [
+          {
+            "source_id": "wikidata",
+            "title": "wikidata",
+            "category": "entity_resolution",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "gdelt",
+            "title": "gdelt",
+            "category": "news_attention",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "rss_allowlist",
+            "title": "rss allowlist",
+            "category": "news_attention",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "google_trends",
+            "title": "google trends",
+            "category": "attention",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": false,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "historical-cache",
+            "title": "historical-cache",
+            "category": "runtime",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": false,
+            "optional_for_query": false,
+            "used_in_run": true
+          }
+        ]
+      },
+      "missing_required_sources": [],
+      "missing_metadata": [],
+      "primary_call": "Policy pressure remains elevated over the selected window.",
+      "card_state": "limited",
+      "binary_winning_side": "",
+      "binary_band": "",
+      "binary_winning_probability": null,
+      "binary_contract_missing": true,
+      "binary_winner_ambiguous": true,
+      "binary_split_inconsistent": true
+    },
+    {
+      "cluster": "policy_risk",
+      "query": "Rischio di elezioni anticipate in Italia entro 12 mesi",
+      "expectedDomains": [
+        "A.24.governance_policy_and_public_timeline"
+      ],
+      "binary": true,
+      "requiredMetadata": [
+        "event_date",
+        "jurisdiction",
+        "governing_entity"
+      ],
+      "preferredWinner": "b",
+      "requiredSources": [
+        "wikidata",
+        "gdelt",
+        "rss_allowlist",
+        "polymarket_public"
+      ],
+      "primary_domain_id": "A.24.governance_policy_and_public_timeline",
+      "candidate_domains_top3": [
+        "A.24.governance_policy_and_public_timeline",
+        "A.25.geopolitics_and_conflict_dynamics",
+        "A.0.general.general_forecast"
+      ],
+      "top3_hit": true,
+      "intent_shape": "binary_outcome",
+      "resolution_frame": "policy",
+      "question_side_a": "Government changes",
+      "question_side_b": "Government holds",
+      "event_date": "Within 12 months",
+      "jurisdiction": "Italy",
+      "governing_entity": "Government",
+      "selected_variable_labels": [
+        "Institutional calendar and governing body incentives",
+        "Polling, public pressure, and regulatory momentum",
+        "Legislative path, veto points, and approval bottlenecks",
+        "Entity identity: Italy",
+        "Recent event flow and live narrative shifts",
+        "Market-implied probability",
+        "Horizon regime: 30d",
+        "20-year analogs and regime shifts",
+        "Source reliability and conflict pressure",
+        "Macro spillovers and second-order pressure"
+      ],
+      "selected_adapter_ids": [
+        "policy_risk",
+        "entity_resolution",
+        "event_news",
+        "consensus_baseline",
+        "temporal_horizon",
+        "historical_baseline",
+        "source_reliability",
+        "macro_spillover"
+      ],
+      "policy_adapter_selected": true,
+      "used_sources": [
+        "wikidata",
+        "polymarket_public",
+        "gdelt",
+        "rss_allowlist",
+        "google_trends",
+        "historical-cache"
+      ],
+      "source_usage": {
+        "policy_like": true,
+        "market_like": false,
+        "sports_like": false,
+        "geo_like": false,
+        "mobility_like": false,
+        "travel_like": false,
+        "macro_public_like": false,
+        "energy_like": false,
+        "environment_like": false,
+        "required_sources": [
+          "wikidata",
+          "gdelt",
+          "rss_allowlist",
+          "polymarket_public"
+        ],
+        "optional_sources": [],
+        "used_sources": [
+          "wikidata",
+          "polymarket_public",
+          "gdelt",
+          "rss_allowlist",
+          "google_trends",
+          "historical-cache"
+        ],
+        "missing_required_sources": [],
+        "missing_optional_sources": [],
+        "provider_states": [
+          {
+            "source_id": "wikidata",
+            "title": "wikidata",
+            "category": "entity_resolution",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "gdelt",
+            "title": "gdelt",
+            "category": "news_attention",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "rss_allowlist",
+            "title": "rss allowlist",
+            "category": "news_attention",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "polymarket_public",
+            "title": "polymarket public",
+            "category": "prediction_market",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "google_trends",
+            "title": "google trends",
+            "category": "attention",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": false,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "historical-cache",
+            "title": "historical-cache",
+            "category": "runtime",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": false,
+            "optional_for_query": false,
+            "used_in_run": true
+          }
+        ]
+      },
+      "missing_required_sources": [],
+      "missing_metadata": [],
+      "primary_call": "Lean Government holds 58/42",
+      "card_state": "limited",
+      "binary_winning_side": "Government holds",
+      "binary_band": "limited",
+      "binary_winning_probability": 0.58,
+      "binary_contract_missing": false,
+      "binary_winner_ambiguous": false,
+      "binary_split_inconsistent": false
+    },
+    {
+      "cluster": "regulatory_decision",
+      "query": "Will parliament block the reform package before autumn?",
+      "expectedDomains": [
+        "A.24.governance_policy_and_public_timeline"
+      ],
+      "binary": true,
+      "requiredMetadata": [
+        "event_date",
+        "governing_entity"
+      ],
+      "preferredWinner": "b",
+      "requiredSources": [
+        "wikidata",
+        "gdelt",
+        "rss_allowlist",
+        "polymarket_public"
+      ],
+      "primary_domain_id": "A.24.governance_policy_and_public_timeline",
+      "candidate_domains_top3": [
+        "A.24.governance_policy_and_public_timeline",
+        "A.25.geopolitics_and_conflict_dynamics",
+        "A.0.general.general_forecast"
+      ],
+      "top3_hit": true,
+      "intent_shape": "binary_outcome",
+      "resolution_frame": "policy",
+      "question_side_a": "Approved",
+      "question_side_b": "Blocked",
+      "event_date": "Autumn",
+      "jurisdiction": "",
+      "governing_entity": "Parliament",
+      "selected_variable_labels": [
+        "Institutional calendar and governing body incentives",
+        "Polling, public pressure, and regulatory momentum",
+        "Legislative path, veto points, and approval bottlenecks",
+        "Entity identity: Parliament",
+        "Recent event flow and live narrative shifts",
+        "Market-implied probability",
+        "Horizon regime: 30d",
+        "20-year analogs and regime shifts",
+        "Source reliability and conflict pressure",
+        "Macro spillovers and second-order pressure"
+      ],
+      "selected_adapter_ids": [
+        "policy_risk",
+        "entity_resolution",
+        "event_news",
+        "consensus_baseline",
+        "temporal_horizon",
+        "historical_baseline",
+        "source_reliability",
+        "macro_spillover"
+      ],
+      "policy_adapter_selected": true,
+      "used_sources": [
+        "wikidata",
+        "polymarket_public",
+        "gdelt",
+        "rss_allowlist",
+        "google_trends",
+        "historical-cache"
+      ],
+      "source_usage": {
+        "policy_like": true,
+        "market_like": false,
+        "sports_like": false,
+        "geo_like": false,
+        "mobility_like": false,
+        "travel_like": false,
+        "macro_public_like": false,
+        "energy_like": false,
+        "environment_like": false,
+        "required_sources": [
+          "wikidata",
+          "gdelt",
+          "rss_allowlist",
+          "polymarket_public"
+        ],
+        "optional_sources": [],
+        "used_sources": [
+          "wikidata",
+          "polymarket_public",
+          "gdelt",
+          "rss_allowlist",
+          "google_trends",
+          "historical-cache"
+        ],
+        "missing_required_sources": [],
+        "missing_optional_sources": [],
+        "provider_states": [
+          {
+            "source_id": "wikidata",
+            "title": "wikidata",
+            "category": "entity_resolution",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "gdelt",
+            "title": "gdelt",
+            "category": "news_attention",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "rss_allowlist",
+            "title": "rss allowlist",
+            "category": "news_attention",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "polymarket_public",
+            "title": "polymarket public",
+            "category": "prediction_market",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "google_trends",
+            "title": "google trends",
+            "category": "attention",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": false,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "historical-cache",
+            "title": "historical-cache",
+            "category": "runtime",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": false,
+            "optional_for_query": false,
+            "used_in_run": true
+          }
+        ]
+      },
+      "missing_required_sources": [],
+      "missing_metadata": [],
+      "primary_call": "Lean Blocked 58/42",
+      "card_state": "limited",
+      "binary_winning_side": "Blocked",
+      "binary_band": "limited",
+      "binary_winning_probability": 0.58,
+      "binary_contract_missing": false,
+      "binary_winner_ambiguous": false,
+      "binary_split_inconsistent": false
+    }
+  ]
+}

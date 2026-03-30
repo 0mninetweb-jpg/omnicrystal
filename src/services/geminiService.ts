@@ -31,6 +31,15 @@ function getGuestRolloutKey() {
   return next;
 }
 
+function getClientTimeZone() {
+  if (typeof Intl === 'undefined' || typeof Intl.DateTimeFormat !== 'function') return '';
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+  } catch (_error) {
+    return '';
+  }
+}
+
 function getFriendlyServerErrorMessage(
   status: number,
   payload: {
@@ -129,6 +138,11 @@ async function requestServer<T>(
 
   if (activeRequestContext?.meteredAction) {
     headers['X-Crystal-Metered-Action'] = activeRequestContext.meteredAction;
+  }
+
+  const clientTimeZone = getClientTimeZone();
+  if (clientTimeZone) {
+    headers['X-Crystal-Timezone'] = clientTimeZone;
   }
 
   if (requireAuth) {

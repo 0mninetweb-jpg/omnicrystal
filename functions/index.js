@@ -53,16 +53,19 @@ const {
 } = require("./catalogRegistry");
 const {
   buildRoutingHints,
+  buildTemporalContext,
   mergeQueryPlanWithRouting,
   computeEvidenceQuality,
   finalizeScorecard,
   buildBinaryContract,
   buildCompatibleProbabilitySplit,
   buildDriverObjects,
+  normalizeTimeZone,
   normalizeTextList,
   clamp01: predictionClamp01,
 } = require("./predictionCore");
 const { createCrystalCoreRuntime, CRYSTAL_CORE_VERSION } = require("./crystalCore/runtime");
+const { sanitizePublishedText, sanitizePublishedArtifactFields } = require("./publicForecastText");
 
 const GEMINI_API_KEY = defineSecret("GEMINI_API_KEY");
 const NIXTLA_API_KEY = defineSecret("NIXTLA_API_KEY");
@@ -144,6 +147,16 @@ function getBody(req) {
     }
   }
   return req.body;
+}
+
+function getRequestTimeZone(req, fallback = "Europe/Rome") {
+  return normalizeTimeZone(
+    req?.get?.("X-Crystal-Timezone") ||
+      req?.headers?.["x-crystal-timezone"] ||
+      req?.body?.timeZone ||
+      req?.query?.timeZone,
+    fallback
+  );
 }
 
 function stripApiPrefix(pathname) {
@@ -242,11 +255,11 @@ function buildPublicForecastIds(queryText, queryPlan = {}, card = {}, existingPu
   const lineageId = createForecastLineageId(queryText, queryPlan, card);
   const domainId = resolveDomainId(queryPlan?.primary_domain_id || queryPlan?.domain || queryPlan?.domain_id || card?.domain || "");
   const domainConfig = getDomain(domainId);
-  const entityLabel = getPrimaryForecastEntityLabel(queryPlan, queryText);
+  const entityLabel = sanitizePublishedText(getPrimaryForecastEntityLabel(queryPlan, queryText), getPrimaryForecastEntityLabel(queryPlan, queryText));
   const entitySlug = slugifyText(entityLabel, "general");
-  const geographyLabel = safeText(getPrimaryLocationFromPlan(queryPlan), "Auto");
+  const geographyLabel = sanitizePublishedText(safeText(getPrimaryLocationFromPlan(queryPlan), "Auto"), "Auto");
   const geographySlug = slugifyText(geographyLabel, "auto");
-  const topicLabel = safeText(domainConfig?.short_label || domainConfig?.title, "Forecast");
+  const topicLabel = sanitizePublishedText(safeText(domainConfig?.short_label || domainConfig?.title, "Forecast"), "Forecast");
   const topicSlug = slugifyText(topicLabel, "forecast");
   const publicSlug =
     safeText(existingPublicSlug) || `${entitySlug}-${topicSlug}-${lineageId.replace(/^lineage_/, "").slice(0, 8)}`;
@@ -296,6 +309,14 @@ async function maybePublishForecastArtifacts({
   const confidenceScore = Number.isFinite(Number(card?.trust_layer?.confidence_score))
     ? Number(card.trust_layer.confidence_score)
     : 0;
+  const temporalContext =
+    card?.temporal_context && typeof card.temporal_context === "object"
+      ? card.temporal_context
+      : queryPlan?.temporal_context && typeof queryPlan.temporal_context === "object"
+        ? queryPlan.temporal_context
+        : buildTemporalContext(queryText, {
+            eventDate: safeText(queryPlan?.event_date),
+          });
   const publicPayload = {
     ...card,
     lineage_id: lineageId,
@@ -319,21 +340,28 @@ async function maybePublishForecastArtifacts({
     public_visibility: "public",
     source_view: safeText(sourceView, "search"),
     published_by_uid: uid,
+    temporal_context: temporalContext,
+    run_as_of_utc: safeText(card?.run_as_of_utc, safeText(temporalContext?.as_of_utc)),
+    run_as_of_timezone: safeText(card?.run_as_of_timezone, safeText(temporalContext?.as_of_timezone, "Europe/Rome")),
+    run_as_of_local_date: safeText(card?.run_as_of_local_date, safeText(temporalContext?.as_of_local_date)),
+    relative_time_phrase: safeText(card?.relative_time_phrase, safeText(temporalContext?.relative_phrase)),
+    resolved_time_window: card?.resolved_time_window || temporalContext?.resolved_time_window || null,
     published_at: publishedAt,
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
   };
+  const { sanitized: sanitizedPublicPayload } = sanitizePublishedArtifactFields(publicPayload);
 
   const createdAt = admin.firestore.FieldValue.serverTimestamp();
   const ledgerPayload = ledgerSnapshot.exists
-    ? publicPayload
+    ? sanitizedPublicPayload
     : {
-        ...publicPayload,
+        ...sanitizedPublicPayload,
         createdAt,
       };
   const publicDocPayload = publicSnapshot.exists
-    ? publicPayload
+    ? sanitizedPublicPayload
     : {
-        ...publicPayload,
+        ...sanitizedPublicPayload,
         createdAt,
       };
 
@@ -341,7 +369,7 @@ async function maybePublishForecastArtifacts({
     ledgerRef.set(ledgerPayload, { merge: true }),
     versionRef.set(
       {
-        ...publicPayload,
+        ...sanitizedPublicPayload,
         parent_lineage_id: lineageId,
         version_saved_at: admin.firestore.FieldValue.serverTimestamp(),
         createdAt,
@@ -462,6 +490,12 @@ function createEvidenceDrawer(card, domainConfig, nowIso) {
 
 function buildCoverageGapCard(queryText, queryPlan, domainConfig) {
   const nowIso = new Date().toISOString();
+  const temporalContext =
+    queryPlan?.temporal_context && typeof queryPlan.temporal_context === "object"
+      ? queryPlan.temporal_context
+      : buildTemporalContext(queryText, {
+          eventDate: safeText(queryPlan?.event_date),
+        });
   const title = `${domainConfig.title}: coverage still building`;
   return {
     card_id: crypto.randomUUID(),
@@ -474,6 +508,12 @@ function buildCoverageGapCard(queryText, queryPlan, domainConfig) {
     summary:
       "Crystal knows this blueprint domain, but the public evidence fabric for this coverage unit is not ready enough to publish a trustworthy read.",
     verdict: `Coverage gap for ${domainConfig.short_label}. Crystal will not guess where the current registry says coverage is blocked.`,
+    temporal_context: temporalContext,
+    run_as_of_utc: safeText(temporalContext?.as_of_utc, nowIso),
+    run_as_of_timezone: safeText(temporalContext?.as_of_timezone, "Europe/Rome"),
+    run_as_of_local_date: safeText(temporalContext?.as_of_local_date),
+    relative_time_phrase: safeText(temporalContext?.relative_phrase),
+    resolved_time_window: temporalContext?.resolved_time_window || null,
     personal_output: "",
     stakes_level: "medium",
     risk_band: "medium",
@@ -937,6 +977,14 @@ function normalizeCard(card, queryPlan, options = {}) {
   const routingDomain = queryPlan?.primary_domain_id || queryPlan?.domain_id || queryPlan?.domain || "general";
   const domain = resolveDomainId(typeof card?.domain === "string" && card.domain ? card.domain : routingDomain);
   const domainConfig = getDomain(domain);
+  const temporalContext =
+    card?.temporal_context && typeof card.temporal_context === "object"
+      ? card.temporal_context
+      : queryPlan?.temporal_context && typeof queryPlan.temporal_context === "object"
+        ? queryPlan.temporal_context
+        : buildTemporalContext(safeText(card?.query_origin || queryPlan?.original_query || queryPlan?.query || queryPlan?.query_text), {
+            eventDate: safeText(card?.event_date || queryPlan?.event_date),
+          });
   const sportsCard = isSportsDomain(domain) || safeText(card?.card_type) === SPORTS_FIXTURE_CARD_TYPE;
   const scenarioSet = Array.isArray(card?.scenario_set)
     ? card.scenario_set
@@ -1155,6 +1203,12 @@ function normalizeCard(card, queryPlan, options = {}) {
     title: safeText(card?.title, titleFallback),
     summary: safeText(card?.summary, summaryFallback),
     verdict: safeText(card?.verdict, verdictFallback),
+    temporal_context: temporalContext,
+    run_as_of_utc: safeText(card?.run_as_of_utc, safeText(temporalContext?.as_of_utc, nowIso)),
+    run_as_of_timezone: safeText(card?.run_as_of_timezone, safeText(temporalContext?.as_of_timezone, "Europe/Rome")),
+    run_as_of_local_date: safeText(card?.run_as_of_local_date, safeText(temporalContext?.as_of_local_date)),
+    relative_time_phrase: safeText(card?.relative_time_phrase, safeText(temporalContext?.relative_phrase)),
+    resolved_time_window: card?.resolved_time_window || temporalContext?.resolved_time_window || null,
     primary_call: safeText(binaryContract?.display_call, safeText(card?.primary_call, safeText(scorecard?.primary_call))),
     binary_contract: binaryContract || null,
     probability_split: compatibilityProbabilitySplit,
@@ -1273,6 +1327,11 @@ function normalizeQueryPlanPayload(payload = {}, options = {}) {
     Array.isArray(mergedPayload?.card_types) && mergedPayload.card_types.length > 0
       ? mergedPayload.card_types
       : [{ card_type_id: defaultCardType }];
+  const temporalContext = buildTemporalContext(safeText(options?.queryText), {
+    timeZone: options?.timeZone,
+    asOfUtc: options?.asOfUtc,
+    eventDate: safeText(mergedPayload?.event_date),
+  });
 
   return {
     plan_version: safeText(mergedPayload?.plan_version, "crystal-b2c-v1"),
@@ -1285,6 +1344,7 @@ function normalizeQueryPlanPayload(payload = {}, options = {}) {
     confidence_mode: safeText(mergedPayload?.confidence_mode, routingHints.confidenceMode || "balanced"),
     question_side_a: safeText(mergedPayload?.question_side_a),
     question_side_b: safeText(mergedPayload?.question_side_b),
+    temporal_context: temporalContext,
     event_date: safeText(mergedPayload?.event_date),
     governing_entity: safeText(mergedPayload?.governing_entity),
     jurisdiction: safeText(mergedPayload?.jurisdiction),
@@ -1311,6 +1371,7 @@ function normalizeQueryPlanPayload(payload = {}, options = {}) {
     })),
     filters: mergedPayload?.filters && typeof mergedPayload.filters === "object" ? { ...mergedPayload.filters } : undefined,
     constraints: mergedPayload?.constraints && typeof mergedPayload.constraints === "object" ? { ...mergedPayload.constraints } : undefined,
+    original_query: safeText(options?.queryText),
   };
 }
 
@@ -1732,6 +1793,7 @@ async function createForecastRunRecord({
   plan = "free",
   runtimeTransport = "local_core",
   rolloutBucket = null,
+  requestTimeZone = "Europe/Rome",
 }) {
   const payload = {
     run_id: runId,
@@ -1747,6 +1809,7 @@ async function createForecastRunRecord({
     user_context: sanitizeFirestoreValue(userContext || null),
     engine: safeText(engine, "extended"),
     plan: safeText(plan, "free"),
+    request_time_zone: normalizeTimeZone(requestTimeZone, "Europe/Rome"),
     runtime_transport: safeText(runtimeTransport, "local_core"),
     rollout_bucket: rolloutBucket ? safeText(rolloutBucket) : null,
     pending_poll_after_ms: 2500,
@@ -1853,7 +1916,11 @@ async function compileQueryThroughCrystalCore(queryText, options = {}) {
     try {
       const response = await invokeCloudRunJson("/v1/compile", {
         method: "POST",
-        body: { query: queryText },
+        body: {
+          query: queryText,
+          timeZone: normalizeTimeZone(options?.timeZone, "Europe/Rome"),
+          asOfUtc: safeText(options?.asOfUtc),
+        },
       });
       return response?.query_plan || response?.plan || response;
     } catch (error) {
@@ -1862,10 +1929,13 @@ async function compileQueryThroughCrystalCore(queryText, options = {}) {
   }
 
   try {
-    return await getCrystalCoreRuntime().compileQuery(queryText);
+    return await getCrystalCoreRuntime().compileQuery(queryText, {
+      timeZone: options?.timeZone,
+      asOfUtc: options?.asOfUtc,
+    });
   } catch (error) {
     console.warn("Crystal core local compile failed, falling back to legacy planner.", error?.message || error);
-    return compileQuery(queryText);
+    return compileQuery(queryText, options);
   }
 }
 
@@ -1883,7 +1953,17 @@ async function startCrystalEdgePrediction({
   plan = "free",
   transport = "local_core",
   rolloutBucket = null,
+  requestTimeZone = "Europe/Rome",
 }) {
+  queryPlan =
+    queryPlan && typeof queryPlan === "object"
+      ? normalizeQueryPlanPayload(queryPlan, {
+          fallbackDomain: safeText(queryPlan?.primary_domain_id || queryPlan?.domain || queryPlan?.domain_id, GENERAL_FORECAST_DOMAIN),
+          queryText,
+          timeZone: requestTimeZone,
+          asOfUtc: new Date().toISOString(),
+        })
+      : queryPlan;
   await createForecastRunRecord({
     runId,
     queryText,
@@ -1898,6 +1978,7 @@ async function startCrystalEdgePrediction({
     plan,
     runtimeTransport: transport === "remote" ? "remote" : "local_core",
     rolloutBucket,
+    requestTimeZone,
   });
 
   if (transport === "remote" && isCrystalCoreRemoteEnabled()) {
@@ -1916,6 +1997,7 @@ async function startCrystalEdgePrediction({
         plan,
         runtimeTransport: "remote",
         rolloutBucket,
+        requestTimeZone,
         waitMs: 8000,
       });
 
@@ -1975,6 +2057,7 @@ async function startCrystalEdgePrediction({
     plan,
     runtimeTransport: transport === "remote" ? "local_fallback" : "local_core",
     rolloutBucket,
+    requestTimeZone,
   });
 
   return {
@@ -2085,6 +2168,7 @@ function mergeRuntimeSourceHealth(baseSummary = {}, crystalCoreHealth = {}) {
   const runtimeTitles = {
     google_trends: "Google Trends",
     yahoo_finance: "Yahoo Finance",
+    thesportsdb_public: "TheSportsDB",
     api_football_optional: "API-Football",
   };
   const providerStateById = Object.fromEntries(providerStates.map((provider) => [provider.source_id, provider]));
@@ -2719,6 +2803,7 @@ function buildGenericQueryPlanPrompt(queryText, routingHints = {}) {
       return `${index + 1}. ${domain.domain_id} | ${domain.short_label} | score=${candidate.score} | ${domain.summary}`;
     })
     .join("\n");
+  const temporalContext = routingHints?.temporalContext || null;
   return `Convert the following user query into a Crystal B2C QueryPlan JSON object.
 
 Query: "${queryText}"
@@ -2731,6 +2816,11 @@ Routing hints from the system:
 - resolution_frame: ${routingHints.resolutionFrame || "trend"}
 - question_side_a: ${routingHints?.binaryFrame?.question_side_a || ""}
 - question_side_b: ${routingHints?.binaryFrame?.question_side_b || ""}
+- as_of_utc: ${safeText(temporalContext?.as_of_utc)}
+- as_of_local_date: ${safeText(temporalContext?.as_of_local_date)}
+- as_of_timezone: ${safeText(temporalContext?.as_of_timezone)}
+- relative_time_phrase: ${safeText(temporalContext?.relative_phrase)}
+- resolved_time_window: ${safeText(temporalContext?.resolved_time_window?.label)}
 - supporting_domains: ${Array.isArray(routingHints?.supportingDomains) ? routingHints.supportingDomains.join(", ") : ""}
 
 Top candidate domains:
@@ -2886,7 +2976,7 @@ Restituisci almeno:
   };
 }
 
-async function compileQuery(queryText) {
+async function compileQuery(queryText, options = {}) {
   if (looksLikeSportsMatchQuery(queryText)) {
     const payload = await withRetry(() =>
       llmRuntime.generateJson({
@@ -2898,14 +2988,26 @@ async function compileQuery(queryText) {
       })
     );
 
-    return normalizeQueryPlanPayload(payload, {
+    const normalizedSportsPlan = normalizeQueryPlanPayload(payload, {
       fallbackDomain: SPORTS_MATCH_OUTCOMES_DOMAIN,
       defaultCardType: SPORTS_FIXTURE_CARD_TYPE,
       defaultEntityType: "fixture",
+      queryText,
+      timeZone: options?.timeZone,
+      asOfUtc: options?.asOfUtc,
     });
+    return {
+      ...normalizedSportsPlan,
+      primary_domain_id: SPORTS_MATCH_OUTCOMES_DOMAIN,
+      domain_id: SPORTS_MATCH_OUTCOMES_DOMAIN,
+      card_types: [{ card_type_id: SPORTS_FIXTURE_CARD_TYPE }],
+    };
   }
 
-  const routingHints = buildRoutingHints(queryText);
+  const routingHints = buildRoutingHints(queryText, {
+    timeZone: options?.timeZone,
+    asOfUtc: options?.asOfUtc,
+  });
   const payload = await withRetry(() =>
     llmRuntime.generateJson({
       modelKind: "query",
@@ -2919,10 +3021,22 @@ async function compileQuery(queryText) {
   return normalizeQueryPlanPayload(payload, {
     fallbackDomain: routingHints.primaryDomainId || GENERAL_FORECAST_DOMAIN,
     routingHints,
+    queryText,
+    timeZone: options?.timeZone,
+    asOfUtc: options?.asOfUtc,
   });
 }
 
 async function predict(queryText, queryPlan, userContext, options = {}) {
+  queryPlan =
+    queryPlan && typeof queryPlan === "object"
+      ? normalizeQueryPlanPayload(queryPlan, {
+          fallbackDomain: safeText(queryPlan?.primary_domain_id || queryPlan?.domain || queryPlan?.domain_id, GENERAL_FORECAST_DOMAIN),
+          queryText,
+          timeZone: options?.timeZone,
+          asOfUtc: options?.asOfUtc,
+        })
+      : queryPlan;
   const domain = resolveDomainId(queryPlan?.primary_domain_id || queryPlan?.domain || queryPlan?.domain_id || "");
   const domainConfig = getDomain(domain);
   const sportsForecast = isSportsDomain(domain);
@@ -3429,6 +3543,7 @@ exports.api = onRequest(
       }
 
       if (req.method === "POST" && route === "/public/compile-query") {
+        const requestTimeZone = getRequestTimeZone(req);
         const runtimeSelection = await resolveCrystalCoreSelection({
           req,
           uid: null,
@@ -3436,6 +3551,8 @@ exports.api = onRequest(
         });
         const plan = await compileQueryThroughCrystalCore(body.query || "", {
           transport: runtimeSelection.selectedTransport,
+          timeZone: requestTimeZone,
+          asOfUtc: new Date().toISOString(),
         });
         respondJson(res, 200, plan);
         return;
@@ -3468,6 +3585,7 @@ exports.api = onRequest(
 
         const queryText = body.query || "";
         const queryPlan = body.queryPlan || {};
+        const requestTimeZone = getRequestTimeZone(req);
         const runtimeSelection = await resolveCrystalCoreSelection({
           req,
           uid: null,
@@ -3491,6 +3609,7 @@ exports.api = onRequest(
             plan: "free",
             transport: runtimeSelection.selectedTransport,
             rolloutBucket: runtimeSelection.rolloutBucket,
+            requestTimeZone,
           });
 
           if (edgeResult.pending) {
@@ -3515,11 +3634,14 @@ exports.api = onRequest(
           if (!isLegacyEmergencyFallbackEnabled()) {
             throw edgeError;
           }
+          const requestTimeZone = getRequestTimeZone(req);
           const card = await predict(body.query || "", body.queryPlan || {}, null, {
             engine: "standard",
             action: "search_standard",
             cost: 0,
             plan: "free",
+            timeZone: requestTimeZone,
+            asOfUtc: new Date().toISOString(),
           });
           const publishedCard = await completeLegacyEmergencyFallbackRun({
             runId,
@@ -3733,6 +3855,7 @@ exports.api = onRequest(
       }
 
       if (req.method === "POST" && route === "/compile-query") {
+        const requestTimeZone = getRequestTimeZone(req);
         const runtimeSelection = await resolveCrystalCoreSelection({
           req,
           uid: decodedUser.uid,
@@ -3740,6 +3863,8 @@ exports.api = onRequest(
         });
         const plan = await compileQueryThroughCrystalCore(body.query || "", {
           transport: runtimeSelection.selectedTransport,
+          timeZone: requestTimeZone,
+          asOfUtc: new Date().toISOString(),
         });
         respondJson(res, 200, plan);
         return;
@@ -3751,6 +3876,7 @@ exports.api = onRequest(
         const queryText = body.query || "";
         const queryPlan = body.queryPlan || {};
         const userContext = body.userContext || null;
+        const requestTimeZone = getRequestTimeZone(req);
         const runtimeSelection = await resolveCrystalCoreSelection({
           req,
           uid: decodedUser.uid,
@@ -3773,6 +3899,7 @@ exports.api = onRequest(
             plan: userState.plan,
             transport: runtimeSelection.selectedTransport,
             rolloutBucket: runtimeSelection.rolloutBucket,
+            requestTimeZone,
           });
 
           await consumeCredits(decodedUser.uid, decodedUser, actionSpec, sourceView, {
@@ -3810,6 +3937,8 @@ exports.api = onRequest(
         try {
           const baseCard = await predict(queryText, queryPlan, userContext, {
             engine: actionSpec.engine,
+            timeZone: requestTimeZone,
+            asOfUtc: new Date().toISOString(),
             action: actionSpec.action,
             cost: actionSpec.cost,
             plan: userState.plan,

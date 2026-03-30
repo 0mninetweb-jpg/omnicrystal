@@ -613,7 +613,7 @@ const CATALOG_DOMAINS = [
     "wave_1",
     "published",
     "Sports remains one of the clearest high-frequency use cases, even while provider depth is still improving.",
-    ["api_football_optional", "rss_allowlist"]
+    ["thesportsdb_public", "api_football_optional", "rss_allowlist"]
   ),
   createDomain(
     "A.30.culture_events_and_attention",
@@ -764,8 +764,8 @@ const CATALOG_DOMAINS = [
     "session-based",
     "tier_3",
     "wave_3",
-    "blocked",
-    "The tradeoff layer is designed, but it stays blocked until B goes live end-to-end.",
+    "limited",
+    "The tradeoff layer is live in guided mode and now depends on typed decision readiness to graduate to stronger public cards.",
     []
   ),
   createDomain(
@@ -858,6 +858,7 @@ const SOURCE_REGISTRY = [
   { source_id: "gtfs_realtime", title: "GTFS Realtime", category: "mobility", status: "approved", access_profile: "public", implementation_status: "implemented" },
   { source_id: "opensky", title: "OpenSky", category: "travel", status: "approved", access_profile: "public", implementation_status: "implemented" },
   { source_id: "football_data", title: "football-data.org", category: "sports", status: "approved", access_profile: "public", implementation_status: "registry_only" },
+  { source_id: "thesportsdb_public", title: "TheSportsDB", category: "sports", status: "approved", access_profile: "public", implementation_status: "implemented" },
   { source_id: "gdelt", title: "GDELT", category: "news_attention", status: "approved", access_profile: "public", implementation_status: "implemented" },
   { source_id: "rss_allowlist", title: "Allowlisted RSS feeds", category: "news_attention", status: "approved", access_profile: "public", implementation_status: "implemented" },
   { source_id: "api_football_optional", title: "API-Football", category: "sports", status: "limited", access_profile: "optional_non_default", implementation_status: "implemented" },

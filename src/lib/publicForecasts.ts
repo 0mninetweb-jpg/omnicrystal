@@ -268,6 +268,34 @@ export function formatPublicForecastDate(value: unknown) {
   });
 }
 
+export function formatPublicForecastRunDate(record: PublicForecastRecord) {
+  const runValue =
+    (typeof record.run_as_of_utc === 'string' && record.run_as_of_utc) ||
+    (typeof record.temporal_context?.as_of_utc === 'string' && record.temporal_context.as_of_utc) ||
+    (typeof record.query_plan?.temporal_context?.as_of_utc === 'string' && record.query_plan.temporal_context.as_of_utc) ||
+    '';
+  if (!runValue) return '';
+  const parsed = new Date(runValue);
+  if (Number.isNaN(parsed.getTime())) return '';
+  return `Forecast run ${parsed.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+}
+
+export function formatRelativeTimeInterpretation(record: PublicForecastRecord) {
+  const phrase =
+    (typeof record.relative_time_phrase === 'string' && record.relative_time_phrase) ||
+    (typeof record.temporal_context?.relative_phrase === 'string' && record.temporal_context.relative_phrase) ||
+    (typeof record.query_plan?.temporal_context?.relative_phrase === 'string' && record.query_plan.temporal_context.relative_phrase) ||
+    '';
+  const resolvedLabel =
+    (typeof record.resolved_time_window?.label === 'string' && record.resolved_time_window.label) ||
+    (typeof record.temporal_context?.resolved_time_window?.label === 'string' && record.temporal_context.resolved_time_window.label) ||
+    (typeof record.query_plan?.temporal_context?.resolved_time_window?.label === 'string' &&
+      record.query_plan.temporal_context.resolved_time_window.label) ||
+    '';
+  if (!phrase || !resolvedLabel) return '';
+  return `Interpreted "${phrase}" as ${resolvedLabel}`;
+}
+
 export function rankTrendingForecasts(records: PublicForecastRecord[]) {
   return [...records].sort((left, right) => {
     const leftScore =

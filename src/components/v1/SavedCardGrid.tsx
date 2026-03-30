@@ -1,4 +1,5 @@
 import React from 'react';
+import { sanitizeDisplayText } from '../../lib/displayText';
 import type { GalleryCardRecord } from './galleryTypes';
 import { cn } from '../../lib/ui';
 
@@ -34,11 +35,11 @@ export function SavedCardGrid({ cards, selectedId, onSelect }: SavedCardGridProp
           <div className="text-[11px] font-semibold uppercase tracking-[0.18em] opacity-70">
             {(card.card_state_ui || card.card_state || 'published').replace(/_/g, ' ')}
           </div>
-          <div className="mt-3 text-lg font-semibold tracking-[-0.02em]">{card.title}</div>
-          <div className="mt-2 text-sm leading-7 opacity-80">{card.summary}</div>
+          <div className="mt-3 text-lg font-semibold tracking-[-0.02em]">{sanitizeDisplayText(card.title, 'Crystal forecast')}</div>
+          <div className="mt-2 text-sm leading-7 opacity-80">{sanitizeDisplayText(card.summary, 'No summary available yet.')}</div>
           <div className="mt-4 flex flex-wrap gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] opacity-70">
-            <span>{card.entity_label || 'Auto'}</span>
-            <span>{card.horizon_label || '30 days'}</span>
+            <span>{sanitizeDisplayText(card.entity_label, 'Auto')}</span>
+            <span>{sanitizeDisplayText(card.horizon_label, '30 days')}</span>
             <span>{Math.round((card.trust_confidence || card.trust_layer?.confidence_score || 0) * 100)}%</span>
           </div>
         </button>

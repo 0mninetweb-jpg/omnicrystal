@@ -120,6 +120,24 @@ function formatProvenanceSummary(card: CardData) {
   return provenance.verification_level.replace(/_/g, ' ');
 }
 
+function formatRunDateSummary(card: CardData) {
+  const runAsOf = safeText(card.run_as_of_utc, safeText(card.temporal_context?.as_of_utc));
+  if (!runAsOf) return '';
+  const parsed = new Date(runAsOf);
+  if (Number.isNaN(parsed.getTime())) return '';
+  return parsed.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function formatRelativeTimeSummary(card: CardData) {
+  const temporalContext = card.temporal_context;
+  const phrase = safeText(card.relative_time_phrase, safeText(temporalContext?.relative_phrase));
+  const resolvedLabel = safeText(card.resolved_time_window?.label, safeText(temporalContext?.resolved_time_window?.label));
+  const usesRelative =
+    temporalContext?.uses_relative_time === true || Boolean(phrase && resolvedLabel);
+  if (!usesRelative || !phrase || !resolvedLabel) return '';
+  return `Interpreted "${phrase}" as ${resolvedLabel}`;
+}
+
 function getPrimaryState(card: CardData) {
   if (card.card_state === 'blocked') return 'coverage_gap' as const;
   if (card.card_state === 'limited') return 'limited' as const;
@@ -284,6 +302,7 @@ function buildCoverageCompanion(card: CardData, context: ForecastResolvedContext
     alternateSuggestions,
     trustLayer: card.trust_layer,
     evidenceDrawer: card.evidence_drawer,
+    card,
   };
 }
 
@@ -313,6 +332,7 @@ export function buildForecastStack(card: CardData, context: ForecastResolvedCont
         ]).slice(0, 3),
         trustLayer: card.trust_layer,
         evidenceDrawer: card.evidence_drawer,
+        card,
       },
     ];
   }
@@ -456,5 +476,7 @@ export function getForecastMetaCopy(card: CardData) {
   return {
     freshnessSummary: formatFreshnessSummary(card),
     provenanceSummary: formatProvenanceSummary(card),
+    runDateSummary: formatRunDateSummary(card),
+    relativeTimeSummary: formatRelativeTimeSummary(card),
   };
 }

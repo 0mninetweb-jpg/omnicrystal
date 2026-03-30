@@ -1,0 +1,187 @@
+﻿{
+    "generated_at":  "2026-03-30T18:58:47.8781054+02:00",
+    "stage":  "rollout-50-50",
+    "stage_label":  "Promote to 50/50",
+    "requested_apply":  false,
+    "action_taken":  "hold",
+    "target_rollout":  {
+                           "signed_in_percent":  50,
+                           "kill_switch":  false,
+                           "guest_percent":  50
+                       },
+    "current_rollout_before":  {
+                                   "enabled":  true,
+                                   "transport":  "remote",
+                                   "signed_in_percent":  10,
+                                   "guest_percent":  0,
+                                   "salt":  "pdmq37s0p01u08v6jvr3vafosthi2zcx",
+                                   "kill_switch":  false,
+                                   "updated_at":  "2026-03-30T12:34:17.178Z"
+                               },
+    "current_rollout_after":  {
+                                  "enabled":  true,
+                                  "transport":  "remote",
+                                  "signed_in_percent":  10,
+                                  "guest_percent":  0,
+                                  "salt":  "pdmq37s0p01u08v6jvr3vafosthi2zcx",
+                                  "kill_switch":  false,
+                                  "updated_at":  "2026-03-30T12:34:17.178Z"
+                              },
+    "gates_required":  [
+                           "phase_a_closeout_green",
+                           "domain_matrix_green",
+                           "parity_green",
+                           "health_green",
+                           "sports_parity_green",
+                           "signed_in_qa_certified",
+                           "current_rollout_stage_ok",
+                           "window_requirement_met",
+                           "total_request_threshold",
+                           "health_spot_checks",
+                           "manual_smoke",
+                           "no_raw_errors",
+                           "no_p0_ux",
+                           "no_p1_systemic"
+                       ],
+    "gates":  [
+                  {
+                      "name":  "phase_a_closeout_green",
+                      "passed":  true,
+                      "status":  "Green",
+                      "notes":  "Latest close-out: C:\\Users\\Fiorenza\\OneDrive\\Desktop\\Codex\\crystal-review-0316\\docs\\phase-a-closeout-2026-03-30.json"
+                  },
+                  {
+                      "name":  "domain_matrix_green",
+                      "passed":  true,
+                      "status":  "Green",
+                      "notes":  "Latest matrix: C:\\Users\\Fiorenza\\OneDrive\\Desktop\\Codex\\crystal-review-0316\\docs\\domain-quality-matrix-2026-03-30.json"
+                  },
+                  {
+                      "name":  "parity_green",
+                      "passed":  true,
+                      "status":  "Green",
+                      "notes":  "Latest parity: C:\\Users\\Fiorenza\\OneDrive\\Desktop\\Codex\\crystal-review-0316\\docs\\parity-report-2026-03-24.json"
+                  },
+                  {
+                      "name":  "health_green",
+                      "passed":  true,
+                      "status":  "Green",
+                      "notes":  "Live /api/health reachable and crystal core available."
+                  },
+                  {
+                      "name":  "sports_parity_green",
+                      "passed":  true,
+                      "status":  "Green",
+                      "notes":  "Sports catalog/provider still available in live health."
+                  },
+                  {
+                      "name":  "signed_in_qa_certified",
+                      "passed":  true,
+                      "status":  "Green",
+                      "notes":  "QA gate from latest phase close-out."
+                  },
+                  {
+                      "name":  "current_rollout_stage_ok",
+                      "passed":  false,
+                      "status":  "Blocked",
+                      "notes":  "Current rollout stage: canary-10-0; expected previous stage: rollout-25-25."
+                  },
+                  {
+                      "name":  "window_requirement_met",
+                      "passed":  false,
+                      "status":  "Blocked",
+                      "notes":  "Elapsed since current rollout change: 4.41 h; required: 48 h."
+                  },
+                  {
+                      "name":  "signed_in_request_threshold",
+                      "passed":  false,
+                      "status":  "Blocked",
+                      "notes":  "Signed-in remote completed runs: 0; required: 100."
+                  },
+                  {
+                      "name":  "total_request_threshold",
+                      "passed":  false,
+                      "status":  "Blocked",
+                      "notes":  "Total remote completed runs: 62; required: 100."
+                  },
+                  {
+                      "name":  "guest_request_presence",
+                      "passed":  true,
+                      "status":  "Green",
+                      "notes":  "Guest remote completed runs in window: 62."
+                  },
+                  {
+                      "name":  "health_spot_checks",
+                      "passed":  true,
+                      "status":  "Green",
+                      "notes":  "Healthy spot checks supplied: 3."
+                  },
+                  {
+                      "name":  "manual_smoke",
+                      "passed":  true,
+                      "status":  "Green",
+                      "notes":  "Manual smoke flag supplied: True."
+                  },
+                  {
+                      "name":  "no_raw_errors",
+                      "passed":  true,
+                      "status":  "Green",
+                      "notes":  "No raw user-facing errors flag supplied: True."
+                  },
+                  {
+                      "name":  "no_p0_ux",
+                      "passed":  true,
+                      "status":  "Green",
+                      "notes":  "No P0 flag supplied: True."
+                  },
+                  {
+                      "name":  "guest_gating_ok",
+                      "passed":  true,
+                      "status":  "Green",
+                      "notes":  "Guest gating flag supplied: False."
+                  },
+                  {
+                      "name":  "no_p1_systemic",
+                      "passed":  true,
+                      "status":  "Green",
+                      "notes":  "No P1 systemic flag supplied: True."
+                  }
+              ],
+    "stage_ready":  false,
+    "evidence":  {
+                     "current_rollout_updated_at":  "2026-03-30T12:34:17.178Z",
+                     "parity_path":  "C:\\Users\\Fiorenza\\OneDrive\\Desktop\\Codex\\crystal-review-0316\\docs\\parity-report-2026-03-24.json",
+                     "manual_smoke_passed":  true,
+                     "no_p0":  true,
+                     "expected_previous_stage":  "rollout-25-25",
+                     "guest_gating_passed":  false,
+                     "remote_completed_total":  62,
+                     "domain_matrix_path":  "C:\\Users\\Fiorenza\\OneDrive\\Desktop\\Codex\\crystal-review-0316\\docs\\domain-quality-matrix-2026-03-30.json",
+                     "remote_fallback_total":  0,
+                     "no_p1_systemic":  true,
+                     "request_window_start":  "2026-03-28T16:58:45.426Z",
+                     "provider_foundation_path":  "C:\\Users\\Fiorenza\\OneDrive\\Desktop\\Codex\\crystal-review-0316\\docs\\provider-foundation-report-2026-03-30.json",
+                     "requested_log_window_hours":  48,
+                     "healthy_spot_checks":  3,
+                     "window_hours":  48,
+                     "remote_completed_guest":  62,
+                     "current_rollout_stage":  "canary-10-0",
+                     "phase_closeout_path":  "C:\\Users\\Fiorenza\\OneDrive\\Desktop\\Codex\\crystal-review-0316\\docs\\phase-a-closeout-2026-03-30.json",
+                     "remote_pending_total":  0,
+                     "elapsed_hours_since_current_rollout":  4.41,
+                     "remote_completed_signed_in":  0,
+                     "no_raw_errors":  true
+                 },
+    "live_health_before":  {
+                               "fetch_error":  "",
+                               "crystal_core_available":  true,
+                               "guest_percent":  0,
+                               "signed_in_percent":  10,
+                               "sports_available":  true,
+                               "sports_provider_configured":  true,
+                               "base_url":  "https://crystal-core-paaqyfwena-ew.a.run.app"
+                           },
+    "live_health_after":  null,
+    "rollout_apply_result":  null,
+    "next_stage":  "rollout-100-100"
+}

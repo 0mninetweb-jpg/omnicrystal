@@ -20,12 +20,14 @@ const {
 } = require("../sportsData");
 const {
   buildRoutingHints,
+  buildTemporalContext,
   mergeQueryPlanWithRouting,
   computeEvidenceQuality,
   finalizeScorecard,
   buildBinaryContract,
   buildCompatibleProbabilitySplit,
   buildDriverObjects,
+  normalizeTimeZone,
   normalizeTextList,
   clamp01,
   safeText,
@@ -959,6 +961,11 @@ function compactScorecardForPrompt(scorecard = {}) {
     publication_basis: {
       reasons: normalizeTextList(scorecard?.publication_basis?.reasons, 3),
       notes: normalizeTextList(scorecard?.publication_basis?.notes, 4),
+      threshold_source: safeText(scorecard?.publication_basis?.threshold_source, "static_defaults"),
+      evidence_convergence: safeText(scorecard?.publication_basis?.evidence_convergence),
+      evidence_strength: safeText(scorecard?.publication_basis?.evidence_strength),
+      quality_verdict: safeText(scorecard?.publication_basis?.quality_verdict),
+      blocker_reason: safeText(scorecard?.publication_basis?.blocker_reason),
     },
   };
 }
@@ -1684,7 +1691,7 @@ function buildSportsGroundedDossierPrediction({
         counter_signals: normalizeTextList([coverageReason], 2),
         invalidators: normalizeTextList(
           [
-            "Configure API-Football and resolve the fixture before trusting a sports pick.",
+            "Configure the primary sports provider and resolve the fixture before trusting a sports pick.",
             "Stand down until the runtime can ground the match with provider data.",
           ],
           3
@@ -1761,7 +1768,7 @@ function buildSportsGroundedDossierPrediction({
       historical_anchors: historicalAnchors,
       why_this_side:
         safeText(sportsGrounding?.reason) ||
-        `API-Football grounding currently leans ${winningSide} on recent form and the odds snapshot.`,
+        `Sports-provider grounding currently leans ${winningSide} on structured recent form, table context, and any active enhancer signals.`,
       recommended_posture:
         "Treat this as a provider-grounded sports read and keep watching lineups, odds drift, and late availability news.",
       scenario_set: [],
@@ -1907,6 +1914,11 @@ function normalizeQueryPlanPayload(payload = {}, options = {}) {
     : routingHints.resolutionFrame || "trend";
   const questionSideA = normalizedIntentShape === "binary_outcome" ? safeText(mergedPayload?.question_side_a) : "";
   const questionSideB = normalizedIntentShape === "binary_outcome" ? safeText(mergedPayload?.question_side_b) : "";
+  const temporalContext = buildTemporalContext(safeText(options?.queryText), {
+    timeZone: options?.timeZone,
+    asOfUtc: options?.asOfUtc,
+    eventDate: safeText(mergedPayload?.event_date),
+  });
 
   return {
     plan_version: safeText(mergedPayload?.plan_version, "crystal-core-v1"),
@@ -1935,6 +1947,7 @@ function normalizeQueryPlanPayload(payload = {}, options = {}) {
       question_side_a: questionSideA,
       question_side_b: questionSideB,
     },
+    temporal_context: temporalContext,
     event_date: safeText(mergedPayload?.event_date),
     governing_entity: safeText(mergedPayload?.governing_entity),
     jurisdiction: safeText(mergedPayload?.jurisdiction),
@@ -1953,6 +1966,8 @@ function buildGenericQueryPlanPrompt(queryText, routingHints = {}) {
     ? routingHints.entities.map((entity) => safeText(entity?.label)).filter(Boolean).slice(0, 4).join(", ")
     : "";
   const policyHint = Boolean(routingHints?.policyLike);
+  const temporalContext = routingHints?.temporalContext || null;
+  const resolvedWindowLabel = safeText(temporalContext?.resolved_time_window?.label);
 
   return `Query: "${safeText(queryText)}"
 Preferred domain: ${safeText(routingHints.primaryDomainId, GENERAL_FORECAST_DOMAIN)}
@@ -1964,6 +1979,11 @@ Policy/governance hint: ${policyHint ? "yes" : "no"}
 Event date hint: ${safeText(routingHints?.eventDate)}
 Jurisdiction hint: ${safeText(routingHints?.jurisdiction)}
 Governing entity hint: ${safeText(routingHints?.governingEntity)}
+As-of UTC: ${safeText(temporalContext?.as_of_utc)}
+As-of local date: ${safeText(temporalContext?.as_of_local_date)}
+As-of timezone: ${safeText(temporalContext?.as_of_timezone)}
+Relative time phrase: ${safeText(temporalContext?.relative_phrase)}
+Resolved time window: ${resolvedWindowLabel}
 Resolved entities: ${resolvedEntities}
 Supporting domains: ${Array.isArray(routingHints?.supportingDomains) ? routingHints.supportingDomains.slice(0, 3).join(", ") : ""}
 Candidate domains:
@@ -1994,12 +2014,18 @@ function buildDossierPredictionPrompt({
     ? normalizedQuery.entities.map((entity) => safeText(entity?.label)).filter(Boolean).slice(0, 4)
     : [];
   const marketStructureSummary = formatMarketStructureForPrompt(verifiedEvidencePack?.market_structure);
-  const marketLike = Boolean(verifiedEvidencePack?.market_structure);
+  const temporalContext = normalizedQuery?.temporal_context || null;
 
   return `Query: "${safeText(queryText)}"
 Domain: ${safeText(normalizedQuery?.primary_domain_id)}
 Intent: ${safeText(normalizedQuery?.intent_shape)}
 Resolution frame: ${safeText(normalizedQuery?.resolution_frame)}
+As-of UTC: ${safeText(temporalContext?.as_of_utc)}
+As-of local date: ${safeText(temporalContext?.as_of_local_date)}
+As-of timezone: ${safeText(temporalContext?.as_of_timezone)}
+Relative time phrase: ${safeText(temporalContext?.relative_phrase)}
+Resolved time window: ${safeText(temporalContext?.resolved_time_window?.label)}
+Event date: ${safeText(normalizedQuery?.event_date)}
 Entities: ${entityLabels.join(", ")}
 Selected variables: ${compactVariablesForPrompt(variableSelectionPack?.selected_variables)
     .map((variable) => variable.label)
@@ -2020,7 +2046,8 @@ Return one JSON object only with keys:
 structured_dossier, raw_prediction.
 
 Rules:
-- Publish a directional thesis when evidence has orientation.
+- Publish a directional thesis only when the evidence is clearly oriented and internally converged.
+- If the evidence is informative but still thin, conflicted, or coverage-limited, keep the raw prediction readable but conservative enough for a watchlist or coverage_gap outcome.
 - Keep structured_dossier compact.
 - If this is a markets/assets question, reason explicitly in this order: trend, range, regime risk, consensus.
 - raw_prediction must include primary_call, confidence_score, key_drivers, counter_signals, invalidators, historical_anchors, why_this_side, recommended_posture.
@@ -2036,11 +2063,18 @@ function buildForecastVerbalizationPrompt({ queryText, normalizedQuery, verified
   const entityLabels = Array.isArray(normalizedQuery?.entities)
     ? normalizedQuery.entities.map((entity) => safeText(entity?.label)).filter(Boolean).slice(0, 4)
     : [];
+  const temporalContext = normalizedQuery?.temporal_context || null;
 
   return `Query: "${safeText(queryText)}"
 Domain: ${safeText(normalizedQuery?.primary_domain_id)}
 Intent: ${safeText(normalizedQuery?.intent_shape)}
 Resolution frame: ${safeText(normalizedQuery?.resolution_frame)}
+As-of UTC: ${safeText(temporalContext?.as_of_utc)}
+As-of local date: ${safeText(temporalContext?.as_of_local_date)}
+As-of timezone: ${safeText(temporalContext?.as_of_timezone)}
+Relative time phrase: ${safeText(temporalContext?.relative_phrase)}
+Resolved time window: ${safeText(temporalContext?.resolved_time_window?.label)}
+Event date: ${safeText(normalizedQuery?.event_date)}
 Entities: ${entityLabels.join(", ")}
 Call: ${safeText(compactScorecard.primary_call)}
 Publication state: ${safeText(compactScorecard.publication_state, "limited")}
@@ -2053,6 +2087,8 @@ Invalidators: ${compactScorecard.invalidators.join("; ")}
 Historical anchors: ${compactScorecard.historical_anchors.join("; ")}
 Trust note: ${safeText(verifiedEvidencePack?.verification_summary)}
 Coverage notes: ${normalizeTextList(compactScorecard.publication_basis?.notes, 4).join("; ")}
+Quality verdict: ${safeText(compactScorecard.publication_basis?.quality_verdict)}
+Blocker reason: ${safeText(compactScorecard.publication_basis?.blocker_reason)}
 
 Return one JSON object only with keys:
 title, summary, verdict, recommended_action.
@@ -2062,7 +2098,97 @@ Rules:
 - If the scorecard is binary, keep the compact verdict aligned with binary_contract.display_call.
 - Keep every field short, precise, and product-like.
 - If the state is limited, keep the thesis and put the caution in summary or coverage_notes.
+- If the quality verdict is coverage_gap or blocked_no_pick, say that plainly and do not overstate certainty.
 - No markdown. No commentary. No wrapper keys.`;
+}
+
+function buildQualityAwareFallbackSummary({ queryText, scorecard = {}, binaryContract = null, normalizedQuery = {} }) {
+  const publicationState = safeText(scorecard?.publication_state, "limited");
+  const qualityVerdict = safeText(scorecard?.publication_basis?.quality_verdict, publicationState === "published" ? "publishable" : "watchlist");
+  const blockerReason = safeText(scorecard?.publication_basis?.blocker_reason);
+  const intentShape = safeText(normalizedQuery?.intent_shape, binaryContract ? "binary_outcome" : "directional_range");
+
+  if (qualityVerdict === "blocked_no_pick") {
+    return "Crystal is holding this card back because the required evidence path is still incomplete.";
+  }
+  if (qualityVerdict === "coverage_gap") {
+    return "Crystal sees early signal here, but required coverage is still too thin for a stronger public read.";
+  }
+  if (qualityVerdict === "watchlist") {
+    if (blockerReason === "directional_signal_not_publish_ready") {
+      return "Crystal has orientation here, but the signals are not converged enough to publish a stronger directional card yet.";
+    }
+    if (blockerReason === "conflicting_live_signals") {
+      return "Crystal has real signal here, but the live stack is still too conflicted to treat this as decision-ready.";
+    }
+    if (blockerReason === "thin_evidence_coverage") {
+      return "Crystal has a readable thesis here, but the evidence stack is still too thin to sharpen it into a stronger public call.";
+    }
+    return binaryContract
+      ? `Crystal still leans ${safeText(binaryContract.winning_side, "the current leader")}, but the edge remains partial and should be treated as a watchlist read.`
+      : "Crystal has a directional read here, but the evidence is still only partially converged.";
+  }
+  if (intentShape === "range_regime") {
+    return "Crystal sees a publishable regime read here, with enough convergence to describe the active range and break risk.";
+  }
+  if (binaryContract) {
+    return `Crystal has a publishable binary edge on ${safeText(binaryContract.winning_side, "the leading side")}, with the caveats pushed into the evidence notes.`;
+  }
+  if (blockerReason === "thin_signal_convergence") {
+    return "Crystal has directional evidence here, but it is not yet converged enough to be treated as a clean public call.";
+  }
+  return safeText(scorecard?.why_this_side, `Crystal built a directional read for "${safeText(queryText, "this query")}".`);
+}
+
+function buildQualityAwareFallbackVerdict({ queryText, scorecard = {}, binaryContract = null, normalizedQuery = {} }) {
+  const publicationState = safeText(scorecard?.publication_state, "limited");
+  const qualityVerdict = safeText(scorecard?.publication_basis?.quality_verdict, publicationState === "published" ? "publishable" : "watchlist");
+
+  if (binaryContract?.display_call && qualityVerdict !== "blocked_no_pick") {
+    return binaryContract.display_call;
+  }
+  if (qualityVerdict === "blocked_no_pick") {
+    return "Blocked pending required evidence";
+  }
+  if (qualityVerdict === "coverage_gap") {
+    return "Coverage gap: hold as watchlist";
+  }
+  if (qualityVerdict === "watchlist") {
+    if (scorecard?.publication_basis?.blocker_reason === "directional_signal_not_publish_ready") {
+      return safeText(scorecard?.primary_call, "Watchlist: directional read not publish-ready");
+    }
+    if (scorecard?.publication_basis?.blocker_reason === "conflicting_live_signals") {
+      return safeText(scorecard?.primary_call, "Watchlist: live signals still conflict");
+    }
+    return safeText(scorecard?.primary_call, "Watchlist: directional read remains tentative");
+  }
+  if (safeText(normalizedQuery?.intent_shape) === "range_regime") {
+    return safeText(scorecard?.primary_call, "Publishable range/regime read");
+  }
+  return safeText(scorecard?.primary_call, `Crystal directional read: ${safeText(queryText, "forecast")}`);
+}
+
+function buildQualityAwareRecommendedAction(scorecard = {}) {
+  const qualityVerdict = safeText(scorecard?.publication_basis?.quality_verdict);
+  if (qualityVerdict === "blocked_no_pick") {
+    return "Do not act on this yet. Wait for the missing required evidence path to come online before treating this as decision-ready.";
+  }
+  if (qualityVerdict === "coverage_gap") {
+    return "Treat this as a watchlist item and wait for stronger source coverage before acting with conviction.";
+  }
+  if (qualityVerdict === "watchlist") {
+    if (scorecard?.publication_basis?.blocker_reason === "directional_signal_not_publish_ready") {
+      return "Use this as a watchlist thesis only. Wait for stronger convergence before treating it as a public-grade directional call.";
+    }
+    if (scorecard?.publication_basis?.blocker_reason === "conflicting_live_signals") {
+      return "Treat this as a conflict watchlist and wait for the strongest live signals to resolve before acting with conviction.";
+    }
+    return "Use this as a bounded scenario read and monitor the invalidation triggers before sizing up any action.";
+  }
+  return safeText(
+    scorecard?.recommended_posture,
+    "Use this as a live directional read and keep monitoring the invalidation triggers."
+  );
 }
 
 function buildFinalCard({
@@ -2093,6 +2219,15 @@ function buildFinalCard({
   const confidenceScore = clamp01(scorecard?.confidence_score, 0.58);
   const publicationState = safeText(scorecard?.publication_state, "limited");
   const now = nowIso();
+  const temporalContext =
+    normalizedQuery?.temporal_context && typeof normalizedQuery.temporal_context === "object"
+      ? normalizedQuery.temporal_context
+      : buildTemporalContext(queryText, {
+          eventDate: safeText(normalizedQuery?.event_date),
+        });
+  const runAsOfUtc = safeText(temporalContext?.as_of_utc, now);
+  const runAsOfTimezone = safeText(temporalContext?.as_of_timezone, "Europe/Rome");
+  const runAsOfLocalDate = safeText(temporalContext?.as_of_local_date);
   const coverageNotes = uniqueStrings(
     normalizeTextList(voicePayload?.coverage_notes, 4).concat(
       normalizeTextList(scorecard?.publication_basis?.notes, 4),
@@ -2122,15 +2257,27 @@ function buildFinalCard({
     stakes_level: buildStakeLevel(domainConfig.domain_id),
     risk_band: publicationState === "published" ? "medium" : "high",
     title: safeText(voicePayload?.title, safeText(queryText, "Crystal Forecast")),
-    summary: safeText(voicePayload?.summary, safeText(scorecard?.why_this_side, "Crystal generated a directional read.")),
-    verdict: safeText(voicePayload?.verdict, safeText(binaryContract?.display_call, safeText(scorecard?.primary_call, "Crystal generated a directional read."))),
+    summary: safeText(
+      voicePayload?.summary,
+      buildQualityAwareFallbackSummary({ queryText, scorecard, binaryContract, normalizedQuery })
+    ),
+    verdict: safeText(
+      voicePayload?.verdict,
+      buildQualityAwareFallbackVerdict({ queryText, scorecard, binaryContract, normalizedQuery })
+    ),
     primary_call: safeText(binaryContract?.display_call, safeText(scorecard?.primary_call)),
+    temporal_context: temporalContext,
+    run_as_of_utc: runAsOfUtc,
+    run_as_of_timezone: runAsOfTimezone,
+    run_as_of_local_date: runAsOfLocalDate,
+    relative_time_phrase: safeText(temporalContext?.relative_phrase),
+    resolved_time_window: temporalContext?.resolved_time_window || null,
     binary_contract: binaryContract,
     probability_split: probabilitySplit,
     why_this_side: safeText(scorecard?.why_this_side),
     personal_output: safeText(
       voicePayload?.recommended_action,
-      safeText(scorecard?.recommended_posture, "Use this as a live directional read and monitor the invalidation triggers.")
+      buildQualityAwareRecommendedAction(scorecard)
     ),
     scenario_set: scenarioSet,
     so_what: [],
@@ -2150,12 +2297,21 @@ function buildFinalCard({
         staleness_bucket: evidenceQuality.freshness_score >= 0.66 ? "fresh" : evidenceQuality.freshness_score <= 0.32 ? "stale" : "unknown",
       },
       coverage_notes: coverageNotes,
+      quality_summary: {
+        evidence_convergence: safeText(scorecard?.publication_basis?.evidence_convergence),
+        evidence_strength: safeText(scorecard?.publication_basis?.evidence_strength),
+        source_coverage_state: safeText(scorecard?.publication_basis?.source_coverage_state),
+        blocker_reason: safeText(scorecard?.publication_basis?.blocker_reason),
+        threshold_source: safeText(scorecard?.publication_basis?.threshold_source, "static_defaults"),
+      },
       gating_reason:
         publicationState === "published" ? "published" : publicationState === "limited" ? "limited_by_evidence" : "blocked_by_policy",
     },
     trust_layer: {
       confidence_score: confidenceScore,
       confidence_tier: confidenceTier(confidenceScore),
+      threshold_source: safeText(scorecard?.publication_basis?.threshold_source, "static_defaults"),
+      quality_verdict: safeText(scorecard?.publication_basis?.quality_verdict),
       data_sufficiency_flag:
         publicationState === "published" ? "sufficient" : evidenceQuality.coverage_score >= 0.45 ? "partial" : "insufficient",
       freshness: {
@@ -2183,6 +2339,13 @@ function buildFinalCard({
 function buildPendingRunCard({ runId, queryText, queryPlan = {}, visibility = "private", accessToken = null, pollAfterMs = 2500 }) {
   const domainId = resolveDomainId(queryPlan?.primary_domain_id || queryPlan?.domain_id || queryPlan?.domain || GENERAL_FORECAST_DOMAIN);
   const domainConfig = getDomain(domainId, GENERAL_FORECAST_DOMAIN);
+  const temporalContext =
+    queryPlan?.temporal_context && typeof queryPlan.temporal_context === "object"
+      ? queryPlan.temporal_context
+      : buildTemporalContext(queryText, {
+          eventDate: safeText(queryPlan?.event_date),
+        });
+  const runAsOfUtc = safeText(temporalContext?.as_of_utc, nowIso());
   return {
     card_id: `pending_${runId}`,
     card_type: getDomainCardTypes(domainId)[0] || "forecast_band",
@@ -2195,6 +2358,12 @@ function buildPendingRunCard({ runId, queryText, queryPlan = {}, visibility = "p
     title: "Crystal is running a deeper forecast",
     summary: "The deep prediction pipeline is still assembling the final card. Crystal will update this result as soon as the run closes.",
     verdict: `Deep run in progress for: ${safeText(queryText, domainConfig.short_label || "forecast")}`,
+    temporal_context: temporalContext,
+    run_as_of_utc: runAsOfUtc,
+    run_as_of_timezone: safeText(temporalContext?.as_of_timezone, "Europe/Rome"),
+    run_as_of_local_date: safeText(temporalContext?.as_of_local_date),
+    relative_time_phrase: safeText(temporalContext?.relative_phrase),
+    resolved_time_window: temporalContext?.resolved_time_window || null,
     primary_call: "",
     personal_output: "Stay on this screen. Crystal will replace this limited placeholder with the final forecast when the run completes.",
     scenario_set: [],
@@ -2274,6 +2443,66 @@ function buildBaselineConsensusPack({ verifiedEvidencePack = {}, normalizedQuery
   };
 }
 
+function inferSimulationDomainFamily(normalizedQuery = {}) {
+  const domainId = safeText(normalizedQuery?.primary_domain_id);
+  if (domainId === "A.24.governance_policy_and_public_timeline") return "governance_timeline";
+  if (domainId === "A.25.geopolitics_and_conflict_dynamics") return "geopolitics_conflict";
+  if (domainId === "A.26.human_history_and_long_run_analogs") return "long_run_analog";
+  if (["C.1.attention_waves", "C.3.hype_curve_tracker", "C.4.global_quote_stream"].includes(domainId)) {
+    return "attention_narrative";
+  }
+  if (domainId === "A.30.culture_events_and_attention") return "culture_event_pressure";
+  if (domainId === "B.3.8.personal_decisions_and_tradeoffs") return "personal_tradeoff";
+  return "";
+}
+
+function buildSimulationEntityEventLocation(normalizedQuery = {}) {
+  return {
+    entity: safeText(getPrimaryEntityLabel(normalizedQuery)),
+    location: safeText(getPrimaryLocationFromPlan(normalizedQuery)),
+    event: safeText(normalizedQuery?.governing_entity || normalizedQuery?.question_side_a || normalizedQuery?.event_date),
+  };
+}
+
+function inferSimulationDecisionFrame(normalizedQuery = {}, verifiedEvidencePack = {}) {
+  const domainId = safeText(normalizedQuery?.primary_domain_id);
+  const publicationBasis = verifiedEvidencePack?.publication_basis || {};
+  const decisionReadyState = safeText(publicationBasis?.decision_ready_state || verifiedEvidencePack?.decision_ready_state);
+  if (domainId === "B.3.8.personal_decisions_and_tradeoffs") return "personal_tradeoff";
+  if (domainId === "B.3.5.business_idea_outcomes") return "business_tradeoff";
+  if (domainId === "A.24.governance_policy_and_public_timeline") return "governance_timeline";
+  if (domainId === "A.25.geopolitics_and_conflict_dynamics") return "escalation_path";
+  if (domainId === "A.26.human_history_and_long_run_analogs") return "analog_break_conditions";
+  if (decisionReadyState === "ready") return "decision_ready";
+  return safeText(normalizedQuery?.resolution_frame, "directional");
+}
+
+function buildSimulationLiveSignalsSummary(verifiedEvidencePack = {}) {
+  const liveSignals = Array.isArray(verifiedEvidencePack?.live_signals) ? verifiedEvidencePack.live_signals : [];
+  return liveSignals.slice(0, 5).map((signal) => ({
+    source_id: safeText(signal?.source_id),
+    label: safeText(signal?.label),
+    lean: safeText(signal?.lean),
+    summary: safeText(signal?.summary).slice(0, 160),
+  }));
+}
+
+function buildSimulationContext({ queryText = "", normalizedQuery = {}, verifiedEvidencePack = {} }) {
+  const domainFamily = inferSimulationDomainFamily(normalizedQuery);
+  if (!domainFamily) return null;
+
+  return {
+    domain_family: domainFamily,
+    entity_event_location: buildSimulationEntityEventLocation(normalizedQuery),
+    horizon: safeText(
+      (Array.isArray(normalizedQuery?.horizons) ? normalizedQuery.horizons[0]?.horizon_id : "") || normalizedQuery?.time_horizon,
+      "30d"
+    ),
+    decision_frame: inferSimulationDecisionFrame(normalizedQuery, verifiedEvidencePack),
+    live_signals_summary: buildSimulationLiveSignalsSummary(verifiedEvidencePack),
+  };
+}
+
 function buildFallbackVerifiedEvidencePack({ normalizedQuery = {}, variableSelectionPack = {}, engine = "extended", reason = "" }) {
   const domainConfig = getDomain(normalizedQuery.primary_domain_id, GENERAL_FORECAST_DOMAIN);
   const sportsLike = isSportsLikeQuery(normalizedQuery, normalizedQuery?.original_query, domainConfig);
@@ -2303,7 +2532,7 @@ function buildFallbackVerifiedEvidencePack({ normalizedQuery = {}, variableSelec
     sports_grounding: sportsLike
       ? {
           provider_required: true,
-          provider: safeText(process.env.SPORTS_PROVIDER, "api-football"),
+          provider: safeText(getSportsRuntimeHealth().provider, "thesportsdb"),
           provider_configured: Boolean(getSportsRuntimeHealth().configured),
           fixture_resolved: false,
           parity_ready: false,
@@ -2340,6 +2569,11 @@ function buildFallbackVerifiedEvidencePack({ normalizedQuery = {}, variableSelec
     fallbackPack.hard_stop = true;
   }
   fallbackPack.evidence_quality = computeEvidenceQuality(fallbackPack, domainConfig, engine || "extended");
+  fallbackPack.simulation_context = buildSimulationContext({
+    queryText: safeText(normalizedQuery?.original_query),
+    normalizedQuery,
+    verifiedEvidencePack: fallbackPack,
+  });
   return fallbackPack;
 }
 
@@ -2544,7 +2778,7 @@ async function buildVerifiedEvidencePack(context, { runId, queryText, normalized
     []
       .concat(sourceTrustMap.map((item) => item.source_id))
       .concat(mainBaseline ? ["historical-cache"] : [])
-      .concat(sportsContext?.available ? ["api_football_optional"] : [])
+      .concat(Array.isArray(sportsContext?.used_source_ids) ? sportsContext.used_source_ids : sportsContext?.available ? [safeText(sportsContext?.source_id)] : [])
   );
   const sourceUsage = buildSourceUsageSummary({
     queryText,
@@ -2590,7 +2824,7 @@ async function buildVerifiedEvidencePack(context, { runId, queryText, normalized
   const sportsGrounding = sportsLike
     ? {
         provider_required: true,
-        provider: safeText(sportsContext?.provider, "api-football"),
+        provider: safeText(sportsContext?.provider, "thesportsdb"),
         provider_configured: Boolean(sportsContext?.provider_configured ?? sportsContext?.configured),
         fixture_resolved: Boolean(sportsContext?.grounded_read?.fixture_resolved),
         parity_ready: Boolean(sportsContext?.grounded_read?.parity_ready),
@@ -2654,7 +2888,7 @@ async function buildVerifiedEvidencePack(context, { runId, queryText, normalized
       mobilityStructure ? "" : mobilityLike || travelLike ? "Mobility/travel grounding remains partial because shared transit or flight feeds are still thin." : "",
       publicDataStructure ? "" : macroPublicLike || energyLike || environmentLike ? "Public-data grounding remains partial because one or more macro, energy, or environment providers did not return a usable signal." : "",
       sportsLike && !sportsGrounding?.provider_configured
-        ? "Sports picks require API-Football. The shared runtime is currently missing that provider configuration."
+        ? "Sports picks require the shared sports provider. The runtime is currently missing that configuration."
         : "",
       sportsLike && sportsGrounding?.provider_configured && !sportsGrounding?.fixture_resolved
         ? "Sports provider is configured, but the runtime could not resolve the fixture cleanly enough for a parity-ready pick."
@@ -2669,13 +2903,21 @@ async function buildVerifiedEvidencePack(context, { runId, queryText, normalized
   }
 
   verifiedEvidencePack.evidence_quality = computeEvidenceQuality(verifiedEvidencePack, domainConfig, engine || "extended");
+  verifiedEvidencePack.simulation_context = buildSimulationContext({
+    queryText,
+    normalizedQuery,
+    verifiedEvidencePack,
+  });
   await writeArtifact(db, admin, runId, "verified_evidence_pack", verifiedEvidencePack);
   return verifiedEvidencePack;
 }
 
 async function compileQueryEdge(context, queryText, options = {}) {
   const { llmRuntime, withRetry } = context;
-  const routingHints = buildRoutingHints(queryText);
+  const routingHints = buildRoutingHints(queryText, {
+    timeZone: options?.timeZone,
+    asOfUtc: options?.asOfUtc,
+  });
   const generatePlannerPayload = () =>
     llmRuntime.generateJson({
       modelKind: "query",
@@ -2700,6 +2942,8 @@ async function compileQueryEdge(context, queryText, options = {}) {
     fallbackDomain: routingHints.primaryDomainId || GENERAL_FORECAST_DOMAIN,
     routingHints,
     queryText,
+    timeZone: options?.timeZone,
+    asOfUtc: options?.asOfUtc,
   });
 }
 
@@ -2713,6 +2957,8 @@ async function executeForecastRun(context, payload = {}) {
   const plan = safeText(payload.plan, "free");
   const runtimeTransport = safeText(payload.runtimeTransport, "local_core");
   const rolloutBucket = safeText(payload.rolloutBucket);
+  const requestTimeZone = normalizeTimeZone(payload.requestTimeZone || payload.timeZone, "Europe/Rome");
+  const runAsOfUtc = safeText(payload.runAsOfUtc, nowIso());
   const runDeadlineAt = Date.now() + EXECUTION_BUDGET_MS;
   const clearField = deleteSentinel(admin);
 
@@ -2730,6 +2976,8 @@ async function executeForecastRun(context, payload = {}) {
     current_stage: "orchestrator",
     engine,
     plan,
+    request_time_zone: requestTimeZone,
+    run_as_of_utc: runAsOfUtc,
     runtime_transport: runtimeTransport,
     rollout_bucket: rolloutBucket || null,
     core_version: CRYSTAL_CORE_VERSION,
@@ -2754,15 +3002,33 @@ async function executeForecastRun(context, payload = {}) {
   });
 
   try {
-    let normalizedQuery = payload.queryPlan && typeof payload.queryPlan === "object" ? payload.queryPlan : null;
+    let normalizedQuery =
+      payload.queryPlan && typeof payload.queryPlan === "object"
+        ? normalizePlannerStagePayload(payload.queryPlan, {
+            fallbackDomain: safeText(
+              payload?.queryPlan?.primary_domain_id || payload?.queryPlan?.domain_id || payload?.queryPlan?.domain,
+              GENERAL_FORECAST_DOMAIN
+            ),
+            queryText,
+            timeZone: requestTimeZone,
+            asOfUtc: runAsOfUtc,
+          })
+        : null;
     if (!normalizedQuery || !safeText(normalizedQuery.primary_domain_id || normalizedQuery.domain_id || normalizedQuery.domain)) {
       await ensureRunActive(db, runId);
       ensureExecutionBudget(runDeadlineAt, "query_domain_agent");
       const queryStageStartedAt = Date.now();
-      normalizedQuery = await withRetry(() => compileQueryEdge(context, queryText, { disableRetry: true }), {
-        ...STAGE_RETRY_POLICY.planner,
-        label: "planner",
-        stage: "query_domain_agent",
+      normalizedQuery = await withRetry(
+        () =>
+          compileQueryEdge(context, queryText, {
+            disableRetry: true,
+            timeZone: requestTimeZone,
+            asOfUtc: runAsOfUtc,
+          }),
+        {
+          ...STAGE_RETRY_POLICY.planner,
+          label: "planner",
+          stage: "query_domain_agent",
         onRetry: ({ attempt, error, nextDelayMs }) => {
           logCoreEvent("stage_retry", {
             runId,
@@ -2773,7 +3039,8 @@ async function executeForecastRun(context, payload = {}) {
             provider: safeText(error?.details?.provider),
           });
         },
-      });
+        }
+      );
       logCoreEvent("stage_completed", {
         runId,
         stage: "query_domain_agent",
@@ -3053,6 +3320,7 @@ async function executeForecastRun(context, payload = {}) {
                     userContext: payload.userContext || null,
                     engine: "oracle",
                     plan,
+                    simulationContext: verifiedEvidencePack?.simulation_context || null,
                     sidecarBaseUrl: process.env.MIROFISH_BASE_URL || "",
                     sidecarApiKey: process.env.MIROFISH_API_KEY || "",
                   }),
@@ -3408,7 +3676,7 @@ function createCrystalCoreRuntime(config = {}) {
   };
 
   return {
-    compileQuery: (queryText) => compileQueryEdge(context, queryText),
+    compileQuery: (queryText, options = {}) => compileQueryEdge(context, queryText, options),
     executeForecastRun: (payload) => executeForecastRun(context, payload),
     buildPendingRunCard,
     runOfflineEvaluationMode: (options) => runOfflineEvaluationMode(context, options),
@@ -3469,6 +3737,7 @@ module.exports = {
     normalizeDossierStagePayload,
     normalizeVerbalizerStagePayload,
     normalizeQueryPlanPayload,
+    buildTemporalContext,
     buildVerifiedEvidencePack,
     buildFallbackVerifiedEvidencePack,
     buildSourceUsageSummary,

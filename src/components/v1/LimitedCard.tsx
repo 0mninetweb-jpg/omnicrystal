@@ -23,6 +23,8 @@ export function LimitedCard({ item, onRemix }: LimitedCardProps) {
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-700">Directional read</div>
+          {meta.runDateSummary ? <div className="mt-2 text-sm font-medium text-slate-600">Forecast run {meta.runDateSummary}</div> : null}
+          {meta.relativeTimeSummary ? <div className="mt-1 text-sm text-slate-500">{meta.relativeTimeSummary}</div> : null}
           <h3 className="mt-3 text-2xl font-semibold tracking-[-0.03em] text-slate-950">{heroCall}</h3>
           {probabilityLabel ? <div className="mt-3 text-sm font-semibold text-amber-800">{probabilityLabel}</div> : null}
         </div>
@@ -72,6 +74,7 @@ export function LimitedCard({ item, onRemix }: LimitedCardProps) {
         trustLayer={item.trustLayer}
         freshnessSummary={meta.freshnessSummary}
         provenanceSummary={meta.provenanceSummary}
+        runDateSummary={meta.runDateSummary}
       />
 
       <div className="mt-5 flex flex-wrap gap-3">

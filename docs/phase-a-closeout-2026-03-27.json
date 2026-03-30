@@ -1,0 +1,191 @@
+﻿{
+    "generated_at":  "2026-03-27T18:40:46.2552646+01:00",
+    "report_date":  "2026-03-27",
+    "verdict":  "phase_a_ready_for_manual_qa",
+    "rollout_verdict":  "hold at 0/0 until signed-in QA is certified",
+    "deploy_requested":  false,
+    "env_presence":  {
+                         "thesportsdb_primary_selected":  true,
+                         "api_football_key_present":  false,
+                         "fred_api_key_present":  true
+                     },
+    "gates":  {
+                  "sports_parity_closed":  true,
+                  "sports_probe_ready":  true,
+                  "winner_mismatch_rate":  0,
+                  "missing_binary_contract_rate":  0,
+                  "fred_api_available":  true,
+                  "gtfs_static_ready":  true,
+                  "gtfs_realtime_ready":  true,
+                  "policy_benchmark_green":  true,
+                  "markets_benchmark_green":  true,
+                  "rollout_frozen":  true,
+                  "checks_green":  true,
+                  "manual_signed_in_qa":  "pending_manual_handoff",
+                  "entry_gate_green":  true
+              },
+    "live_health":  {
+                        "crystal_core_available":  true,
+                        "crystal_core_base_url":  "https://crystal-core-paaqyfwena-ew.a.run.app",
+                        "rollout_signed_in_percent":  0,
+                        "rollout_guest_percent":  0,
+                        "sports_available":  true,
+                        "sports_configured":  true,
+                        "health_fetch_error":  ""
+                    },
+    "provider_states":  {
+                            "thesportsdb_public":  {
+                                                       "source_id":  "thesportsdb_public",
+                                                       "title":  "TheSportsDB",
+                                                       "category":  "sports",
+                                                       "access_profile":  "public",
+                                                       "implementation_status":  "implemented",
+                                                       "configured":  true,
+                                                       "available":  true,
+                                                       "status":  "available",
+                                                       "provider":  "thesportsdb",
+                                                       "base_url":  "https://www.thesportsdb.com/api/v1/json",
+                                                       "notes":  [
+                                                                     "Using TheSportsDB free tier (key 123) as the primary sports runtime source."
+                                                                 ]
+                                                   },
+                            "fred_api":  {
+                                             "source_id":  "fred_api",
+                                             "title":  "FRED API",
+                                             "category":  "macro",
+                                             "access_profile":  "public",
+                                             "implementation_status":  "implemented",
+                                             "configured":  true,
+                                             "available":  true,
+                                             "status":  "available",
+                                             "notes":  [
+
+                                                       ]
+                                         },
+                            "gtfs_static":  {
+                                                "source_id":  "gtfs_static",
+                                                "title":  "GTFS Static",
+                                                "category":  "mobility",
+                                                "access_profile":  "public",
+                                                "implementation_status":  "implemented",
+                                                "configured":  true,
+                                                "available":  true,
+                                                "status":  "available",
+                                                "feed_count":  1,
+                                                "notes":  [
+
+                                                          ]
+                                            },
+                            "gtfs_realtime":  {
+                                                  "source_id":  "gtfs_realtime",
+                                                  "title":  "GTFS Realtime",
+                                                  "category":  "mobility",
+                                                  "access_profile":  "public",
+                                                  "implementation_status":  "implemented",
+                                                  "configured":  true,
+                                                  "available":  true,
+                                                  "status":  "available",
+                                                  "feed_count":  1,
+                                                  "notes":  [
+
+                                                            ]
+                                              },
+                            "openaq":  {
+                                           "source_id":  "openaq",
+                                           "title":  "OpenAQ",
+                                           "category":  "environment",
+                                           "access_profile":  "public",
+                                           "implementation_status":  "implemented",
+                                           "configured":  false,
+                                           "available":  false,
+                                           "status":  "config_missing",
+                                           "notes":  [
+                                                         "OPENAQ_API_KEY is required by the current OpenAQ v3 runtime path."
+                                                     ]
+                                       },
+                            "api_football_optional":  {
+                                                          "source_id":  "api_football_optional",
+                                                          "title":  "API-Football",
+                                                          "category":  "sports",
+                                                          "access_profile":  "optional_non_default",
+                                                          "implementation_status":  "implemented",
+                                                          "configured":  false,
+                                                          "available":  false,
+                                                          "status":  "config_missing",
+                                                          "provider":  "api-football",
+                                                          "base_url":  "https://v3.football.api-sports.io",
+                                                          "notes":  [
+                                                                        "API_FOOTBALL_KEY is optional now and only used as a sports enhancer when configured."
+                                                                    ]
+                                                      }
+                        },
+    "report_refs":  {
+                        "parity_json":  "C:\\Users\\Fiorenza\\OneDrive\\Desktop\\Codex\\crystal-review-0316\\docs\\parity-report-2026-03-24.json",
+                        "policy_json":  "C:\\Users\\Fiorenza\\OneDrive\\Desktop\\Codex\\crystal-review-0316\\docs\\policy-quality-report-2026-03-27.json",
+                        "markets_json":  "C:\\Users\\Fiorenza\\OneDrive\\Desktop\\Codex\\crystal-review-0316\\docs\\markets-quality-report-2026-03-27.json",
+                        "provider_foundation_json":  "C:\\Users\\Fiorenza\\OneDrive\\Desktop\\Codex\\crystal-review-0316\\docs\\provider-foundation-report-2026-03-27.json",
+                        "domain_quality_json":  "C:\\Users\\Fiorenza\\OneDrive\\Desktop\\Codex\\crystal-review-0316\\docs\\domain-quality-matrix-2026-03-27.json"
+                    },
+    "steps":  [
+                  {
+                      "name":  "check:prediction-core",
+                      "ok":  true,
+                      "exit_code":  0,
+                      "output_tail":  "\n\u003e react-example@0.0.0 check:prediction-core\n\u003e node scripts/check-prediction-core.mjs\n\nPrediction core benchmark passed on 125 routing cases.\nSynthetic scorecard check passed with publication_state=published."
+                  },
+                  {
+                      "name":  "check:policy-governance",
+                      "ok":  true,
+                      "exit_code":  0,
+                      "output_tail":  "\n\u003e react-example@0.0.0 check:policy-governance\n\u003e node scripts/check-policy-governance.mjs\n\nPolicy/governance benchmark passed on 10 cases with verdict=policy-ready and A.0.general rate=0."
+                  },
+                  {
+                      "name":  "report:policy-governance",
+                      "ok":  true,
+                      "exit_code":  0,
+                      "output_tail":  "\n\u003e react-example@0.0.0 report:policy-governance\n\u003e node scripts/run-policy-quality-report.mjs\n\nPolicy quality report written to C:\\Users\\Fiorenza\\OneDrive\\Desktop\\Codex\\crystal-review-0316\\docs\\policy-quality-report-2026-03-27.md\nPolicy quality JSON written to C:\\Users\\Fiorenza\\OneDrive\\Desktop\\Codex\\crystal-review-0316\\docs\\policy-quality-report-2026-03-27.json\nSummary: verdict=policy-ready, total_cases=10, general_fallback_rate=0"
+                  },
+                  {
+                      "name":  "check:markets-assets",
+                      "ok":  true,
+                      "exit_code":  0,
+                      "output_tail":  "\n\u003e react-example@0.0.0 check:markets-assets\n\u003e node scripts/check-markets-assets.mjs\n\nMarkets/assets benchmark passed on 11 cases with verdict=markets-ready and A.0.general rate=0."
+                  },
+                  {
+                      "name":  "report:markets-assets",
+                      "ok":  true,
+                      "exit_code":  0,
+                      "output_tail":  "\n\u003e react-example@0.0.0 report:markets-assets\n\u003e node scripts/run-markets-quality-report.mjs\n\nMarkets quality report written to C:\\Users\\Fiorenza\\OneDrive\\Desktop\\Codex\\crystal-review-0316\\docs\\markets-quality-report-2026-03-27.md\nMarkets quality JSON written to C:\\Users\\Fiorenza\\OneDrive\\Desktop\\Codex\\crystal-review-0316\\docs\\markets-quality-report-2026-03-27.json\nSummary: verdict=markets-ready, total_cases=11, general_fallback_rate=0"
+                  },
+                  {
+                      "name":  "check:provider-foundation",
+                      "ok":  true,
+                      "exit_code":  0,
+                      "output_tail":  "\n\u003e react-example@0.0.0 check:provider-foundation\n\u003e node scripts/check-provider-foundation.mjs\n\n[dotenv@17.3.1] injecting env (38) from functions\\.env.omnicrystal -- tip: ⚙️  override existing env vars with { override: true }\nProvider foundation smoke passed on 6 cases with runtime_config_verdict=config-ready and blockers=0."
+                  },
+                  {
+                      "name":  "report:provider-foundation",
+                      "ok":  true,
+                      "exit_code":  0,
+                      "output_tail":  "\n\u003e react-example@0.0.0 report:provider-foundation\n\u003e node scripts/run-provider-foundation-report.mjs\n\n[dotenv@17.3.1] injecting env (38) from functions\\.env.omnicrystal -- tip: 🤖 agentic secret storage: https://dotenvx.com/as2\nProvider foundation report written to C:\\Users\\Fiorenza\\OneDrive\\Desktop\\Codex\\crystal-review-0316\\docs\\provider-foundation-report-2026-03-27.md\nProvider foundation JSON written to C:\\Users\\Fiorenza\\OneDrive\\Desktop\\Codex\\crystal-review-0316\\docs\\provider-foundation-report-2026-03-27.json\nSummary: verdict=foundation-ready, synthetic_smoke_verdict=connector-ready, runtime_config_blockers=0"
+                  },
+                  {
+                      "name":  "check:domain-quality-grid",
+                      "ok":  true,
+                      "exit_code":  0,
+                      "output_tail":  "\n\u003e react-example@0.0.0 check:domain-quality-grid\n\u003e node scripts/check-domain-quality-grid.mjs\n\n[dotenv@17.3.1] injecting env (38) from functions\\.env.omnicrystal -- tip: ⚙️  override existing env vars with { override: true }\nDomain quality grid passed with verdict=matrix_ready, top1_hit_rate=0.593, top3_miss_count=18."
+                  },
+                  {
+                      "name":  "report:domain-quality-grid",
+                      "ok":  true,
+                      "exit_code":  0,
+                      "output_tail":  "\n\u003e react-example@0.0.0 report:domain-quality-grid\n\u003e node scripts/run-domain-quality-report.mjs\n\n[dotenv@17.3.1] injecting env (38) from functions\\.env.omnicrystal -- tip: 🔐 encrypt with Dotenvx: https://dotenvx.com\nDomain quality markdown written to C:\\Users\\Fiorenza\\OneDrive\\Desktop\\Codex\\crystal-review-0316\\docs\\domain-quality-matrix-2026-03-27.md\nDomain quality JSON written to C:\\Users\\Fiorenza\\OneDrive\\Desktop\\Codex\\crystal-review-0316\\docs\\domain-quality-matrix-2026-03-27.json\nSummary: verdict=matrix_ready, total_domains=43, top3_miss_count=18"
+                  },
+                  {
+                      "name":  "parity:direct-api",
+                      "ok":  true,
+                      "exit_code":  0,
+                      "output_tail":  "Parity report written to C:\\Users\\Fiorenza\\OneDrive\\Desktop\\Codex\\crystal-review-0316\\docs\\parity-report-2026-03-24.md\nParity JSON written to C:\\Users\\Fiorenza\\OneDrive\\Desktop\\Codex\\crystal-review-0316\\docs\\parity-report-2026-03-24.json\nVerdict: 10% ready"
+                  }
+              ]
+}
