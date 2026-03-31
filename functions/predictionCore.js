@@ -2979,10 +2979,13 @@ function finalizeScorecard(rawScorecard = {}, evidenceBundle = {}, queryPlan = {
       (Array.isArray(evidenceBundle?.source_usage?.missing_required_sources) &&
         evidenceBundle.source_usage.missing_required_sources.length > 0)
   );
+  const sportsPublishGateReady =
+    evidenceBundle?.sports_grounding?.publish_gate_ready === true ||
+    (evidenceBundle?.sports_grounding?.publish_gate_ready == null && Boolean(evidenceBundle?.sports_grounding?.parity_ready));
   const providerRequiredNoPick =
     hardStop &&
     Boolean(evidenceBundle?.sports_grounding?.provider_required) &&
-    !Boolean(evidenceBundle?.sports_grounding?.parity_ready);
+    !sportsPublishGateReady;
   let publicationState = "limited";
   if (hardStop) {
     publicationState = "blocked";
@@ -3160,7 +3163,10 @@ function finalizeScorecard(rawScorecard = {}, evidenceBundle = {}, queryPlan = {
       safeText(domainConfig.status_reason),
       safeText(evidenceBundle.notes?.[0]),
       providerRequiredNoPick
-        ? "Crystal will not publish a sports pick until the required provider is grounded and parity-ready."
+        ? "Crystal has the matchup grounded, but it will not publish the sports pick until the semantic overlay and parity gate are both ready."
+        : "",
+      providerRequiredNoPick && safeText(evidenceBundle?.sports_grounding?.overlay_blocker_reason)
+        ? `Sports overlay blocker: ${safeText(evidenceBundle.sports_grounding.overlay_blocker_reason).replace(/_/g, " ")}.`
         : "",
       requiredSourceGap
         ? "Required source coverage is still missing, so Crystal downgraded this forecast out of published state."
@@ -3222,6 +3228,26 @@ function finalizeScorecard(rawScorecard = {}, evidenceBundle = {}, queryPlan = {
       required_source_gap: requiredSourceGap,
       hard_stop: hardStop,
       provider_required_no_pick: providerRequiredNoPick,
+      sports_semantic_ready: evidenceBundle?.sports_grounding?.semantic_ready === true,
+      sports_overlay_confidence: Number.isFinite(Number(evidenceBundle?.sports_grounding?.overlay_confidence))
+        ? Number(evidenceBundle.sports_grounding.overlay_confidence)
+        : null,
+      sports_overlay_blocker_reason: safeText(evidenceBundle?.sports_grounding?.overlay_blocker_reason) || null,
+      sports_publish_gate_ready: sportsPublishGateReady,
+      market_consensus_strength: Number.isFinite(Number(evidenceBundle?.sports_grounding?.market_consensus_strength))
+        ? Number(evidenceBundle.sports_grounding.market_consensus_strength)
+        : evidenceBundle?.sports_market_overlay?.market_consensus_strength ?? null,
+      market_disagreement_score: Number.isFinite(Number(evidenceBundle?.sports_grounding?.market_disagreement_score))
+        ? Number(evidenceBundle.sports_grounding.market_disagreement_score)
+        : evidenceBundle?.sports_market_overlay?.market_disagreement_score ?? null,
+      price_move_pressure: Number.isFinite(Number(evidenceBundle?.sports_grounding?.price_move_pressure))
+        ? Number(evidenceBundle.sports_grounding.price_move_pressure)
+        : evidenceBundle?.sports_market_overlay?.price_move_pressure ?? null,
+      narrative_hype_score: Number.isFinite(Number(evidenceBundle?.sports_grounding?.narrative_hype_score))
+        ? Number(evidenceBundle.sports_grounding.narrative_hype_score)
+        : evidenceBundle?.sports_market_overlay?.narrative_hype_score ?? null,
+      sportsbook_readiness_state:
+        safeText(evidenceBundle?.sports_grounding?.sportsbook_readiness_state, safeText(evidenceBundle?.sports_market_overlay?.sportsbook_readiness_state)) || null,
       domain_state: domainConfig.current_state || "limited",
       reasons: publicationReasons,
       notes: publicationNotes,

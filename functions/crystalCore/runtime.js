@@ -1482,7 +1482,16 @@ function buildSourceTrustMap(searchPayload = {}, liveSignals = [], connectorTrus
   return [...bySource.values()].sort((left, right) => right.trust_score - left.trust_score).slice(0, 8);
 }
 
-function buildMissingnessMap({ baseline, liveSignals = [], predictionMarketFrame }) {
+function buildMissingnessMap({ baseline, liveSignals = [], predictionMarketFrame, sportsLike = false, sportsContext = null }) {
+  if (sportsLike) {
+    return uniqueStrings([
+      sportsContext?.provider_configured ? "" : "sports_provider_missing",
+      sportsContext?.grounded_read?.fixture_resolved ? "" : "sports_fixture_resolution_partial",
+      sportsContext?.semantic_ready === true ? "" : safeText(sportsContext?.overlay_blocker_reason, "sports_semantic_overlay_pending"),
+      sportsContext?.publish_gate_ready === true ? "" : "sports_publish_gate_pending",
+    ]);
+  }
+
   return uniqueStrings([
     safeText(baseline) ? "" : "historical_baseline_thin",
     Array.isArray(liveSignals) && liveSignals.length >= 2 ? "" : "live_signal_coverage_light",
@@ -1663,9 +1672,16 @@ function buildSportsGroundedDossierPrediction({
   const questionSideA = safeText(sportsGrounding?.question_side_a || normalizedQuery?.question_side_a);
   const questionSideB = safeText(sportsGrounding?.question_side_b || normalizedQuery?.question_side_b);
 
-  if (!sportsGrounding?.provider_configured || !sportsGrounding?.fixture_resolved || !sportsGrounding?.parity_ready) {
+  if (
+    !sportsGrounding?.provider_configured ||
+    !sportsGrounding?.fixture_resolved ||
+    !sportsGrounding?.parity_ready ||
+    sportsGrounding?.publish_gate_ready === false
+  ) {
     const coverageReason = sportsGrounding?.provider_configured
-      ? "Crystal could not resolve the sports fixture cleanly enough to publish a grounded match pick."
+      ? sportsGrounding?.fixture_resolved
+        ? "Crystal has the match grounded, but the sports semantic publish gate is not closed yet for a responsible pick."
+        : "Crystal could not resolve the sports fixture cleanly enough to publish a grounded match pick."
       : "Crystal needs a live sports provider before it can publish a grounded match pick.";
     const payload = {
       structured_dossier: {
@@ -1678,7 +1694,10 @@ function buildSportsGroundedDossierPrediction({
         macro_context: [],
         case_specific_context: [],
         uncertainty_map: normalizeTextList([safeText(sportsGrounding?.reason), coverageReason], 3),
-        data_quality_map: ["sports_provider_required"],
+        data_quality_map: normalizeTextList(
+          ["sports_provider_required", safeText(sportsGrounding?.overlay_blocker_reason)],
+          3
+        ),
       },
       feature_bundle: [],
       baseline_consensus_pack: baselineConsensusPack || {},
@@ -1692,7 +1711,9 @@ function buildSportsGroundedDossierPrediction({
         invalidators: normalizeTextList(
           [
             "Configure the primary sports provider and resolve the fixture before trusting a sports pick.",
-            "Stand down until the runtime can ground the match with provider data.",
+            sportsGrounding?.fixture_resolved
+              ? "Stand down until lineup, injury, and preview coverage is aligned tightly enough to close the sports publish gate."
+              : "Stand down until the runtime can ground the match with provider data.",
           ],
           3
         ),
@@ -2109,7 +2130,7 @@ function buildQualityAwareFallbackSummary({ queryText, scorecard = {}, binaryCon
   const intentShape = safeText(normalizedQuery?.intent_shape, binaryContract ? "binary_outcome" : "directional_range");
 
   if (qualityVerdict === "blocked_no_pick") {
-    return "Crystal is holding this card back because the required evidence path is still incomplete.";
+    return "Crystal has the match grounded, but the sports publish gate is still waiting on enough fresh lineup, injury, and preview confirmation.";
   }
   if (qualityVerdict === "coverage_gap") {
     return "Crystal sees early signal here, but required coverage is still too thin for a stronger public read.";
@@ -2148,7 +2169,7 @@ function buildQualityAwareFallbackVerdict({ queryText, scorecard = {}, binaryCon
     return binaryContract.display_call;
   }
   if (qualityVerdict === "blocked_no_pick") {
-    return "Blocked pending required evidence";
+    return "Blocked pending sports publish gate";
   }
   if (qualityVerdict === "coverage_gap") {
     return "Coverage gap: hold as watchlist";
@@ -2171,7 +2192,7 @@ function buildQualityAwareFallbackVerdict({ queryText, scorecard = {}, binaryCon
 function buildQualityAwareRecommendedAction(scorecard = {}) {
   const qualityVerdict = safeText(scorecard?.publication_basis?.quality_verdict);
   if (qualityVerdict === "blocked_no_pick") {
-    return "Do not act on this yet. Wait for the missing required evidence path to come online before treating this as decision-ready.";
+    return "Treat this as a grounded matchup read only. Wait for fresher lineup, injury, and preview confirmation before using it as a publishable sports pick.";
   }
   if (qualityVerdict === "coverage_gap") {
     return "Treat this as a watchlist item and wait for stronger source coverage before acting with conviction.";
@@ -2331,6 +2352,31 @@ function buildFinalCard({
     rollout_bucket: rolloutBucket ? safeText(rolloutBucket) : undefined,
     calibration_snapshot: calibrationSnapshot || undefined,
     sports_grounding: verifiedEvidencePack?.sports_grounding || undefined,
+    sports_semantic_overlay: verifiedEvidencePack?.sports_semantic_overlay || undefined,
+    sports_market_overlay: verifiedEvidencePack?.sports_market_overlay || undefined,
+    sports_semantic_ready: verifiedEvidencePack?.sports_grounding?.semantic_ready === true,
+    sports_overlay_confidence: Number.isFinite(Number(verifiedEvidencePack?.sports_grounding?.overlay_confidence))
+      ? Number(verifiedEvidencePack.sports_grounding.overlay_confidence)
+      : undefined,
+    sports_overlay_blocker_reason: safeText(verifiedEvidencePack?.sports_grounding?.overlay_blocker_reason) || undefined,
+    sports_publish_gate_ready: verifiedEvidencePack?.sports_grounding?.publish_gate_ready === true,
+    market_consensus_strength: Number.isFinite(Number(verifiedEvidencePack?.sports_grounding?.market_consensus_strength))
+      ? Number(verifiedEvidencePack.sports_grounding.market_consensus_strength)
+      : verifiedEvidencePack?.sports_market_overlay?.market_consensus_strength,
+    market_disagreement_score: Number.isFinite(Number(verifiedEvidencePack?.sports_grounding?.market_disagreement_score))
+      ? Number(verifiedEvidencePack.sports_grounding.market_disagreement_score)
+      : verifiedEvidencePack?.sports_market_overlay?.market_disagreement_score,
+    price_move_pressure: Number.isFinite(Number(verifiedEvidencePack?.sports_grounding?.price_move_pressure))
+      ? Number(verifiedEvidencePack.sports_grounding.price_move_pressure)
+      : verifiedEvidencePack?.sports_market_overlay?.price_move_pressure,
+    narrative_hype_score: Number.isFinite(Number(verifiedEvidencePack?.sports_grounding?.narrative_hype_score))
+      ? Number(verifiedEvidencePack.sports_grounding.narrative_hype_score)
+      : verifiedEvidencePack?.sports_market_overlay?.narrative_hype_score,
+    sportsbook_readiness_state:
+      safeText(
+        verifiedEvidencePack?.sports_grounding?.sportsbook_readiness_state,
+        safeText(verifiedEvidencePack?.sports_market_overlay?.sportsbook_readiness_state)
+      ) || undefined,
     core_version: CRYSTAL_CORE_VERSION,
     _source: "crystal-core",
   };
@@ -2536,6 +2582,10 @@ function buildFallbackVerifiedEvidencePack({ normalizedQuery = {}, variableSelec
           provider_configured: Boolean(getSportsRuntimeHealth().configured),
           fixture_resolved: false,
           parity_ready: false,
+          semantic_ready: false,
+          overlay_confidence: null,
+          overlay_blocker_reason: "sports_semantic_overlay_pending",
+          publish_gate_ready: false,
           question_side_a: safeText(normalizedQuery?.question_side_a),
           question_side_b: safeText(normalizedQuery?.question_side_b),
           reason: "Sports evidence degraded before Crystal could ground the fixture with the shared provider path.",
@@ -2656,6 +2706,8 @@ async function buildVerifiedEvidencePack(context, { runId, queryText, normalized
         queryText,
         queryPlan: normalizedQuery,
         fetchJson,
+        db,
+        admin,
       });
     } catch (error) {
       sportsContext = {
@@ -2773,6 +2825,8 @@ async function buildVerifiedEvidencePack(context, { runId, queryText, normalized
     baseline: mainBaseline,
     liveSignals,
     predictionMarketFrame,
+    sportsLike,
+    sportsContext,
   });
   const sourceLedger = uniqueStrings(
     []
@@ -2828,12 +2882,32 @@ async function buildVerifiedEvidencePack(context, { runId, queryText, normalized
         provider_configured: Boolean(sportsContext?.provider_configured ?? sportsContext?.configured),
         fixture_resolved: Boolean(sportsContext?.grounded_read?.fixture_resolved),
         parity_ready: Boolean(sportsContext?.grounded_read?.parity_ready),
+        semantic_ready: Boolean(sportsContext?.semantic_ready),
+        overlay_confidence: Number.isFinite(Number(sportsContext?.overlay_confidence)) ? Number(sportsContext.overlay_confidence) : null,
+        overlay_blocker_reason: safeText(sportsContext?.overlay_blocker_reason),
+        publish_gate_ready: Boolean(sportsContext?.publish_gate_ready),
         question_side_a: safeText(sportsContext?.grounded_read?.question_side_a),
         question_side_b: safeText(sportsContext?.grounded_read?.question_side_b),
         winning_side: safeText(sportsContext?.grounded_read?.winning_side),
         winning_probability: Number.isFinite(Number(sportsContext?.grounded_read?.winning_probability))
           ? Number(sportsContext.grounded_read.winning_probability)
           : null,
+        market_consensus_strength: Number.isFinite(Number(sportsContext?.market_consensus_strength))
+          ? Number(sportsContext.market_consensus_strength)
+          : null,
+        market_disagreement_score: Number.isFinite(Number(sportsContext?.market_disagreement_score))
+          ? Number(sportsContext.market_disagreement_score)
+          : null,
+        price_move_pressure: Number.isFinite(Number(sportsContext?.price_move_pressure))
+          ? Number(sportsContext.price_move_pressure)
+          : null,
+        narrative_hype_score: Number.isFinite(Number(sportsContext?.narrative_hype_score))
+          ? Number(sportsContext.narrative_hype_score)
+          : null,
+        sportsbook_readiness_state: safeText(sportsContext?.sportsbook_readiness_state),
+        key_drivers: normalizeTextList(sportsContext?.grounded_read?.key_drivers, 4),
+        counter_signals: normalizeTextList(sportsContext?.grounded_read?.counter_signals, 4),
+        invalidators: normalizeTextList(sportsContext?.grounded_read?.invalidators, 4),
         reason: safeText(sportsContext?.grounded_read?.reason, safeText(sportsContext?.reason)),
       }
     : null;
@@ -2872,6 +2946,8 @@ async function buildVerifiedEvidencePack(context, { runId, queryText, normalized
     public_data_structure: publicDataStructure,
     market_structure: marketStructure,
     sports_grounding: sportsGrounding,
+    sports_semantic_overlay: sportsLike ? sportsContext?.semantic_overlay || null : null,
+    sports_market_overlay: sportsLike ? sportsContext?.market_overlay || null : null,
     selected_variables: Array.isArray(variableSelectionPack?.selected_variables) ? variableSelectionPack.selected_variables : [],
     adapter_activation_map: Array.isArray(variableSelectionPack?.adapter_activation_map) ? variableSelectionPack.adapter_activation_map : [],
     notes: uniqueStrings([
@@ -2892,6 +2968,15 @@ async function buildVerifiedEvidencePack(context, { runId, queryText, normalized
         : "",
       sportsLike && sportsGrounding?.provider_configured && !sportsGrounding?.fixture_resolved
         ? "Sports provider is configured, but the runtime could not resolve the fixture cleanly enough for a parity-ready pick."
+        : "",
+      sportsLike && sportsGrounding?.fixture_resolved && sportsGrounding?.semantic_ready !== true
+        ? "Crystal grounded the fixture, but the sports semantic overlay is still below the publish gate."
+        : "",
+      sportsLike && sportsGrounding?.overlay_blocker_reason
+        ? `Sports semantic blocker: ${safeText(sportsGrounding.overlay_blocker_reason).replace(/_/g, " ")}.`
+        : "",
+      sportsLike && safeText(sportsContext?.sportsbook_readiness_state)
+        ? `Sports market posture: ${safeText(sportsContext.sportsbook_readiness_state).replace(/_/g, " ")}.`
         : "",
     ]).slice(0, 4),
   };

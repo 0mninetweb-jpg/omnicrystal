@@ -326,6 +326,235 @@ assert.equal(scorecard.probability_split.primary_label, 'No', 'Compatibility pro
 assert(scorecard.counter_signals.length > 0, 'Binary scorecards should expose counter-signals');
 assert(scorecard.invalidators.length > 0, 'Binary scorecards should expose flip conditions');
 
+const sportsRawScorecard = {
+  primary_call: 'Inter 62/38',
+  confidence_score: 0.81,
+  probability_split: {
+    winning_side: 'Inter',
+    winning_probability: 0.62,
+  },
+  key_drivers: ['home form is stronger', 'recent finishing volume is still positive', 'the structured matchup lean is stable'],
+  counter_signals: ['late lineup uncertainty', 'set-piece variance remains live'],
+  invalidators: ['confirmed starter absences', 'unexpected tactical rotation'],
+  historical_anchors: ['Recent head-to-head form and season table remain broadly aligned.'],
+  why_this_side: 'The structured matchup read still leans Inter, but the semantic layer can still hold the public gate closed.',
+  recommended_posture: 'Keep the matchup on watch until the semantic overlay and parity gate are both ready.',
+};
+
+const sportsEvidenceBase = {
+  historical_baseline_20y: 'Recent match and table baseline exists.',
+  live_signals: [
+    { lean: 'up', freshness_score: 0.86 },
+    { lean: 'up', freshness_score: 0.8 },
+    { lean: 'up', freshness_score: 0.78 },
+  ],
+  source_ledger: ['thesportsdb_public', 'sports_semantic_overlay', 'rss_allowlist', 'polymarket_public', 'google_trends'],
+  sports_market_overlay: {
+    enabled: true,
+    available: true,
+    used_source_ids: ['polymarket_public', 'google_trends'],
+    source_count: 2,
+    market_consensus_strength: 0.66,
+    market_disagreement_score: 0.18,
+    price_move_pressure: 0.34,
+    narrative_hype_score: 0.57,
+    sportsbook_readiness_state: 'forecast_betting_aware',
+  },
+  entity_resolution: { resolved: true, entities: ['Inter', 'Juventus'] },
+  event_resolution: { resolved: true, jurisdiction: 'Italy' },
+  evidence_quality: {
+    coverage_score: 0.78,
+    freshness_score: 0.82,
+    agreement_score: 0.71,
+    conflict_score: 0.18,
+    source_count: 3,
+  },
+};
+
+const sportsQueryPlan = {
+  query_text: 'Inter vs Juventus',
+  question_side_a: 'Inter',
+  question_side_b: 'Juventus',
+};
+
+const sportsDomainConfig = {
+  domain_id: 'A.29.sports_performance_and_outcomes',
+  current_state: 'limited',
+  status_reason: 'Sports picks require the semantic publish gate before they can go public.',
+};
+
+const sportsBettingDomainConfig = {
+  domain_id: 'B.3.6.sports_outcomes_probability_mode',
+  current_state: 'limited',
+  status_reason: 'Sports probability mode stays benchmark-only until it has its own parity-closed market benchmark.',
+};
+
+const sportsBlockedScorecard = finalizeScorecard(
+  sportsRawScorecard,
+  {
+    ...sportsEvidenceBase,
+    hard_stop: true,
+    sports_grounding: {
+      provider_required: true,
+      provider_configured: true,
+      fixture_resolved: true,
+      parity_ready: true,
+      semantic_ready: false,
+      overlay_confidence: 0.59,
+      overlay_blocker_reason: 'sports_semantic_overlay_pending',
+      publish_gate_ready: false,
+      market_consensus_strength: 0.61,
+      market_disagreement_score: 0.22,
+      price_move_pressure: 0.31,
+      narrative_hype_score: 0.55,
+      sportsbook_readiness_state: 'forecast_context_only',
+    },
+  },
+  sportsQueryPlan,
+  sportsDomainConfig,
+  {
+    engine: 'extended',
+  }
+);
+
+assert.equal(
+  sportsBlockedScorecard.publication_state,
+  'blocked',
+  'A.29 should stay blocked while the sports semantic publish gate is closed'
+);
+assert.equal(
+  sportsBlockedScorecard.publication_basis.blocker_reason,
+  'provider_required_no_pick',
+  'A.29 should surface provider_required_no_pick until the sports publish gate is ready'
+);
+assert.equal(
+  sportsBlockedScorecard.publication_basis.sports_publish_gate_ready,
+  false,
+  'A.29 blocked scorecard should expose publish gate readiness as false'
+);
+assert.equal(
+  sportsBlockedScorecard.publication_basis.sportsbook_readiness_state,
+  'forecast_context_only',
+  'Blocked A.29 should still expose a conservative sportsbook readiness state'
+);
+assert.equal(
+  sportsBlockedScorecard.binary_contract,
+  null,
+  'Blocked sports scorecards should not expose a publishable binary contract'
+);
+
+const sportsReadyScorecard = finalizeScorecard(
+  sportsRawScorecard,
+  {
+    ...sportsEvidenceBase,
+    hard_stop: false,
+    sports_grounding: {
+      provider_required: true,
+      provider_configured: true,
+      fixture_resolved: true,
+      parity_ready: true,
+      semantic_ready: true,
+      overlay_confidence: 0.79,
+      overlay_blocker_reason: '',
+      publish_gate_ready: true,
+      market_consensus_strength: 0.68,
+      market_disagreement_score: 0.16,
+      price_move_pressure: 0.28,
+      narrative_hype_score: 0.59,
+      sportsbook_readiness_state: 'forecast_betting_aware',
+    },
+  },
+  sportsQueryPlan,
+  sportsDomainConfig,
+  {
+    engine: 'extended',
+  }
+);
+
+assert.notEqual(
+  sportsReadyScorecard.publication_basis.blocker_reason,
+  'provider_required_no_pick',
+  'A.29 should clear provider_required_no_pick once the sports publish gate is ready'
+);
+assert.equal(
+  sportsReadyScorecard.publication_basis.sports_publish_gate_ready,
+  true,
+  'A.29 ready scorecard should expose publish gate readiness as true'
+);
+assert.equal(
+  sportsReadyScorecard.publication_basis.sports_semantic_ready,
+  true,
+  'A.29 ready scorecard should expose semantic readiness as true'
+);
+assert.equal(
+  sportsReadyScorecard.publication_basis.sportsbook_readiness_state,
+  'forecast_betting_aware',
+  'A.29 ready scorecard should expose a betting-aware but forecast-first posture'
+);
+assert(
+  sportsReadyScorecard.binary_contract,
+  'A.29 should expose a binary contract again once the sports publish gate is ready'
+);
+
+const sportsBenchmarkOnlyScorecard = finalizeScorecard(
+  sportsRawScorecard,
+  {
+    ...sportsEvidenceBase,
+    hard_stop: true,
+    sports_grounding: {
+      provider_required: true,
+      provider_configured: true,
+      fixture_resolved: true,
+      parity_ready: true,
+      semantic_ready: true,
+      overlay_confidence: 0.76,
+      overlay_blocker_reason: '',
+      publish_gate_ready: false,
+      market_consensus_strength: 0.69,
+      market_disagreement_score: 0.14,
+      price_move_pressure: 0.27,
+      narrative_hype_score: 0.58,
+      sportsbook_readiness_state: 'benchmark_only',
+    },
+  },
+  sportsQueryPlan,
+  sportsBettingDomainConfig,
+  {
+    engine: 'extended',
+  }
+);
+
+assert.equal(
+  sportsBenchmarkOnlyScorecard.publication_state,
+  'blocked',
+  'B.3.6 should stay blocked live even when the enriched sports overlays are available.'
+);
+assert.equal(
+  sportsBenchmarkOnlyScorecard.publication_basis.blocker_reason,
+  'provider_required_no_pick',
+  'B.3.6 should keep provider_required_no_pick until its own sports probability benchmark is ready for live unlock.'
+);
+assert.equal(
+  sportsBenchmarkOnlyScorecard.publication_basis.sports_semantic_ready,
+  true,
+  'B.3.6 should still expose semantic readiness in benchmark mode.'
+);
+assert.equal(
+  sportsBenchmarkOnlyScorecard.publication_basis.sports_publish_gate_ready,
+  false,
+  'B.3.6 must not expose the live sports publish gate as ready in this pass.'
+);
+assert.equal(
+  sportsBenchmarkOnlyScorecard.publication_basis.sportsbook_readiness_state,
+  'benchmark_only',
+  'B.3.6 should expose a benchmark-only sportsbook readiness state.'
+);
+assert.equal(
+  sportsBenchmarkOnlyScorecard.binary_contract,
+  null,
+  'B.3.6 should not expose a live binary contract while it stays benchmark-only.'
+);
+
 if (failures.length > 0) {
   console.error(`Prediction core benchmark failed with ${failures.length} issues.`);
   for (const failure of failures.slice(0, 20)) {
@@ -337,3 +566,6 @@ if (failures.length > 0) {
 
 console.log(`Prediction core benchmark passed on ${benchmarkCases.length} routing cases.`);
 console.log(`Synthetic scorecard check passed with publication_state=${scorecard.publication_state}.`);
+console.log(
+  `Sports publish gate checks passed with blocked=${sportsBlockedScorecard.publication_state} and ready=${sportsReadyScorecard.publication_state}.`
+);

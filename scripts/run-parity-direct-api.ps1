@@ -201,6 +201,42 @@ function Get-SportsParityReady($card) {
   return [bool]($grounding.provider_required -and $grounding.provider_configured -and $grounding.fixture_resolved -and $grounding.parity_ready)
 }
 
+function Get-SportsSemanticReady($card) {
+  if ($null -eq $card) { return $false }
+  if ($card.PSObject.Properties.Name -contains "sports_semantic_ready") {
+    return [bool]$card.sports_semantic_ready
+  }
+  $grounding = Get-SportsGrounding $card
+  if ($null -ne $grounding -and $grounding.PSObject.Properties.Name -contains "semantic_ready") {
+    return [bool]$grounding.semantic_ready
+  }
+  return $false
+}
+
+function Get-SportsPublishGateReady($card) {
+  if ($null -eq $card) { return $false }
+  if ($card.PSObject.Properties.Name -contains "sports_publish_gate_ready") {
+    return [bool]$card.sports_publish_gate_ready
+  }
+  $grounding = Get-SportsGrounding $card
+  if ($null -ne $grounding -and $grounding.PSObject.Properties.Name -contains "publish_gate_ready") {
+    return [bool]$grounding.publish_gate_ready
+  }
+  return $false
+}
+
+function Get-SportsOverlayBlockerReason($card) {
+  if ($null -eq $card) { return "" }
+  if ($card.PSObject.Properties.Name -contains "sports_overlay_blocker_reason") {
+    return [string]$card.sports_overlay_blocker_reason
+  }
+  $grounding = Get-SportsGrounding $card
+  if ($null -ne $grounding -and $grounding.PSObject.Properties.Name -contains "overlay_blocker_reason") {
+    return [string]$grounding.overlay_blocker_reason
+  }
+  return ""
+}
+
 function Get-SportsGroundingFlag($card, [string]$name) {
   $grounding = Get-SportsGrounding $card
   if ($null -eq $grounding) { return $false }
@@ -217,6 +253,39 @@ function Get-SportsGroundingReason($card) {
     return [string]$grounding.reason
   }
   return ""
+}
+
+function Get-SportsMarketOverlay($card) {
+  if ($null -eq $card) { return $null }
+  if ($card.PSObject.Properties.Name -contains "sports_market_overlay" -and $null -ne $card.sports_market_overlay) {
+    return $card.sports_market_overlay
+  }
+  return $null
+}
+
+function Get-SportsbookReadinessState($card) {
+  if ($null -eq $card) { return "" }
+  if ($card.PSObject.Properties.Name -contains "sportsbook_readiness_state") {
+    return [string]$card.sportsbook_readiness_state
+  }
+  $grounding = Get-SportsGrounding $card
+  if ($null -ne $grounding -and $grounding.PSObject.Properties.Name -contains "sportsbook_readiness_state") {
+    return [string]$grounding.sportsbook_readiness_state
+  }
+  $overlay = Get-SportsMarketOverlay $card
+  if ($null -ne $overlay -and $overlay.PSObject.Properties.Name -contains "sportsbook_readiness_state") {
+    return [string]$overlay.sportsbook_readiness_state
+  }
+  return ""
+}
+
+function Get-SportsMarketOverlayAvailable($card) {
+  $overlay = Get-SportsMarketOverlay $card
+  if ($null -eq $overlay) { return $false }
+  if ($overlay.PSObject.Properties.Name -contains "available") {
+    return [bool]$overlay.available
+  }
+  return $false
 }
 
 function Get-SportsSideA($card) {
@@ -364,11 +433,13 @@ foreach ($item in $queries) {
   $localCard = if ($localPredictResult.ok) { $localPredictResult.response } else { $null }
 
   $remoteCompile = Invoke-JsonPost -Uri "$RemoteServiceUrl/v1/compile" -Headers $remoteHeaders -Body @{ query = $query }
+  $remoteQueryPlan = Get-QueryPlan -Response $remoteCompile
   $runId = "parity_" + [Guid]::NewGuid().ToString("N").Substring(0, 10)
   $remoteRun = Invoke-JsonPost -Uri "$RemoteServiceUrl/v1/runs" -Headers $remoteHeaders -Body @{
     runId = $runId
     queryText = $query
-    queryPlan = (Get-QueryPlan -Response $remoteCompile)
+    queryPlan = $remoteQueryPlan
+    query_plan = $remoteQueryPlan
     visibility = "private"
     engine = "extended"
     plan = "free"
@@ -399,6 +470,10 @@ foreach ($item in $queries) {
   $sportsProbe = ($query -eq "Inter vs Juventus")
   $localSportsReady = if ($sportsProbe) { Get-SportsParityReady $localCard } else { $false }
   $remoteSportsReady = if ($sportsProbe) { Get-SportsParityReady $remoteCard } else { $false }
+  $localSportsSemanticReady = if ($sportsProbe) { Get-SportsSemanticReady $localCard } else { $false }
+  $remoteSportsSemanticReady = if ($sportsProbe) { Get-SportsSemanticReady $remoteCard } else { $false }
+  $localSportsPublishGateReady = if ($sportsProbe) { Get-SportsPublishGateReady $localCard } else { $false }
+  $remoteSportsPublishGateReady = if ($sportsProbe) { Get-SportsPublishGateReady $remoteCard } else { $false }
   $localSideA = if ($sportsProbe) { Get-SportsSideA $localCard } else { "" }
   $remoteSideA = if ($sportsProbe) { Get-SportsSideA $remoteCard } else { "" }
   $localSideB = if ($sportsProbe) { Get-SportsSideB $localCard } else { "" }
@@ -409,6 +484,12 @@ foreach ($item in $queries) {
   $remoteFixtureResolved = if ($sportsProbe) { Get-SportsGroundingFlag $remoteCard "fixture_resolved" } else { $false }
   $localSportsReason = if ($sportsProbe) { Get-SportsGroundingReason $localCard } else { "" }
   $remoteSportsReason = if ($sportsProbe) { Get-SportsGroundingReason $remoteCard } else { "" }
+  $localSportsOverlayBlockerReason = if ($sportsProbe) { Get-SportsOverlayBlockerReason $localCard } else { "" }
+  $remoteSportsOverlayBlockerReason = if ($sportsProbe) { Get-SportsOverlayBlockerReason $remoteCard } else { "" }
+  $localSportsMarketOverlayAvailable = if ($sportsProbe) { Get-SportsMarketOverlayAvailable $localCard } else { $false }
+  $remoteSportsMarketOverlayAvailable = if ($sportsProbe) { Get-SportsMarketOverlayAvailable $remoteCard } else { $false }
+  $localSportsbookReadinessState = if ($sportsProbe) { Get-SportsbookReadinessState $localCard } else { "" }
+  $remoteSportsbookReadinessState = if ($sportsProbe) { Get-SportsbookReadinessState $remoteCard } else { "" }
 
   if ($item.expects_binary) {
     if (-not $localCard.binary_contract -or -not $remoteCard.binary_contract) {
@@ -443,6 +524,10 @@ foreach ($item in $queries) {
     remote_card_state = if ($remoteCard) { [string]$remoteCard.card_state } else { "" }
     local_sports_ready = $localSportsReady
     remote_sports_ready = $remoteSportsReady
+    local_sports_semantic_ready = $localSportsSemanticReady
+    remote_sports_semantic_ready = $remoteSportsSemanticReady
+    local_sports_publish_gate_ready = $localSportsPublishGateReady
+    remote_sports_publish_gate_ready = $remoteSportsPublishGateReady
     local_side_a = $localSideA
     remote_side_a = $remoteSideA
     local_side_b = $localSideB
@@ -453,6 +538,12 @@ foreach ($item in $queries) {
     remote_fixture_resolved = $remoteFixtureResolved
     local_sports_reason = $localSportsReason
     remote_sports_reason = $remoteSportsReason
+    local_sports_overlay_blocker_reason = $localSportsOverlayBlockerReason
+    remote_sports_overlay_blocker_reason = $remoteSportsOverlayBlockerReason
+    local_sports_market_overlay_available = $localSportsMarketOverlayAvailable
+    remote_sports_market_overlay_available = $remoteSportsMarketOverlayAvailable
+    local_sportsbook_readiness_state = $localSportsbookReadinessState
+    remote_sportsbook_readiness_state = $remoteSportsbookReadinessState
     expects_binary = $item.expects_binary
     timeout = [bool]$remoteWait.timed_out
   }
@@ -493,10 +584,31 @@ foreach ($item in $queries) {
   }
 }
 
+$binaryRows = @($reportRows | Where-Object { $_.expects_binary })
+$binaryComparableRows = @($binaryRows | Where-Object {
+  $_.local_status -eq "completed" -and
+  $_.remote_status -eq "completed" -and
+  [string]::IsNullOrWhiteSpace([string]$_.local_winner) -eq $false -and
+  [string]::IsNullOrWhiteSpace([string]$_.remote_winner) -eq $false
+})
+$binaryComparableCount = $binaryComparableRows.Count
+$binaryWinnerMismatches = @($binaryComparableRows | Where-Object { [string]$_.local_winner -ne [string]$_.remote_winner }).Count
+$binaryComparableProbabilityDeltas = @(
+  $binaryComparableRows |
+    Where-Object { [string]::IsNullOrWhiteSpace([string]$_.probability_delta) -eq $false } |
+    ForEach-Object { [double]$_.probability_delta }
+)
+$binaryMissingContracts = @($binaryRows | Where-Object {
+  $_.local_status -ne "completed" -or
+  $_.remote_status -ne "completed" -or
+  [string]::IsNullOrWhiteSpace([string]$_.local_winner) -or
+  [string]::IsNullOrWhiteSpace([string]$_.remote_winner)
+}).Count
+
 $winnerMismatchRate = if ($binaryComparableCount -gt 0) { [math]::Round(($binaryWinnerMismatches / $binaryComparableCount), 4) } else { $null }
 $medianProbabilityDelta = Get-Median -Values $binaryComparableProbabilityDeltas
-$missingBinaryContractRate = if (($queries | Where-Object { $_.expects_binary }).Count -gt 0) {
-  [math]::Round(($binaryMissingContracts / ($queries | Where-Object { $_.expects_binary }).Count), 4)
+$missingBinaryContractRate = if ($binaryRows.Count -gt 0) {
+  [math]::Round(($binaryMissingContracts / $binaryRows.Count), 4)
 } else {
   $null
 }
@@ -524,6 +636,16 @@ if (-not $sportsProbeReady) { $blockers += "sports probe is not provider-grounde
 
 $blockers = $blockers | Select-Object -Unique
 $verdict = if ($blockers.Count -eq 0) { "10% ready" } else { "hold at 0/0" }
+$sportsProbeRow = $reportRows | Where-Object { $_.query -eq "Inter vs Juventus" } | Select-Object -First 1
+$sportsProbeSemanticReady = if ($sportsProbeRow) { [bool]($sportsProbeRow.local_sports_semantic_ready -and $sportsProbeRow.remote_sports_semantic_ready) } else { $false }
+$sportsProbePublishGateReady = if ($sportsProbeRow) { [bool]($sportsProbeRow.local_sports_publish_gate_ready -and $sportsProbeRow.remote_sports_publish_gate_ready) } else { $false }
+$sportsProbeMarketOverlayAvailable = if ($sportsProbeRow) { [bool]($sportsProbeRow.local_sports_market_overlay_available -and $sportsProbeRow.remote_sports_market_overlay_available) } else { $false }
+$sportsProbeSportsbookReadinessState =
+  if ($sportsProbeRow -and [string]$sportsProbeRow.local_sportsbook_readiness_state -eq [string]$sportsProbeRow.remote_sportsbook_readiness_state) {
+    [string]$sportsProbeRow.local_sportsbook_readiness_state
+  } else {
+    ""
+  }
 
 $report = [ordered]@{
   generated_at = (Get-Date).ToString("o")
@@ -538,6 +660,10 @@ $report = [ordered]@{
     missing_binary_contract_rate = $missingBinaryContractRate
     direct_api_502_count = $local502Count
     sports_probe_ready = $sportsProbeReady
+    sports_probe_semantic_ready = $sportsProbeSemanticReady
+    sports_probe_publish_gate_ready = $sportsProbePublishGateReady
+    sports_probe_market_overlay_available = $sportsProbeMarketOverlayAvailable
+    sports_probe_sportsbook_readiness_state = $sportsProbeSportsbookReadinessState
     verdict = $verdict
     blockers = @($blockers)
   }
@@ -560,6 +686,10 @@ $markdown = @(
   ('- Missing binary contract rate: `{0}`' -f $missingBinaryText),
   ('- Direct API 502 count: `{0}`' -f $local502Count),
   ('- Sports probe ready: `{0}`' -f $sportsProbeReady),
+  ('- Sports semantic ready: `{0}`' -f $report.summary.sports_probe_semantic_ready),
+  ('- Sports publish gate ready: `{0}`' -f $report.summary.sports_probe_publish_gate_ready),
+  ('- Sports market overlay available: `{0}`' -f $report.summary.sports_probe_market_overlay_available),
+  ('- Sportsbook readiness state: `{0}`' -f $report.summary.sports_probe_sportsbook_readiness_state),
   ('- Verdict: **{0}**' -f $verdict),
   "",
   "## Benchmark",

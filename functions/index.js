@@ -32,6 +32,7 @@ const {
   SPORTS_MATCH_OUTCOMES_DOMAIN,
   SPORTS_FIXTURE_CARD_TYPE,
   buildSportsForecastContext,
+  getSportsSemanticOverlayMode,
   getSportsRuntimeHealth,
   isSportsDomain,
   looksLikeSportsMatchQuery,
@@ -186,6 +187,11 @@ function createQueryHash(queryText) {
 }
 
 function createCardCacheKey(queryText, queryPlan = {}, engine = "standard") {
+  const domainId = queryPlan?.primary_domain_id || queryPlan?.domain || queryPlan?.domain_id || "";
+  const sportsLikeQuery =
+    isSportsDomain(domainId) ||
+    safeText(domainId) === "B.3.6.sports_outcomes_probability_mode" ||
+    looksLikeSportsMatchQuery(queryText);
   return createQueryHash(
     JSON.stringify({
       predictionCoreVersion: PREDICTION_CORE_VERSION,
@@ -199,6 +205,8 @@ function createCardCacheKey(queryText, queryPlan = {}, engine = "standard") {
       entities: Array.isArray(queryPlan?.entities)
         ? queryPlan.entities.map((entity) => `${entity?.entity_type || "entity"}:${entity?.label || entity?.entity_id || ""}`)
         : [],
+      sportsSemanticOverlayMode: sportsLikeQuery ? getSportsSemanticOverlayMode() : "",
+      sportsCacheVersion: sportsLikeQuery ? "sports-v1.5" : "",
     })
   );
 }
@@ -1037,6 +1045,24 @@ function normalizeCard(card, queryPlan, options = {}) {
         .filter((item) => isMeaningfulText(item.label))
     : [];
   const rankedList = normalizedRankedList.length > 0 ? normalizedRankedList : sportsCard ? buildSportsRankedList(fixtureReads) : [];
+  const sportsGrounding =
+    card?.sports_grounding && typeof card.sports_grounding === "object"
+      ? card.sports_grounding
+      : evidenceBundle?.sports_grounding && typeof evidenceBundle.sports_grounding === "object"
+        ? evidenceBundle.sports_grounding
+        : null;
+  const sportsOverlay =
+    card?.sports_semantic_overlay && typeof card.sports_semantic_overlay === "object"
+      ? card.sports_semantic_overlay
+      : evidenceBundle?.sports_semantic_overlay && typeof evidenceBundle.sports_semantic_overlay === "object"
+        ? evidenceBundle.sports_semantic_overlay
+        : null;
+  const sportsMarketOverlay =
+    card?.sports_market_overlay && typeof card.sports_market_overlay === "object"
+      ? card.sports_market_overlay
+      : evidenceBundle?.sports_market_overlay && typeof evidenceBundle.sports_market_overlay === "object"
+        ? evidenceBundle.sports_market_overlay
+        : null;
   let cardState =
     card?.card_state === "published" || card?.card_state === "limited" || card?.card_state === "blocked"
       ? card.card_state
@@ -1056,20 +1082,44 @@ function normalizeCard(card, queryPlan, options = {}) {
     .concat(invalidators)
     .filter(Boolean)
     .slice(0, 4);
-  const coverageNotes = uniqueStrings(
-    sanitizeList(card?.evidence_drawer?.coverage_notes).concat(
-      normalizeTextList(scorecard?.publication_basis?.notes, 4),
-      normalizeTextList(evidenceBundle?.notes, 4)
-    )
+  const sportsBlockedNoPick =
+    sportsCard &&
+    Boolean(sportsGrounding?.provider_required) &&
+    cardState === "blocked" &&
+    safeText(scorecard?.publication_basis?.blocker_reason || card?.publication_basis?.blocker_reason) === "provider_required_no_pick";
+  const coverageNotes = (
+    sportsBlockedNoPick
+      ? uniqueStrings([
+          sportsGrounding?.fixture_resolved ? "Crystal already grounded the matchup with TheSportsDB." : "",
+          safeText(sportsGrounding?.overlay_blocker_reason)
+            ? `The sports publish gate is still blocked because ${safeText(sportsGrounding.overlay_blocker_reason).replace(/_/g, " ")}.`
+            : "Crystal still needs fresher lineup, injury, and preview confirmation before publishing the pick.",
+          safeText(sportsGrounding?.reason),
+          ...invalidators.slice(0, 2),
+        ])
+      : uniqueStrings(
+          sanitizeList(card?.evidence_drawer?.coverage_notes).concat(
+            normalizeTextList(scorecard?.publication_basis?.notes, 4),
+            normalizeTextList(evidenceBundle?.notes, 4)
+          )
+        )
   ).slice(0, 4);
-  const howToRaiseConfidence = uniqueStrings(
-    sanitizeList(card?.how_to_raise_confidence || card?.howToRaiseConfidence).concat(
-      cardState !== "published" && !coverageNotes.length ? [safeText(domainConfig.status_reason)] : [],
-      evidenceBundle?.historical_baseline_20y ? [] : ["Add a stronger historical baseline for the core entity or geography."],
-      Array.isArray(evidenceBundle?.live_signals) && evidenceBundle.live_signals.length > 0
-        ? []
-        : ["Add fresher live signals before promoting this read."]
-    )
+  const howToRaiseConfidence = (
+    sportsBlockedNoPick
+      ? uniqueStrings([
+          "Use explicit team names and, when possible, the match date or competition.",
+          "Re-run closer to kickoff so lineup, injury, and preview coverage can thicken.",
+          "Treat this as a grounded matchup read until the sports publish gate is fully ready.",
+        ])
+      : uniqueStrings(
+          sanitizeList(card?.how_to_raise_confidence || card?.howToRaiseConfidence).concat(
+            cardState !== "published" && !coverageNotes.length ? [safeText(domainConfig.status_reason)] : [],
+            evidenceBundle?.historical_baseline_20y ? [] : ["Add a stronger historical baseline for the core entity or geography."],
+            Array.isArray(evidenceBundle?.live_signals) && evidenceBundle.live_signals.length > 0
+              ? []
+              : ["Add fresher live signals before promoting this read."]
+          )
+        )
   ).slice(0, 4);
 
   const evidenceQuality =
@@ -1233,6 +1283,26 @@ function normalizeCard(card, queryPlan, options = {}) {
             source_count: evidenceQuality.source_count,
             domain_state: domainConfig.current_state,
             notes: coverageNotes,
+            sports_semantic_ready: sportsGrounding?.semantic_ready === true,
+            sports_overlay_confidence: Number.isFinite(Number(sportsGrounding?.overlay_confidence))
+              ? Number(sportsGrounding.overlay_confidence)
+              : null,
+            sports_overlay_blocker_reason: safeText(sportsGrounding?.overlay_blocker_reason) || null,
+            sports_publish_gate_ready: sportsGrounding?.publish_gate_ready === true,
+            market_consensus_strength: Number.isFinite(Number(sportsGrounding?.market_consensus_strength))
+              ? Number(sportsGrounding.market_consensus_strength)
+              : sportsMarketOverlay?.market_consensus_strength ?? null,
+            market_disagreement_score: Number.isFinite(Number(sportsGrounding?.market_disagreement_score))
+              ? Number(sportsGrounding.market_disagreement_score)
+              : sportsMarketOverlay?.market_disagreement_score ?? null,
+            price_move_pressure: Number.isFinite(Number(sportsGrounding?.price_move_pressure))
+              ? Number(sportsGrounding.price_move_pressure)
+              : sportsMarketOverlay?.price_move_pressure ?? null,
+            narrative_hype_score: Number.isFinite(Number(sportsGrounding?.narrative_hype_score))
+              ? Number(sportsGrounding.narrative_hype_score)
+              : sportsMarketOverlay?.narrative_hype_score ?? null,
+            sportsbook_readiness_state:
+              safeText(sportsGrounding?.sportsbook_readiness_state, safeText(sportsMarketOverlay?.sportsbook_readiness_state)) || null,
           },
     what_to_watch: whatToWatch,
     how_to_raise_confidence: howToRaiseConfidence,
@@ -1285,6 +1355,43 @@ function normalizeCard(card, queryPlan, options = {}) {
         : evidenceBundle?.prediction_market_frame && typeof evidenceBundle.prediction_market_frame === "object"
           ? { ...evidenceBundle.prediction_market_frame }
           : null,
+    sports_grounding: sportsGrounding || undefined,
+    sports_semantic_overlay: sportsOverlay || undefined,
+    sports_market_overlay: sportsMarketOverlay || undefined,
+    sports_semantic_ready:
+      card?.sports_semantic_ready === true || sportsGrounding?.semantic_ready === true || sportsOverlay?.ready === true,
+    sports_overlay_confidence: Number.isFinite(Number(card?.sports_overlay_confidence))
+      ? Number(card.sports_overlay_confidence)
+      : Number.isFinite(Number(sportsGrounding?.overlay_confidence))
+        ? Number(sportsGrounding.overlay_confidence)
+        : undefined,
+    sports_overlay_blocker_reason:
+      safeText(card?.sports_overlay_blocker_reason, safeText(sportsGrounding?.overlay_blocker_reason)) || undefined,
+    sports_publish_gate_ready:
+      card?.sports_publish_gate_ready === true || sportsGrounding?.publish_gate_ready === true,
+    market_consensus_strength: Number.isFinite(Number(card?.market_consensus_strength))
+      ? Number(card.market_consensus_strength)
+      : Number.isFinite(Number(sportsGrounding?.market_consensus_strength))
+        ? Number(sportsGrounding.market_consensus_strength)
+        : sportsMarketOverlay?.market_consensus_strength,
+    market_disagreement_score: Number.isFinite(Number(card?.market_disagreement_score))
+      ? Number(card.market_disagreement_score)
+      : Number.isFinite(Number(sportsGrounding?.market_disagreement_score))
+        ? Number(sportsGrounding.market_disagreement_score)
+        : sportsMarketOverlay?.market_disagreement_score,
+    price_move_pressure: Number.isFinite(Number(card?.price_move_pressure))
+      ? Number(card.price_move_pressure)
+      : Number.isFinite(Number(sportsGrounding?.price_move_pressure))
+        ? Number(sportsGrounding.price_move_pressure)
+        : sportsMarketOverlay?.price_move_pressure,
+    narrative_hype_score: Number.isFinite(Number(card?.narrative_hype_score))
+      ? Number(card.narrative_hype_score)
+      : Number.isFinite(Number(sportsGrounding?.narrative_hype_score))
+        ? Number(sportsGrounding.narrative_hype_score)
+        : sportsMarketOverlay?.narrative_hype_score,
+    sportsbook_readiness_state:
+      safeText(card?.sportsbook_readiness_state, safeText(sportsGrounding?.sportsbook_readiness_state, safeText(sportsMarketOverlay?.sportsbook_readiness_state))) ||
+      undefined,
   };
 }
 
@@ -1893,9 +2000,33 @@ async function completeLegacyEmergencyFallbackRun({
 }
 
 async function startRemoteCrystalCoreRun(payload = {}) {
+  const body = {
+    ...payload,
+  };
+  if (body.queryPlan && typeof body.queryPlan === "object" && !body.query_plan) {
+    body.query_plan = body.queryPlan;
+  }
+  if (safeText(body.queryText) && !safeText(body.query_text)) {
+    body.query_text = body.queryText;
+  }
+  if (safeText(body.publicAccessToken) && !safeText(body.public_access_token)) {
+    body.public_access_token = body.publicAccessToken;
+  }
+  if (safeText(body.sourceView) && !safeText(body.source_view)) {
+    body.source_view = body.sourceView;
+  }
+  if (safeText(body.routeOrigin) && !safeText(body.route_origin)) {
+    body.route_origin = body.routeOrigin;
+  }
+  if (safeText(body.rolloutBucket) && !safeText(body.rollout_bucket)) {
+    body.rollout_bucket = body.rolloutBucket;
+  }
+  if (safeText(body.requestTimeZone) && !safeText(body.request_time_zone)) {
+    body.request_time_zone = body.requestTimeZone;
+  }
   return invokeCloudRunJson("/v1/runs", {
     method: "POST",
-    body: payload,
+    body,
   });
 }
 
@@ -2976,6 +3107,104 @@ Restituisci almeno:
   };
 }
 
+function applySportsPublishGateToCardPayload(payload = {}, sportsContext = {}, queryPlan = {}) {
+  const groundedRead = sportsContext?.grounded_read || {};
+  const publishGateReady = sportsContext?.publish_gate_ready === true;
+  const blockerReason = safeText(sportsContext?.overlay_blocker_reason, "sports_semantic_overlay_pending");
+  const coverageNotes = uniqueStrings([
+    groundedRead?.fixture_resolved ? "Crystal already grounded the matchup with TheSportsDB." : "",
+    publishGateReady ? "" : `The sports publish gate is still blocked because ${blockerReason.replace(/_/g, " ")}.`,
+    safeText(groundedRead?.reason),
+    ...normalizeTextList(groundedRead?.invalidators, 3),
+  ]).slice(0, 4);
+  const whatToWatch = uniqueStrings(
+    normalizeTextList(payload?.what_to_watch, 4).concat(normalizeTextList(groundedRead?.invalidators, 4))
+  ).slice(0, 4);
+  const howToRaiseConfidence = uniqueStrings([
+    "Use explicit team names and, when possible, the match date or competition.",
+    "Re-run closer to kickoff so lineup, injury, and preview coverage can thicken.",
+    publishGateReady ? "" : "Treat this as a grounded matchup read until the sports publish gate is fully ready.",
+  ]).slice(0, 4);
+
+  return {
+    ...payload,
+    card_state: publishGateReady ? safeText(payload?.card_state, "published") : "blocked",
+    summary: publishGateReady
+      ? safeText(payload?.summary)
+      : "Crystal has the matchup grounded, but the sports semantic publish gate is not closed yet for a responsible pick.",
+    verdict: publishGateReady
+      ? safeText(payload?.verdict)
+      : "Blocked pending sports semantic publish gate",
+    what_to_watch: whatToWatch,
+    how_to_raise_confidence: howToRaiseConfidence,
+    counter_signals: uniqueStrings(
+      normalizeTextList(payload?.counter_signals, 4).concat(normalizeTextList(groundedRead?.counter_signals, 4))
+    ).slice(0, 4),
+    invalidators: uniqueStrings(
+      normalizeTextList(payload?.invalidators, 4).concat(normalizeTextList(groundedRead?.invalidators, 4))
+    ).slice(0, 4),
+    evidence_drawer: {
+      ...(payload?.evidence_drawer || {}),
+      coverage_notes: coverageNotes,
+      gating_reason: publishGateReady ? safeText(payload?.evidence_drawer?.gating_reason, "published") : "blocked_by_sports_publish_gate",
+    },
+    trust_layer: {
+      ...(payload?.trust_layer || {}),
+      data_sufficiency_flag: publishGateReady ? safeText(payload?.trust_layer?.data_sufficiency_flag, "partial") : "partial",
+    },
+    sports_grounding: {
+      provider_required: true,
+      provider_configured: Boolean(sportsContext?.provider_configured ?? sportsContext?.configured),
+      fixture_resolved: Boolean(groundedRead?.fixture_resolved),
+      parity_ready: Boolean(groundedRead?.parity_ready),
+      semantic_ready: Boolean(sportsContext?.semantic_ready),
+      overlay_confidence: Number.isFinite(Number(sportsContext?.overlay_confidence)) ? Number(sportsContext.overlay_confidence) : null,
+      overlay_blocker_reason: blockerReason,
+      publish_gate_ready: publishGateReady,
+      question_side_a: safeText(groundedRead?.question_side_a || queryPlan?.question_side_a),
+      question_side_b: safeText(groundedRead?.question_side_b || queryPlan?.question_side_b),
+      winning_side: safeText(groundedRead?.winning_side),
+      winning_probability: Number.isFinite(Number(groundedRead?.winning_probability)) ? Number(groundedRead.winning_probability) : null,
+      market_consensus_strength: Number.isFinite(Number(sportsContext?.market_consensus_strength))
+        ? Number(sportsContext.market_consensus_strength)
+        : null,
+      market_disagreement_score: Number.isFinite(Number(sportsContext?.market_disagreement_score))
+        ? Number(sportsContext.market_disagreement_score)
+        : null,
+      price_move_pressure: Number.isFinite(Number(sportsContext?.price_move_pressure))
+        ? Number(sportsContext.price_move_pressure)
+        : null,
+      narrative_hype_score: Number.isFinite(Number(sportsContext?.narrative_hype_score))
+        ? Number(sportsContext.narrative_hype_score)
+        : null,
+      sportsbook_readiness_state: safeText(sportsContext?.sportsbook_readiness_state) || null,
+      key_drivers: normalizeTextList(groundedRead?.key_drivers, 4),
+      counter_signals: normalizeTextList(groundedRead?.counter_signals, 4),
+      invalidators: normalizeTextList(groundedRead?.invalidators, 4),
+      reason: safeText(groundedRead?.reason),
+    },
+    sports_semantic_overlay: sportsContext?.semantic_overlay || null,
+    sports_market_overlay: sportsContext?.market_overlay || null,
+    sports_semantic_ready: sportsContext?.semantic_ready === true,
+    sports_overlay_confidence: Number.isFinite(Number(sportsContext?.overlay_confidence)) ? Number(sportsContext.overlay_confidence) : null,
+    sports_overlay_blocker_reason: blockerReason,
+    sports_publish_gate_ready: publishGateReady,
+    market_consensus_strength: Number.isFinite(Number(sportsContext?.market_consensus_strength))
+      ? Number(sportsContext.market_consensus_strength)
+      : null,
+    market_disagreement_score: Number.isFinite(Number(sportsContext?.market_disagreement_score))
+      ? Number(sportsContext.market_disagreement_score)
+      : null,
+    price_move_pressure: Number.isFinite(Number(sportsContext?.price_move_pressure))
+      ? Number(sportsContext.price_move_pressure)
+      : null,
+    narrative_hype_score: Number.isFinite(Number(sportsContext?.narrative_hype_score))
+      ? Number(sportsContext.narrative_hype_score)
+      : null,
+    sportsbook_readiness_state: safeText(sportsContext?.sportsbook_readiness_state) || null,
+  };
+}
+
 async function compileQuery(queryText, options = {}) {
   if (looksLikeSportsMatchQuery(queryText)) {
     const payload = await withRetry(() =>
@@ -3100,6 +3329,8 @@ CONTESTO UTENTE:
       queryText,
       queryPlan,
       fetchJson,
+      db,
+      admin,
     });
   }
 
@@ -3121,7 +3352,7 @@ CONTESTO UTENTE:
       })
     );
 
-    baseCard = normalizeCard(payload, queryPlan);
+    baseCard = normalizeCard(applySportsPublishGateToCardPayload(payload, sportsContext, queryPlan), queryPlan);
   } else {
     const evidenceBundle = await buildEvidenceBundle({
       queryText,

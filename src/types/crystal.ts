@@ -106,6 +106,100 @@ export interface PublicationBasis {
   source_count?: number;
   domain_state?: string;
   notes?: string[];
+  blocker_reason?: string | null;
+  quality_verdict?: string | null;
+  provider_required_no_pick?: boolean;
+  sports_semantic_ready?: boolean;
+  sports_overlay_confidence?: number | null;
+  sports_overlay_blocker_reason?: string | null;
+  sports_publish_gate_ready?: boolean;
+  market_consensus_strength?: number | null;
+  market_disagreement_score?: number | null;
+  price_move_pressure?: number | null;
+  narrative_hype_score?: number | null;
+  sportsbook_readiness_state?: string | null;
+}
+
+export interface SportsGrounding {
+  provider_required: boolean;
+  provider_configured: boolean;
+  fixture_resolved: boolean;
+  parity_ready: boolean;
+  semantic_ready?: boolean;
+  overlay_confidence?: number | null;
+  overlay_blocker_reason?: string | null;
+  publish_gate_ready?: boolean;
+  question_side_a?: string | null;
+  question_side_b?: string | null;
+  winning_side?: string | null;
+  winning_probability?: number | null;
+  key_drivers?: string[];
+  counter_signals?: string[];
+  invalidators?: string[];
+  reason?: string | null;
+  market_consensus_strength?: number | null;
+  market_disagreement_score?: number | null;
+  price_move_pressure?: number | null;
+  narrative_hype_score?: number | null;
+  sportsbook_readiness_state?: string | null;
+}
+
+export interface SportsSemanticOverlay {
+  enabled: boolean;
+  mode?: string;
+  ready?: boolean;
+  publish_gate_ready?: boolean;
+  confidence?: number | null;
+  blocker_reason?: string | null;
+  source_count?: number;
+  freshness_hours?: number | null;
+  entity_alignment_score?: number;
+  contradiction_score?: number;
+  injury_pressure?: number;
+  lineup_uncertainty?: number;
+  managerial_disruption?: number;
+  travel_fatigue?: number;
+  motivation_context?: number;
+  narrative_consensus?: string | null;
+  notes?: string[];
+}
+
+export interface SportsMarketOverlay {
+  enabled: boolean;
+  available?: boolean;
+  used_source_ids?: string[];
+  source_count?: number;
+  confidence?: number | null;
+  notes?: string[];
+  key_drivers?: string[];
+  invalidators?: string[];
+  google_trends?: {
+    keyword?: string;
+    latest_interest?: number;
+    peak_interest?: number;
+    average_interest?: number;
+    momentum_score?: number;
+    narrative_hype_score?: number;
+    note?: string;
+  } | null;
+  polymarket_public?: {
+    market_question?: string;
+    market_url?: string | null;
+    implied_probability?: number | null;
+    match_confidence?: number | null;
+    market_quality?: number | null;
+    divergence_vs_crystal?: number | null;
+    price_change_7d?: number | null;
+    market_consensus_strength?: number | null;
+    market_disagreement_score?: number | null;
+    price_move_pressure?: number | null;
+    note?: string;
+  } | null;
+  market_consensus_strength?: number | null;
+  market_disagreement_score?: number | null;
+  price_move_pressure?: number | null;
+  narrative_hype_score?: number | null;
+  sportsbook_readiness_state?: string | null;
 }
 
 export interface ResolvedTimeWindow {
@@ -252,6 +346,18 @@ export interface CardData {
   runtime_transport?: 'remote' | 'local_core' | 'local_fallback' | 'legacy_emergency' | 'local';
   rollout_bucket?: string;
   calibration_snapshot?: CalibrationSnapshot;
+  sports_grounding?: SportsGrounding;
+  sports_semantic_overlay?: SportsSemanticOverlay | null;
+  sports_market_overlay?: SportsMarketOverlay | null;
+  sports_semantic_ready?: boolean;
+  sports_overlay_confidence?: number | null;
+  sports_overlay_blocker_reason?: string | null;
+  sports_publish_gate_ready?: boolean;
+  market_consensus_strength?: number | null;
+  market_disagreement_score?: number | null;
+  price_move_pressure?: number | null;
+  narrative_hype_score?: number | null;
+  sportsbook_readiness_state?: string | null;
   core_version?: string;
   _source?: string;
   _billing?: {

@@ -1,6 +1,6 @@
 # Crystal domain quality matrix
 
-Generated at: 2026-03-30T23:46:05.727Z
+Generated at: 2026-03-31T09:30:31.860Z
 Domains covered: 43
 Rows scanned: 86
 Top-1 hit rate: 93%

@@ -149,6 +149,7 @@ function Invoke-PhaseADeploy {
     SportsProviderBaseUrl = [string]$EnvMap["SPORTS_PROVIDER_BASE_URL"]
     TheSportsDbApiKey = [string]$EnvMap["THE_SPORTS_DB_API_KEY"]
     ApiFootballKey = [string]$EnvMap["API_FOOTBALL_KEY"]
+    SportsSemanticOverlayMode = [string]$EnvMap["SPORTS_SEMANTIC_OVERLAY_MODE"]
     FredApiKey = [string]$EnvMap["FRED_API_KEY"]
     NominatimBaseUrl = [string]$EnvMap["NOMINATIM_BASE_URL"]
     OverpassBaseUrl = [string]$EnvMap["OVERPASS_BASE_URL"]

@@ -1,7 +1,7 @@
 {
   "summary": {
-    "generated_at": "2026-03-30T23:45:43.635Z",
-    "report_date": "2026-03-30",
+    "generated_at": "2026-03-31T09:30:02.682Z",
+    "report_date": "2026-03-31",
     "total_cases": 10,
     "binary_cases": 8,
     "top3_miss_count": 0,
@@ -22,6 +22,7 @@
         "polymarket_public",
         "gdelt",
         "rss_allowlist",
+        "google_trends",
         "historical-cache"
       ],
       "missing_required_sources": []
@@ -33,6 +34,7 @@
         "polymarket_public",
         "gdelt",
         "rss_allowlist",
+        "google_trends",
         "historical-cache"
       ],
       "missing_required_sources": []
@@ -44,6 +46,7 @@
         "polymarket_public",
         "gdelt",
         "rss_allowlist",
+        "google_trends",
         "historical-cache"
       ],
       "missing_required_sources": []
@@ -54,7 +57,8 @@
         "wikidata",
         "gdelt",
         "rss_allowlist",
-        "historical-cache"
+        "historical-cache",
+        "google_trends"
       ],
       "missing_required_sources": []
     }
@@ -121,6 +125,7 @@
         "polymarket_public",
         "gdelt",
         "rss_allowlist",
+        "google_trends",
         "historical-cache"
       ],
       "source_usage": {
@@ -146,11 +151,10 @@
           "polymarket_public",
           "gdelt",
           "rss_allowlist",
+          "google_trends",
           "historical-cache"
         ],
-        "missing_required_sources": [
-          "google_trends"
-        ],
+        "missing_required_sources": [],
         "missing_optional_sources": [],
         "provider_states": [
           {
@@ -200,10 +204,10 @@
             "implementation_status": "implemented",
             "configured": true,
             "available": true,
-            "status": "required_not_used",
+            "status": "used",
             "required_for_query": true,
             "optional_for_query": false,
-            "used_in_run": false
+            "used_in_run": true
           },
           {
             "source_id": "polymarket_public",
@@ -236,7 +240,7 @@
       "missing_required_sources": [],
       "missing_metadata": [],
       "primary_call": "Lean No 58/42",
-      "card_state": "limited",
+      "card_state": "published",
       "binary_winning_side": "No",
       "binary_band": "lean",
       "binary_winning_probability": 0.58,
@@ -304,6 +308,7 @@
         "polymarket_public",
         "gdelt",
         "rss_allowlist",
+        "google_trends",
         "historical-cache"
       ],
       "source_usage": {
@@ -329,11 +334,10 @@
           "polymarket_public",
           "gdelt",
           "rss_allowlist",
+          "google_trends",
           "historical-cache"
         ],
-        "missing_required_sources": [
-          "google_trends"
-        ],
+        "missing_required_sources": [],
         "missing_optional_sources": [],
         "provider_states": [
           {
@@ -383,10 +387,10 @@
             "implementation_status": "implemented",
             "configured": true,
             "available": true,
-            "status": "required_not_used",
+            "status": "used",
             "required_for_query": true,
             "optional_for_query": false,
-            "used_in_run": false
+            "used_in_run": true
           },
           {
             "source_id": "polymarket_public",
@@ -419,7 +423,7 @@
       "missing_required_sources": [],
       "missing_metadata": [],
       "primary_call": "Lean No 58/42",
-      "card_state": "limited",
+      "card_state": "published",
       "binary_winning_side": "No",
       "binary_band": "lean",
       "binary_winning_probability": 0.58,
@@ -487,6 +491,7 @@
         "polymarket_public",
         "gdelt",
         "rss_allowlist",
+        "google_trends",
         "historical-cache"
       ],
       "source_usage": {
@@ -512,11 +517,10 @@
           "polymarket_public",
           "gdelt",
           "rss_allowlist",
+          "google_trends",
           "historical-cache"
         ],
-        "missing_required_sources": [
-          "google_trends"
-        ],
+        "missing_required_sources": [],
         "missing_optional_sources": [],
         "provider_states": [
           {
@@ -566,10 +570,10 @@
             "implementation_status": "implemented",
             "configured": true,
             "available": true,
-            "status": "required_not_used",
+            "status": "used",
             "required_for_query": true,
             "optional_for_query": false,
-            "used_in_run": false
+            "used_in_run": true
           },
           {
             "source_id": "polymarket_public",
@@ -602,7 +606,7 @@
       "missing_required_sources": [],
       "missing_metadata": [],
       "primary_call": "Lean Government survives 58/42",
-      "card_state": "limited",
+      "card_state": "published",
       "binary_winning_side": "Government survives",
       "binary_band": "lean",
       "binary_winning_probability": 0.58,
@@ -671,6 +675,7 @@
         "polymarket_public",
         "gdelt",
         "rss_allowlist",
+        "google_trends",
         "historical-cache"
       ],
       "source_usage": {
@@ -696,11 +701,10 @@
           "polymarket_public",
           "gdelt",
           "rss_allowlist",
+          "google_trends",
           "historical-cache"
         ],
-        "missing_required_sources": [
-          "google_trends"
-        ],
+        "missing_required_sources": [],
         "missing_optional_sources": [],
         "provider_states": [
           {
@@ -750,10 +754,10 @@
             "implementation_status": "implemented",
             "configured": true,
             "available": true,
-            "status": "required_not_used",
+            "status": "used",
             "required_for_query": true,
             "optional_for_query": false,
-            "used_in_run": false
+            "used_in_run": true
           },
           {
             "source_id": "polymarket_public",
@@ -786,7 +790,7 @@
       "missing_required_sources": [],
       "missing_metadata": [],
       "primary_call": "Lean Government holds 58/42",
-      "card_state": "limited",
+      "card_state": "published",
       "binary_winning_side": "Government holds",
       "binary_band": "lean",
       "binary_winning_probability": 0.58,
@@ -853,6 +857,7 @@
         "polymarket_public",
         "gdelt",
         "rss_allowlist",
+        "google_trends",
         "historical-cache"
       ],
       "source_usage": {
@@ -878,11 +883,10 @@
           "polymarket_public",
           "gdelt",
           "rss_allowlist",
+          "google_trends",
           "historical-cache"
         ],
-        "missing_required_sources": [
-          "google_trends"
-        ],
+        "missing_required_sources": [],
         "missing_optional_sources": [],
         "provider_states": [
           {
@@ -932,10 +936,10 @@
             "implementation_status": "implemented",
             "configured": true,
             "available": true,
-            "status": "required_not_used",
+            "status": "used",
             "required_for_query": true,
             "optional_for_query": false,
-            "used_in_run": false
+            "used_in_run": true
           },
           {
             "source_id": "polymarket_public",
@@ -970,7 +974,7 @@
       "primary_call": "Lean Approved 58/42",
       "card_state": "limited",
       "binary_winning_side": "Approved",
-      "binary_band": "lean",
+      "binary_band": "limited",
       "binary_winning_probability": 0.58,
       "binary_contract_missing": false,
       "binary_winner_ambiguous": false,
@@ -1036,6 +1040,7 @@
         "polymarket_public",
         "gdelt",
         "rss_allowlist",
+        "google_trends",
         "historical-cache"
       ],
       "source_usage": {
@@ -1061,11 +1066,10 @@
           "polymarket_public",
           "gdelt",
           "rss_allowlist",
+          "google_trends",
           "historical-cache"
         ],
-        "missing_required_sources": [
-          "google_trends"
-        ],
+        "missing_required_sources": [],
         "missing_optional_sources": [],
         "provider_states": [
           {
@@ -1115,10 +1119,10 @@
             "implementation_status": "implemented",
             "configured": true,
             "available": true,
-            "status": "required_not_used",
+            "status": "used",
             "required_for_query": true,
             "optional_for_query": false,
-            "used_in_run": false
+            "used_in_run": true
           },
           {
             "source_id": "polymarket_public",
@@ -1153,7 +1157,7 @@
       "primary_call": "Lean Approved 58/42",
       "card_state": "limited",
       "binary_winning_side": "Approved",
-      "binary_band": "lean",
+      "binary_band": "limited",
       "binary_winning_probability": 0.58,
       "binary_contract_missing": false,
       "binary_winner_ambiguous": false,
@@ -1442,6 +1446,7 @@
         "wikidata",
         "gdelt",
         "rss_allowlist",
+        "google_trends",
         "historical-cache"
       ],
       "source_usage": {
@@ -1465,11 +1470,10 @@
           "wikidata",
           "gdelt",
           "rss_allowlist",
+          "google_trends",
           "historical-cache"
         ],
-        "missing_required_sources": [
-          "google_trends"
-        ],
+        "missing_required_sources": [],
         "missing_optional_sources": [],
         "provider_states": [
           {
@@ -1519,10 +1523,10 @@
             "implementation_status": "implemented",
             "configured": true,
             "available": true,
-            "status": "required_not_used",
+            "status": "used",
             "required_for_query": true,
             "optional_for_query": false,
-            "used_in_run": false
+            "used_in_run": true
           },
           {
             "source_id": "historical-cache",
@@ -1611,6 +1615,7 @@
         "polymarket_public",
         "gdelt",
         "rss_allowlist",
+        "google_trends",
         "historical-cache"
       ],
       "source_usage": {
@@ -1636,11 +1641,10 @@
           "polymarket_public",
           "gdelt",
           "rss_allowlist",
+          "google_trends",
           "historical-cache"
         ],
-        "missing_required_sources": [
-          "google_trends"
-        ],
+        "missing_required_sources": [],
         "missing_optional_sources": [],
         "provider_states": [
           {
@@ -1690,10 +1694,10 @@
             "implementation_status": "implemented",
             "configured": true,
             "available": true,
-            "status": "required_not_used",
+            "status": "used",
             "required_for_query": true,
             "optional_for_query": false,
-            "used_in_run": false
+            "used_in_run": true
           },
           {
             "source_id": "polymarket_public",
@@ -1726,7 +1730,7 @@
       "missing_required_sources": [],
       "missing_metadata": [],
       "primary_call": "Lean Government holds 58/42",
-      "card_state": "limited",
+      "card_state": "published",
       "binary_winning_side": "Government holds",
       "binary_band": "lean",
       "binary_winning_probability": 0.58,
@@ -1794,6 +1798,7 @@
         "polymarket_public",
         "gdelt",
         "rss_allowlist",
+        "google_trends",
         "historical-cache"
       ],
       "source_usage": {
@@ -1819,11 +1824,10 @@
           "polymarket_public",
           "gdelt",
           "rss_allowlist",
+          "google_trends",
           "historical-cache"
         ],
-        "missing_required_sources": [
-          "google_trends"
-        ],
+        "missing_required_sources": [],
         "missing_optional_sources": [],
         "provider_states": [
           {
@@ -1873,10 +1877,10 @@
             "implementation_status": "implemented",
             "configured": true,
             "available": true,
-            "status": "required_not_used",
+            "status": "used",
             "required_for_query": true,
             "optional_for_query": false,
-            "used_in_run": false
+            "used_in_run": true
           },
           {
             "source_id": "polymarket_public",
@@ -1911,7 +1915,7 @@
       "primary_call": "Lean Blocked 58/42",
       "card_state": "limited",
       "binary_winning_side": "Blocked",
-      "binary_band": "lean",
+      "binary_band": "limited",
       "binary_winning_probability": 0.58,
       "binary_contract_missing": false,
       "binary_winner_ambiguous": false,

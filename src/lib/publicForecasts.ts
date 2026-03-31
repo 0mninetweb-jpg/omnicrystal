@@ -26,6 +26,7 @@ export interface PublicForecastRecord extends CardData {
   published_at?: unknown;
   createdAt?: unknown;
   updatedAt?: unknown;
+  resolution_status?: string;
 }
 
 export type PublicForecastLoadSource = 'live' | 'cache';
@@ -103,9 +104,57 @@ function findForecastRecordBySlug(records: PublicForecastRecord[], slug: string)
   return records.find((record) => (record.public_slug || record.id) === slug) || null;
 }
 
+function parseDateValue(value: unknown) {
+  const numeric = toSortNumber(value);
+  if (!numeric) return null;
+  const parsed = new Date(numeric);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function parseDateOnlyAtEndOfDay(value: unknown) {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  const normalized = value.trim();
+  const parsed = /^\d{4}-\d{2}-\d{2}$/.test(normalized)
+    ? new Date(`${normalized}T23:59:59.999Z`)
+    : new Date(normalized);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function getResolvedWindowEnd(record: PublicForecastRecord) {
+  return (
+    record.resolved_time_window?.end_date ||
+    record.temporal_context?.resolved_time_window?.end_date ||
+    record.query_plan?.temporal_context?.resolved_time_window?.end_date ||
+    null
+  );
+}
+
+function getPublicForecastDeadline(record: PublicForecastRecord) {
+  return (
+    parseDateValue(record.resolution_target?.resolution_due_at) ||
+    parseDateOnlyAtEndOfDay(record.resolution_target?.event_date) ||
+    parseDateOnlyAtEndOfDay(record.query_plan?.event_date) ||
+    parseDateOnlyAtEndOfDay(getResolvedWindowEnd(record))
+  );
+}
+
+export function isPublicForecastConcluded(record: PublicForecastRecord, now = new Date()) {
+  const status = String(record.resolution_status || '').trim().toLowerCase();
+  if (status === 'resolved' || status === 'closed' || status === 'expired' || status === 'canceled' || status === 'cancelled') {
+    return true;
+  }
+
+  const deadline = getPublicForecastDeadline(record);
+  return Boolean(deadline && deadline.getTime() < now.getTime());
+}
+
+export function filterActivePublicForecasts(records: PublicForecastRecord[], now = new Date()) {
+  return records.filter((record) => !isPublicForecastConcluded(record, now));
+}
+
 export async function fetchPublicForecasts() {
   const snapshot = await getDocs(collection(db, 'public_forecasts'));
-  return snapshot.docs.map(mapSnapshotToPublicForecast);
+  return filterActivePublicForecasts(snapshot.docs.map(mapSnapshotToPublicForecast));
 }
 
 export async function fetchPublicForecastBySlug(slug: string, timeoutMs = PUBLIC_FORECAST_TIMEOUT_MS) {
@@ -122,7 +171,7 @@ export async function fetchPublicForecastBySlug(slug: string, timeoutMs = PUBLIC
 }
 
 export async function fetchPublicForecastCollection(timeoutMs = PUBLIC_FORECAST_TIMEOUT_MS): Promise<PublicForecastCollectionResult> {
-  const cachedRecords = readCachedPublicForecasts();
+  const cachedRecords = filterActivePublicForecasts(readCachedPublicForecasts());
 
   try {
     const snapshot = await withTimeout(
@@ -130,7 +179,7 @@ export async function fetchPublicForecastCollection(timeoutMs = PUBLIC_FORECAST_
       timeoutMs,
       'Crystal timed out while loading the public forecast gallery.'
     );
-    const records = snapshot.docs.map(mapSnapshotToPublicForecast);
+    const records = filterActivePublicForecasts(snapshot.docs.map(mapSnapshotToPublicForecast));
     writeCachedPublicForecasts(records);
     return {
       records,

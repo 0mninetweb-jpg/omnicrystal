@@ -543,13 +543,24 @@ function buildSyntheticEvidenceBundle({ domainConfig, sourceUsage, variant = "ca
   const hasWeek3EdgeDepth = week3FocusEdge && sourceUsage.used_sources.length >= 4 && sourceUsage.missing_required_sources.length === 0;
   const sportsProvider = sourceUsage.provider_states.find((provider) => provider.source_id === "thesportsdb_public");
   const decisionMetadata = buildWeek3DecisionMetadata(domainId, queryText, variant, sourceUsage);
+  const a29SportsDomain = domainId === "A.29.sports_performance_and_outcomes";
+  const b36SportsDomain = domainId === "B.3.6.sports_outcomes_probability_mode";
   const sportsGrounding =
     flags.sportsLike
       ? {
           provider_required: true,
           provider_configured: sportsProvider?.configured === true,
-          fixture_resolved: sportsProvider?.configured === true && variant === "canonical",
-          parity_ready: sportsProvider?.configured === true && variant === "canonical",
+          fixture_resolved: sportsProvider?.configured === true,
+          parity_ready: sportsProvider?.configured === true,
+          semantic_ready: sportsProvider?.configured === true && (a29SportsDomain || b36SportsDomain),
+          overlay_confidence: sportsProvider?.configured === true && (a29SportsDomain || b36SportsDomain) ? 0.79 : null,
+          overlay_blocker_reason: a29SportsDomain ? "" : b36SportsDomain ? "sports_probability_mode_benchmark_only" : "sports_semantic_overlay_pending",
+          publish_gate_ready: sportsProvider?.configured === true && a29SportsDomain,
+          market_consensus_strength: sportsProvider?.configured === true && (a29SportsDomain || b36SportsDomain) ? 0.67 : null,
+          market_disagreement_score: sportsProvider?.configured === true && b36SportsDomain ? 0.24 : 0.18,
+          price_move_pressure: sportsProvider?.configured === true && (a29SportsDomain || b36SportsDomain) ? 0.38 : null,
+          narrative_hype_score: sportsProvider?.configured === true && (a29SportsDomain || b36SportsDomain) ? 0.58 : null,
+          sportsbook_readiness_state: a29SportsDomain ? "forecast_betting_aware" : b36SportsDomain ? "benchmark_only" : "forecast_only",
         }
       : undefined;
 
@@ -596,8 +607,31 @@ function buildSyntheticEvidenceBundle({ domainConfig, sourceUsage, variant = "ca
       safeText(domainConfig?.status_reason),
       week3FocusEdge ? "Week 3 focus row now uses a thicker live-first edge pack." : "",
     ]),
-    hard_stop: Boolean(flags.sportsLike && sportsGrounding?.parity_ready !== true),
+    hard_stop: Boolean(flags.sportsLike && sportsGrounding?.publish_gate_ready !== true),
     sports_grounding: sportsGrounding,
+    sports_semantic_overlay: flags.sportsLike
+      ? {
+          enabled: true,
+          mode: a29SportsDomain ? "a29" : "observe",
+          ready: sportsGrounding?.semantic_ready === true,
+          publish_gate_ready: sportsGrounding?.publish_gate_ready === true,
+          confidence: sportsGrounding?.overlay_confidence ?? null,
+          blocker_reason: safeText(sportsGrounding?.overlay_blocker_reason),
+        }
+      : null,
+    sports_market_overlay: flags.sportsLike
+      ? {
+          enabled: true,
+          available: sportsProvider?.configured === true && (a29SportsDomain || b36SportsDomain),
+          used_source_ids: sportsProvider?.configured === true && (a29SportsDomain || b36SportsDomain) ? ["polymarket_public", "google_trends"] : [],
+          source_count: sportsProvider?.configured === true && (a29SportsDomain || b36SportsDomain) ? 2 : 0,
+          market_consensus_strength: sportsGrounding?.market_consensus_strength ?? null,
+          market_disagreement_score: sportsGrounding?.market_disagreement_score ?? null,
+          price_move_pressure: sportsGrounding?.price_move_pressure ?? null,
+          narrative_hype_score: sportsGrounding?.narrative_hype_score ?? null,
+          sportsbook_readiness_state: sportsGrounding?.sportsbook_readiness_state ?? null,
+        }
+      : null,
     required_source_gap: sourceUsage.missing_required_sources.length > 0,
     decision_axes: decisionMetadata.decision_axes || [],
     input_completeness: decisionMetadata.input_completeness,
@@ -986,6 +1020,25 @@ function buildDomainRow({ domainCase, queryText, variant }) {
       decision_ready_state: safeText(scorecard?.publication_basis?.decision_ready_state),
       decision_blocker_reason: safeText(scorecard?.publication_basis?.decision_blocker_reason),
       targeted_provider_used: scorecard?.publication_basis?.targeted_provider_used === true,
+      sports_semantic_ready: scorecard?.publication_basis?.sports_semantic_ready === true,
+      sports_overlay_confidence: Number.isFinite(Number(scorecard?.publication_basis?.sports_overlay_confidence))
+        ? Number(scorecard.publication_basis.sports_overlay_confidence)
+        : null,
+      sports_overlay_blocker_reason: safeText(scorecard?.publication_basis?.sports_overlay_blocker_reason),
+      sports_publish_gate_ready: scorecard?.publication_basis?.sports_publish_gate_ready === true,
+      market_consensus_strength: Number.isFinite(Number(scorecard?.publication_basis?.market_consensus_strength))
+        ? Number(scorecard.publication_basis.market_consensus_strength)
+        : null,
+      market_disagreement_score: Number.isFinite(Number(scorecard?.publication_basis?.market_disagreement_score))
+        ? Number(scorecard.publication_basis.market_disagreement_score)
+        : null,
+      price_move_pressure: Number.isFinite(Number(scorecard?.publication_basis?.price_move_pressure))
+        ? Number(scorecard.publication_basis.price_move_pressure)
+        : null,
+      narrative_hype_score: Number.isFinite(Number(scorecard?.publication_basis?.narrative_hype_score))
+        ? Number(scorecard.publication_basis.narrative_hype_score)
+        : null,
+      sportsbook_readiness_state: safeText(scorecard?.publication_basis?.sportsbook_readiness_state),
       still_thin_reason: safeText(scorecard?.publication_basis?.still_thin_reason),
       expected_quality_verdict: expectedQuality,
       quality_alignment: expectedQuality === safeText(scorecard?.publication_basis?.quality_verdict) || expectedQuality === safeText(scorecard?.publication_state),

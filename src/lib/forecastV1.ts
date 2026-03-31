@@ -266,11 +266,37 @@ function buildActionItem(card: CardData, context: ForecastResolvedContext): Fore
 
 function buildCoverageCompanion(card: CardData, context: ForecastResolvedContext): ForecastCoverageStackItem | null {
   const state = getPrimaryState(card);
-  const evidenceNotes = Array.isArray(card.evidence_drawer?.coverage_notes) ? card.evidence_drawer.coverage_notes : [];
-  const refinementHints = Array.isArray(card.how_to_raise_confidence) ? card.how_to_raise_confidence.slice(0, 3) : [];
+  const sportsBlockedNoPick =
+    card.publication_basis?.blocker_reason === 'provider_required_no_pick' && card.sports_grounding?.provider_required === true;
+  const sportsFixtureWindowBlocked = card.sports_overlay_blocker_reason === 'sports_fixture_window_not_live';
+  const evidenceNotes = sportsBlockedNoPick
+    ? uniqueList([
+        card.sports_grounding?.fixture_resolved ? 'Crystal already grounded the matchup with TheSportsDB.' : '',
+        card.sports_overlay_blocker_reason
+          ? sportsFixtureWindowBlocked
+            ? 'The matchup is grounded, but there is no active fixture window yet for a match-specific sports pick.'
+            : `The sports publish gate is still blocked because ${card.sports_overlay_blocker_reason.replace(/_/g, ' ')}.`
+          : 'Crystal still needs fresher lineup, injury, and preview confirmation before publishing the pick.',
+        ...(Array.isArray(card.invalidators) ? card.invalidators.slice(0, 2) : []),
+      ])
+    : Array.isArray(card.evidence_drawer?.coverage_notes)
+      ? card.evidence_drawer.coverage_notes
+      : [];
+  const refinementHints = sportsBlockedNoPick
+    ? [
+        'Use explicit team names and, when possible, the match date or competition.',
+        sportsFixtureWindowBlocked
+          ? 'Re-run when the next fixture is inside the active match week, or include the exact fixture date.'
+          : 'Re-run closer to kickoff so lineup, injury, and preview coverage can thicken.',
+        'Treat this as a grounded matchup read until the sports publish gate is fully ready.',
+      ]
+    : Array.isArray(card.how_to_raise_confidence)
+      ? card.how_to_raise_confidence.slice(0, 3)
+      : [];
   const alternateSuggestions = uniqueList([
     context.entity !== 'Auto' ? `Try the same question with a shorter horizon for ${context.entity}.` : '',
     context.geography !== 'Auto' ? `Switch geography from ${context.geography} to Auto if you want broader signal coverage.` : '',
+    sportsBlockedNoPick ? 'Ask on the exact fixture and competition if you want the clearest sports grounding.' : '',
     context.horizon !== '30 days' ? 'Try the 30-day horizon for a stronger public coverage envelope.' : '',
   ]).slice(0, 3);
 
@@ -279,7 +305,11 @@ function buildCoverageCompanion(card: CardData, context: ForecastResolvedContext
   }
 
   const explanation =
-    state === 'coverage_gap'
+    sportsBlockedNoPick
+      ? sportsFixtureWindowBlocked
+        ? 'Crystal has already grounded this matchup, but there is no live fixture window yet, so it keeps the sports pick on hold.'
+        : 'Crystal has already grounded this matchup, but the sports semantic publish gate is still closed, so the pick stays on hold.'
+      : state === 'coverage_gap'
       ? 'Crystal understood the question but will not publish a full-confidence forecast while coverage is still too thin.'
       : state === 'limited'
         ? 'Crystal can publish a directional read here, but coverage or freshness is still partial.'

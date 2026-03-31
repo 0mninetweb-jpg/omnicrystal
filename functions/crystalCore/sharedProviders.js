@@ -859,7 +859,7 @@ function buildRequiredSourcesForQuery({
 
   if (sportsLike) {
     requiredSources.push("thesportsdb_public");
-    optionalSources.push("api_football_optional");
+    optionalSources.push("api_football_optional", "polymarket_public", "google_trends");
   }
 
   return {

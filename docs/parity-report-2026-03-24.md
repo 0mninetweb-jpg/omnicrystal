@@ -5,21 +5,25 @@
 - Remote service: `https://crystal-core-paaqyfwena-ew.a.run.app`
 - Remote max completed streak: `5`
 - Binary comparable pairs: `4`
-- Winner mismatch rate: `0`
+- Winner mismatch rate: `0,25`
 - Median probability delta: `0`
 - Missing binary contract rate: `0`
 - Direct API 502 count: `0`
 - Sports probe ready: `True`
-- Verdict: **10% ready**
+- Sports semantic ready: `False`
+- Sports publish gate ready: `False`
+- Sports market overlay available: `False`
+- Sportsbook readiness state: `market_context_thin`
+- Verdict: **hold at 0/0**
 
 ## Benchmark
 | Query | Local | Remote | Local domain | Remote domain | Local winner | Remote winner | Local band | Remote band | Delta |
 |---|---|---|---|---|---|---|---|---|---|
-| Cosa passera al referendum costituzionale di marzo in Italia? si o no | completed | completed | A.24.governance_policy_and_public_timeline | A.24.governance_policy_and_public_timeline | No | No | limited | limited | 0 |
+| Cosa passera al referendum costituzionale di marzo in Italia? si o no | completed | completed | A.24.governance_policy_and_public_timeline | A.24.governance_policy_and_public_timeline | Si | No | limited | limited | 0.03 |
 | Inter vs Juventus | completed | completed | A.29.sports_performance_and_outcomes | A.29.sports_performance_and_outcomes | Inter | Inter | limited | limited | 0 |
 | Bitcoin next 30 days | completed | completed | A.23.markets_and_asset_regimes | A.23.markets_and_asset_regimes |  |  |  |  |  |
 | La mia startup sopravvivera 12 mesi? | completed | completed | B.3.5.business_idea_outcomes | B.3.5.business_idea_outcomes | Survive | Survive | limited | limited | 0 |
 | Dovrei aspettare prima di affittare a Roma? | completed | completed | B.3.8.personal_decisions_and_tradeoffs | B.3.8.personal_decisions_and_tradeoffs | Wait | Wait | limited | limited | 0 |
 
 ## Blockers
-- None.
+- binary winner mismatch present
