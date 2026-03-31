@@ -3,6 +3,7 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const { buildRoutingHints, finalizeScorecard } = require('../functions/predictionCore.js');
+const { buildSportsFixtureWindow } = require('../functions/sportsData.js');
 
 function addCases(target, queries, expectedDomains, options = {}) {
   for (const query of queries) {
@@ -553,6 +554,57 @@ assert.equal(
   sportsBenchmarkOnlyScorecard.binary_contract,
   null,
   'B.3.6 should not expose a live binary contract while it stays benchmark-only.'
+);
+
+const hoursToMs = 60 * 60 * 1000;
+const now = Date.now();
+const genericFixtureOpen = buildSportsFixtureWindow({
+  kickoffUtc: new Date(now + 3 * 24 * hoursToMs).toISOString(),
+});
+assert.equal(
+  genericFixtureOpen.window_open,
+  true,
+  'Generic sports matchups should open only when the next grounded fixture is inside the 7 day live window.'
+);
+
+const genericFixtureFar = buildSportsFixtureWindow({
+  kickoffUtc: new Date(now + 8 * 24 * hoursToMs).toISOString(),
+});
+assert.equal(
+  genericFixtureFar.window_open,
+  false,
+  'Generic sports matchups should stay closed when the grounded fixture is outside the 7 day live window.'
+);
+assert.equal(
+  genericFixtureFar.state,
+  'scheduled_far',
+  'Generic sports matchups outside the live window should surface a scheduled_far state.'
+);
+
+const explicitKickoff = new Date(now + 13 * 24 * hoursToMs).toISOString();
+const explicitFixtureOpen = buildSportsFixtureWindow({
+  kickoffUtc: explicitKickoff,
+  queryDate: explicitKickoff.slice(0, 10),
+});
+assert.equal(
+  explicitFixtureOpen.window_open,
+  true,
+  'Explicit dated sports fixtures should open inside the 14 day dated-fixture window.'
+);
+
+const explicitFixtureMismatch = buildSportsFixtureWindow({
+  kickoffUtc: explicitKickoff,
+  queryDate: new Date(now + 14 * 24 * hoursToMs).toISOString().slice(0, 10),
+});
+assert.equal(
+  explicitFixtureMismatch.window_open,
+  false,
+  'Explicit dated sports fixtures should stay closed when the resolved kickoff does not match the requested date.'
+);
+assert.equal(
+  explicitFixtureMismatch.state,
+  'date_mismatch',
+  'Date-mismatched sports fixtures should expose a date_mismatch fixture window state.'
 );
 
 if (failures.length > 0) {

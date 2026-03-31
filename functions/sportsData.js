@@ -259,6 +259,31 @@ function average(numbers = []) {
   return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
+function toUtcDateKey(value = "") {
+  const normalized = safeText(value);
+  if (!normalized) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) return normalized;
+  const parsed = new Date(normalized);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return parsed.toISOString().slice(0, 10);
+}
+
+function buildUtcDateKeyFromOffset(offsetDays = 0) {
+  const anchor = new Date();
+  anchor.setUTCHours(0, 0, 0, 0);
+  anchor.setUTCDate(anchor.getUTCDate() + Number(offsetDays || 0));
+  return anchor.toISOString().slice(0, 10);
+}
+
+function buildSportsFixtureSearchDates(daysAhead = 7) {
+  const horizon = Math.max(0, Math.min(21, Number(daysAhead || 0)));
+  const dates = [];
+  for (let offset = 0; offset <= horizon; offset += 1) {
+    dates.push(buildUtcDateKeyFromOffset(offset));
+  }
+  return dates;
+}
+
 function buildSportsFixtureWindow({ kickoffUtc = "", queryDate = "" } = {}) {
   const normalizedKickoffUtc = safeText(kickoffUtc);
   const kickoff = normalizedKickoffUtc ? new Date(normalizedKickoffUtc) : null;
@@ -269,6 +294,16 @@ function buildSportsFixtureWindow({ kickoffUtc = "", queryDate = "" } = {}) {
       window_open: false,
       hours_to_kickoff: null,
       note: "Crystal grounded the teams, but it could not anchor this matchup to a live fixture window yet.",
+    };
+  }
+
+  const kickoffDateKey = toUtcDateKey(kickoff.toISOString());
+  if (explicitDate && kickoffDateKey && kickoffDateKey !== explicitDate) {
+    return {
+      state: "date_mismatch",
+      window_open: false,
+      hours_to_kickoff: Number((((kickoff.getTime() - Date.now()) / (1000 * 60 * 60))).toFixed(1)),
+      note: "Crystal grounded the matchup, but the resolved fixture does not match the requested date yet.",
     };
   }
 
@@ -367,23 +402,41 @@ function extractFixtureDate(queryText = "", queryPlan = {}) {
   return date.toISOString().slice(0, 10);
 }
 
+function stripFixtureDateNoise(label = "") {
+  return normalizeWhitespace(label)
+    .replace(/\b\d{4}-\d{2}-\d{2}\b/giu, " ")
+    .replace(/\b\d{1,2}\s+(gen(?:naio)?|feb(?:braio)?|mar(?:zo)?|apr(?:ile)?|mag(?:gio)?|giu(?:gno)?|lug(?:lio)?|ago(?:sto)?|set(?:tembre)?|ott(?:obre)?|nov(?:embre)?|dic(?:embre)?)(?:\s+\d{4})?\b/giu, " ")
+    .replace(/\b(?:oggi|domani|today|tomorrow|stasera|tonight|this week|this weekend|next week|questa settimana|questo weekend|la prossima settimana)\b/giu, " ")
+    .replace(/\b(?:alle|ore|at)\s*\d{1,2}:\d{2}\b/giu, " ")
+    .replace(/\b\d{1,2}:\d{2}\b/gu, " ")
+    .replace(/\s+/g, " ")
+    .replace(/^[,\-–:\s]+|[,\-–:\s]+$/g, "")
+    .trim();
+}
+
 function splitFixtureLabel(label) {
   const normalized = normalizeWhitespace(label);
   if (!normalized) return null;
 
   const explicit = normalized.split(/\s+(?:vs?|contro)\s+/i);
   if (explicit.length === 2) {
+    const homeTeam = stripFixtureDateNoise(explicit[0]);
+    const awayTeam = stripFixtureDateNoise(explicit[1]);
+    if (!homeTeam || !awayTeam) return null;
     return {
-      homeTeam: explicit[0].trim(),
-      awayTeam: explicit[1].trim(),
+      homeTeam,
+      awayTeam,
     };
   }
 
   const dashed = normalized.split(/\s[-–]\s/);
   if (dashed.length === 2) {
+    const homeTeam = stripFixtureDateNoise(dashed[0]);
+    const awayTeam = stripFixtureDateNoise(dashed[1]);
+    if (!homeTeam || !awayTeam) return null;
     return {
-      homeTeam: dashed[0].trim(),
-      awayTeam: dashed[1].trim(),
+      homeTeam,
+      awayTeam,
     };
   }
 
@@ -411,25 +464,30 @@ function buildTheSportsDbUrl(config, endpoint, query = {}) {
     if (value === undefined || value === null || value === "") continue;
     params.set(key, String(value));
   }
-  const baseUrl = config.baseUrl.replace(/\/+$/, "");
+  const baseUrl = safeText(config.theSportsDbBaseUrl, DEFAULT_THESPORTSDB_BASE_URL).replace(/\/+$/, "");
   return `${baseUrl}/${encodeURIComponent(config.theSportsDbApiKey)}/${endpoint}${params.toString() ? `?${params.toString()}` : ""}`;
 }
 
 function getSportsConfig() {
-  const provider = normalizeProvider(process.env.SPORTS_PROVIDER);
+  const runtimeProvider = "thesportsdb";
+  const configuredProvider = normalizeProvider(process.env.SPORTS_PROVIDER);
   const apiFootballKey = readRuntimeCredential(process.env.API_FOOTBALL_KEY);
   const theSportsDbApiKey = readRuntimeCredential(process.env.THE_SPORTS_DB_API_KEY) || DEFAULT_THESPORTSDB_FREE_KEY;
-  const defaultBaseUrl = provider === "api-football" ? DEFAULT_API_FOOTBALL_BASE_URL : DEFAULT_THESPORTSDB_BASE_URL;
-  const baseUrl = safeText(process.env.SPORTS_PROVIDER_BASE_URL, defaultBaseUrl) || defaultBaseUrl;
-  const configured = provider === "api-football" ? Boolean(apiFootballKey) : true;
+  const providerBaseUrl = safeText(process.env.SPORTS_PROVIDER_BASE_URL);
+  const theSportsDbBaseUrl =
+    configuredProvider === "thesportsdb" && providerBaseUrl ? providerBaseUrl : DEFAULT_THESPORTSDB_BASE_URL;
+  const apiFootballBaseUrl =
+    configuredProvider === "api-football" && providerBaseUrl ? providerBaseUrl : DEFAULT_API_FOOTBALL_BASE_URL;
   return {
-    provider,
-    baseUrl: baseUrl.replace(/\/+$/, ""),
+    provider: runtimeProvider,
+    configured_provider: configuredProvider,
+    configured: true,
+    theSportsDbBaseUrl: theSportsDbBaseUrl.replace(/\/+$/, ""),
+    apiFootballBaseUrl: apiFootballBaseUrl.replace(/\/+$/, ""),
     apiFootballKey,
     theSportsDbApiKey,
-    configured,
-    primarySourceId: provider === "api-football" ? "api_football_optional" : "thesportsdb_public",
-    primaryProviderLabel: provider === "api-football" ? "API-Football" : "TheSportsDB",
+    primarySourceId: "thesportsdb_public",
+    primaryProviderLabel: "TheSportsDB",
   };
 }
 
@@ -450,8 +508,8 @@ function getSportsProviderStates() {
       available: true,
       status: "available",
       provider: "thesportsdb",
-      base_url: config.provider === "thesportsdb" ? config.baseUrl : DEFAULT_THESPORTSDB_BASE_URL,
-      notes: config.provider === "thesportsdb" ? ["Using TheSportsDB free tier (key 123) as the primary sports runtime source."] : [],
+      base_url: config.theSportsDbBaseUrl,
+      notes: ["Using TheSportsDB as the live sports backbone for fixture grounding, recent form, and table context."],
     },
     {
       source_id: "api_football_optional",
@@ -463,8 +521,10 @@ function getSportsProviderStates() {
       available: Boolean(config.apiFootballKey),
       status: config.apiFootballKey ? "available" : "config_missing",
       provider: "api-football",
-      base_url: config.provider === "api-football" ? config.baseUrl : DEFAULT_API_FOOTBALL_BASE_URL,
-      notes: config.apiFootballKey ? [] : ["API_FOOTBALL_KEY is optional now and only used as a sports enhancer when configured."],
+      base_url: config.apiFootballBaseUrl,
+      notes: config.apiFootballKey
+        ? ["API-Football is configured as optional sports context only (history, odds, standings) and never drives live fixture unlock."]
+        : ["API_FOOTBALL_KEY is optional now and only used as a sports enhancer when configured."],
     },
   ];
 }
@@ -478,9 +538,9 @@ function getSportsRuntimeHealth() {
     source_id: config.primarySourceId,
     provider: config.provider,
     title: config.primaryProviderLabel,
-    base_url: config.baseUrl,
-    mode: config.provider === "thesportsdb" ? "free-tier-live" : config.configured ? "live" : "preview",
-    coverage: config.provider === "thesportsdb" ? ["fixtures", "recent-form", "league-table"] : ["fixtures", "recent-form", "odds"],
+    base_url: config.theSportsDbBaseUrl,
+    mode: "free-tier-live",
+    coverage: ["fixtures", "recent-form", "league-table"],
     enhancers: getSportsProviderStates().filter((provider) => provider.source_id !== config.primarySourceId && provider.available).map((provider) => provider.source_id),
   };
 }
@@ -1289,7 +1349,7 @@ async function callApiFootball(fetchJson, path, query = {}) {
     params.set(key, String(value));
   }
 
-  const url = `${DEFAULT_API_FOOTBALL_BASE_URL}${path}${params.toString() ? `?${params.toString()}` : ""}`;
+  const url = `${config.apiFootballBaseUrl}${path}${params.toString() ? `?${params.toString()}` : ""}`;
   return fetchJson(url, {
     method: "GET",
     headers: {
@@ -1473,6 +1533,47 @@ async function searchHeadToHeadEventTheSportsDb(fetchJson, homeTeam, awayTeam, d
   return null;
 }
 
+async function fetchEventsByDayTheSportsDb(fetchJson, date) {
+  const day = toUtcDateKey(date);
+  if (!day) return [];
+  try {
+    const payload = await callTheSportsDbApi(fetchJson, "eventsday.php", { d: day, s: "Soccer" });
+    const list = Array.isArray(payload?.events) ? payload.events : Array.isArray(payload?.results) ? payload.results : [];
+    return list.filter(Boolean);
+  } catch (_error) {
+    return [];
+  }
+}
+
+function sortUpcomingEvents(events = [], preferredDate = "") {
+  const targetMs = preferredDate ? Date.parse(preferredDate) : Date.now();
+  return events
+    .slice()
+    .sort((left, right) => {
+      const leftDate = Date.parse(safeText(left?.strTimestamp) || safeText(left?.dateEvent) || "");
+      const rightDate = Date.parse(safeText(right?.strTimestamp) || safeText(right?.dateEvent) || "");
+      const leftDistance = Number.isFinite(leftDate) ? Math.abs(leftDate - targetMs) : Number.MAX_SAFE_INTEGER;
+      const rightDistance = Number.isFinite(rightDate) ? Math.abs(rightDate - targetMs) : Number.MAX_SAFE_INTEGER;
+      if (leftDistance !== rightDistance) return leftDistance - rightDistance;
+      return (leftDate || 0) - (rightDate || 0);
+    });
+}
+
+async function findFixtureByDateWindowTheSportsDb(fetchJson, homeTeam, awayTeam, date) {
+  const searchDates = date ? [toUtcDateKey(date)] : buildSportsFixtureSearchDates(7);
+  const matches = [];
+  for (const day of searchDates) {
+    const events = await fetchEventsByDayTheSportsDb(fetchJson, day);
+    const filtered = events.filter((event) => eventMatchesHeadToHead(event, homeTeam, awayTeam));
+    if (filtered.length) {
+      matches.push(...filtered);
+      if (date) break;
+    }
+  }
+  if (!matches.length) return null;
+  return sortUpcomingEvents(matches, date || searchDates[0])[0] || null;
+}
+
 async function fetchTeamScheduleTheSportsDb(fetchJson, teamId, direction = "next") {
   if (!teamId) return [];
   const endpoint = direction === "last" ? "eventslast.php" : "eventsnext.php";
@@ -1519,7 +1620,8 @@ function buildDirectTeamRecordFromEvent(event = {}, preferredSide = "home") {
 }
 
 async function findFixtureTheSportsDb(fetchJson, homeTeam, awayTeam, date) {
-  const directEvent = await searchHeadToHeadEventTheSportsDb(fetchJson, homeTeam, awayTeam, date);
+  const datedOrWindowEvent = await findFixtureByDateWindowTheSportsDb(fetchJson, homeTeam, awayTeam, date);
+  const directEvent = datedOrWindowEvent || (await searchHeadToHeadEventTheSportsDb(fetchJson, homeTeam, awayTeam, date));
   const directEventHome = normalizeTeamName(directEvent?.strHomeTeam);
   const queryHome = normalizeTeamName(homeTeam);
   const directEventMatchesQueryOrder =
@@ -1556,7 +1658,9 @@ async function findFixtureTheSportsDb(fetchJson, homeTeam, awayTeam, date) {
     selectMutualFixture(awayLast, homeId, awayId, false);
   let fixture = null;
 
-  if (date && directEvent) {
+  if (datedOrWindowEvent) {
+    fixture = normalizeTheSportsDbEvent(datedOrWindowEvent);
+  } else if (date && directEvent) {
     fixture = normalizeTheSportsDbEvent(directEvent);
   }
 
@@ -1674,25 +1778,19 @@ async function findFixtureApiFootball(fetchJson, homeTeam, awayTeam, date) {
 }
 
 async function searchTeam(fetchJson, name) {
-  const config = getSportsConfig();
-  if (config.provider === "api-football") {
-    return searchTeamApiFootball(fetchJson, name);
-  }
   return searchTeamTheSportsDb(fetchJson, name);
 }
 
 async function findFixture(fetchJson, homeTeam, awayTeam, date) {
   const config = getSportsConfig();
+  const sportsDbResult = await findFixtureTheSportsDb(fetchJson, homeTeam, awayTeam, date);
+  if (sportsDbResult?.fixture && sportsDbResult?.homeTeam?.team?.id && sportsDbResult?.awayTeam?.team?.id) {
+    return sportsDbResult;
+  }
   if (shouldUseApiFootballEnhancer(config)) {
-    const apiFootballResult = await findFixtureApiFootball(fetchJson, homeTeam, awayTeam, date).catch(() => null);
-    if (apiFootballResult?.fixture && apiFootballResult?.homeTeam?.team?.id && apiFootballResult?.awayTeam?.team?.id) {
-      return apiFootballResult;
-    }
+    return (await findFixtureApiFootball(fetchJson, homeTeam, awayTeam, date).catch(() => null)) || sportsDbResult;
   }
-  if (config.provider === "api-football") {
-    return findFixtureApiFootball(fetchJson, homeTeam, awayTeam, date);
-  }
-  return findFixtureTheSportsDb(fetchJson, homeTeam, awayTeam, date);
+  return sportsDbResult;
 }
 
 function summarizeForm(fixtures = [], teamId) {
@@ -1763,9 +1861,6 @@ async function fetchRecentFixtures(fetchJson, teamId, leagueId, season) {
     if (Array.isArray(apiFootballFixtures) && apiFootballFixtures.length > 0) {
       return apiFootballFixtures;
     }
-  }
-  if (config.provider === "api-football") {
-    return fetchRecentFixturesApiFootball(fetchJson, teamId, leagueId, season);
   }
   return fetchRecentFixturesTheSportsDb(fetchJson, teamId, leagueId, season);
 }
@@ -1894,9 +1989,6 @@ async function fetchLeagueTable(fetchJson, leagueId, season) {
     if (Array.isArray(apiFootballRows) && apiFootballRows.length > 0) {
       return apiFootballRows;
     }
-  }
-  if (config.provider === "api-football") {
-    return fetchLeagueTableApiFootball(fetchJson, leagueId, season);
   }
   return fetchLeagueTableTheSportsDb(fetchJson, leagueId, season);
 }
@@ -2171,7 +2263,7 @@ async function resolveFixtureContext(fetchJson, fixtureLabel, date) {
   }
 
   const fixture = resolved.fixture;
-  const fixtureProvider = safeText(fixture?.provider, config.provider === "api-football" ? "api-football" : "thesportsdb_public");
+  const fixtureProvider = safeText(fixture?.provider, "thesportsdb_public");
   const providerSourceId = fixtureProvider === "api-football" ? "api_football_optional" : "thesportsdb_public";
   const providerLabel = fixtureProvider === "api-football" ? "API-Football" : "TheSportsDB";
   const leagueId =
@@ -2490,6 +2582,7 @@ module.exports = {
   SPORTS_MATCH_OUTCOMES_DOMAIN,
   SPORTS_FIXTURE_CARD_TYPE,
   buildSportsForecastContext,
+  buildSportsFixtureWindow,
   buildSportsGroundedRead,
   getSportsRuntimeHealth,
   getSportsConfig,

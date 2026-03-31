@@ -37,8 +37,8 @@
 | eurostat_api | available | yes | yes | - |
 | oecd_api | available | yes | yes | - |
 | eia_api | config_missing | no | no | EIA_API_KEY is required to activate EIA in runtime. |
-| thesportsdb_public | available | yes | yes | Using TheSportsDB free tier (key 123) as the primary sports runtime source. |
-| api_football_optional | available | yes | yes | - |
+| thesportsdb_public | available | yes | yes | Using TheSportsDB as the live sports backbone for fixture grounding, recent form, and table context. |
+| api_football_optional | available | yes | yes | API-Football is configured as optional sports context only (history, odds, standings) and never drives live fixture unlock. |
 
 ## Synthetic Connector Smoke
 | Cluster | Query | Domain | Sources | Missing required | Location | Mobility | Public data |

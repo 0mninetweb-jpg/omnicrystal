@@ -30,7 +30,7 @@
 
 ### public_timeline
 - Cases: `2`
-- Used sources: `wikidata`, `gdelt`, `rss_allowlist`, `historical-cache`, `google_trends`
+- Used sources: `wikidata`, `gdelt`, `rss_allowlist`, `historical-cache`
 - Missing required sources: none
 
 ## Regression vs Previous Report
@@ -50,7 +50,7 @@
 | regulatory_decision | Will the new regulation be approved by parliament? | A.24.governance_policy_and_public_timeline | - | - | Parliament | yes | wikidata, polymarket_public, gdelt, rss_allowlist, google_trends, historical-cache | Lean Approved 58/42 |
 | regulatory_decision | Will the senate approve the reform package this quarter? | A.24.governance_policy_and_public_timeline | This quarter | - | Senate | yes | wikidata, polymarket_public, gdelt, rss_allowlist, google_trends, historical-cache | Lean Approved 58/42 |
 | public_timeline | Election volatility in Italy over the next 90 days | A.24.governance_policy_and_public_timeline | Next 90 days | Italy | Voters | yes | wikidata, gdelt, rss_allowlist, historical-cache | Policy pressure remains elevated over the selected window. |
-| public_timeline | Policy pressure around EU AI regulation next 90 days | A.24.governance_policy_and_public_timeline | Next 90 days | European Union | EU institutions | yes | wikidata, gdelt, rss_allowlist, google_trends, historical-cache | Policy pressure remains elevated over the selected window. |
+| public_timeline | Policy pressure around EU AI regulation next 90 days | A.24.governance_policy_and_public_timeline | Next 90 days | European Union | EU institutions | yes | wikidata, gdelt, rss_allowlist, historical-cache | Policy pressure remains elevated over the selected window. |
 | policy_risk | Rischio di elezioni anticipate in Italia entro 12 mesi | A.24.governance_policy_and_public_timeline | Within 12 months | Italy | Government | yes | wikidata, polymarket_public, gdelt, rss_allowlist, google_trends, historical-cache | Lean Government holds 58/42 |
 | regulatory_decision | Will parliament block the reform package before autumn? | A.24.governance_policy_and_public_timeline | Autumn | - | Parliament | yes | wikidata, polymarket_public, gdelt, rss_allowlist, google_trends, historical-cache | Lean Blocked 58/42 |
 

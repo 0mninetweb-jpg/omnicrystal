@@ -29,10 +29,10 @@
 | report:policy-governance | passed | 0 |  > react-example@0.0.0 report:policy-governance > node scripts/run-policy-quality-report.mjs  Policy quality report written to C:\Users\Fiorenza\OneDrive\Desktop\Codex\crystal-r... |
 | check:markets-assets | passed | 0 |  > react-example@0.0.0 check:markets-assets > node scripts/check-markets-assets.mjs  Markets/assets benchmark passed on 11 cases with verdict=markets-ready and A.0.general rate=0. |
 | report:markets-assets | passed | 0 |  > react-example@0.0.0 report:markets-assets > node scripts/run-markets-quality-report.mjs  Markets quality report written to C:\Users\Fiorenza\OneDrive\Desktop\Codex\crystal-re... |
-| check:provider-foundation | passed | 0 |  > react-example@0.0.0 check:provider-foundation > node scripts/check-provider-foundation.mjs  [dotenv@17.3.1] injecting env (39) from functions\.env.omnicrystal -- tip: ⚙️  loa... |
-| report:provider-foundation | passed | 0 |  > react-example@0.0.0 report:provider-foundation > node scripts/run-provider-foundation-report.mjs  [dotenv@17.3.1] injecting env (39) from functions\.env.omnicrystal -- tip: �... |
-| check:domain-quality-grid | passed | 0 |  > react-example@0.0.0 check:domain-quality-grid > node scripts/check-domain-quality-grid.mjs  [dotenv@17.3.1] injecting env (39) from functions\.env.omnicrystal -- tip: ⚙️  ena... |
-| report:domain-quality-grid | passed | 0 |  > react-example@0.0.0 report:domain-quality-grid > node scripts/run-domain-quality-report.mjs  [dotenv@17.3.1] injecting env (39) from functions\.env.omnicrystal -- tip: ⚙️  sp... |
+| check:provider-foundation | passed | 0 |  > react-example@0.0.0 check:provider-foundation > node scripts/check-provider-foundation.mjs  [dotenv@17.3.1] injecting env (39) from functions\.env.omnicrystal -- tip: ⚙️  ena... |
+| report:provider-foundation | passed | 0 |  > react-example@0.0.0 report:provider-foundation > node scripts/run-provider-foundation-report.mjs  [dotenv@17.3.1] injecting env (39) from functions\.env.omnicrystal -- tip: ⚡... |
+| check:domain-quality-grid | passed | 0 |  > react-example@0.0.0 check:domain-quality-grid > node scripts/check-domain-quality-grid.mjs  [dotenv@17.3.1] injecting env (39) from functions\.env.omnicrystal -- tip: ⚙️  sup... |
+| report:domain-quality-grid | passed | 0 |  > react-example@0.0.0 report:domain-quality-grid > node scripts/run-domain-quality-report.mjs  [dotenv@17.3.1] injecting env (39) from functions\.env.omnicrystal -- tip: 🔐 pre... |
 | parity:direct-api | passed | 0 | Parity report written to C:\Users\Fiorenza\OneDrive\Desktop\Codex\crystal-review-0316\docs\parity-report-2026-03-24.md Parity JSON written to C:\Users\Fiorenza\OneDrive\Desktop\... |
 
 ## Runtime Baseline

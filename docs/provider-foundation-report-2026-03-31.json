@@ -1,6 +1,6 @@
 {
   "summary": {
-    "generated_at": "2026-03-31T10:39:38.990Z",
+    "generated_at": "2026-03-31T13:05:40.577Z",
     "report_date": "2026-03-31",
     "total_cases": 6,
     "top3_miss_count": 0,
@@ -227,7 +227,7 @@
       "provider": "thesportsdb",
       "base_url": "https://www.thesportsdb.com/api/v1/json",
       "notes": [
-        "Using TheSportsDB free tier (key 123) as the primary sports runtime source."
+        "Using TheSportsDB as the live sports backbone for fixture grounding, recent form, and table context."
       ]
     },
     {
@@ -241,7 +241,9 @@
       "status": "available",
       "provider": "api-football",
       "base_url": "https://v3.football.api-sports.io",
-      "notes": []
+      "notes": [
+        "API-Football is configured as optional sports context only (history, odds, standings) and never drives live fixture unlock."
+      ]
     }
   ],
   "runtime_config_blockers": [],

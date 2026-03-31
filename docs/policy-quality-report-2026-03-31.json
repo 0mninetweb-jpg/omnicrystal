@@ -1,6 +1,6 @@
 {
   "summary": {
-    "generated_at": "2026-03-31T10:37:59.589Z",
+    "generated_at": "2026-03-31T13:05:18.766Z",
     "report_date": "2026-03-31",
     "total_cases": 10,
     "binary_cases": 8,
@@ -57,8 +57,7 @@
         "wikidata",
         "gdelt",
         "rss_allowlist",
-        "historical-cache",
-        "google_trends"
+        "historical-cache"
       ],
       "missing_required_sources": []
     }
@@ -1325,7 +1324,7 @@
             "provider": "thesportsdb",
             "base_url": "https://www.thesportsdb.com/api/v1/json",
             "notes": [
-              "Using TheSportsDB free tier (key 123) as the primary sports runtime source."
+              "Using TheSportsDB as the live sports backbone for fixture grounding, recent form, and table context."
             ],
             "required_for_query": true,
             "optional_for_query": false,
@@ -1446,7 +1445,6 @@
         "wikidata",
         "gdelt",
         "rss_allowlist",
-        "google_trends",
         "historical-cache"
       ],
       "source_usage": {
@@ -1470,10 +1468,11 @@
           "wikidata",
           "gdelt",
           "rss_allowlist",
-          "google_trends",
           "historical-cache"
         ],
-        "missing_required_sources": [],
+        "missing_required_sources": [
+          "google_trends"
+        ],
         "missing_optional_sources": [],
         "provider_states": [
           {
@@ -1523,10 +1522,10 @@
             "implementation_status": "implemented",
             "configured": true,
             "available": true,
-            "status": "used",
+            "status": "required_not_used",
             "required_for_query": true,
             "optional_for_query": false,
-            "used_in_run": true
+            "used_in_run": false
           },
           {
             "source_id": "historical-cache",
