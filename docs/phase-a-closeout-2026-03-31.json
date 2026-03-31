@@ -1,18 +1,18 @@
 ﻿{
-    "generated_at":  "2026-03-31T11:36:47.0520358+02:00",
+    "generated_at":  "2026-03-31T12:47:05.8611198+02:00",
     "report_date":  "2026-03-31",
-    "verdict":  "phase_a_blocked",
-    "rollout_verdict":  "hold at 0/0",
+    "verdict":  "phase_a_ready_for_sprint_baseline",
+    "rollout_verdict":  "canary live at 10/0; promote only through the canary rollout runbook",
     "deploy_requested":  true,
     "env_presence":  {
                          "thesportsdb_primary_selected":  true,
-                         "api_football_key_present":  false,
+                         "api_football_key_present":  true,
                          "fred_api_key_present":  true
                      },
     "gates":  {
-                  "sports_parity_closed":  false,
+                  "sports_parity_closed":  true,
                   "sports_probe_ready":  true,
-                  "winner_mismatch_rate":  0.25,
+                  "winner_mismatch_rate":  0,
                   "missing_binary_contract_rate":  0,
                   "fred_api_available":  true,
                   "gtfs_static_ready":  true,
@@ -24,7 +24,7 @@
                   "checks_green":  true,
                   "parity_direct_api_soft_fail":  false,
                   "manual_signed_in_qa":  "certified",
-                  "entry_gate_green":  false
+                  "entry_gate_green":  true
               },
     "live_health":  {
                         "crystal_core_available":  true,
@@ -111,13 +111,13 @@
                                                           "category":  "sports",
                                                           "access_profile":  "optional_non_default",
                                                           "implementation_status":  "implemented",
-                                                          "configured":  false,
-                                                          "available":  false,
-                                                          "status":  "config_missing",
+                                                          "configured":  true,
+                                                          "available":  true,
+                                                          "status":  "available",
                                                           "provider":  "api-football",
                                                           "base_url":  "https://v3.football.api-sports.io",
                                                           "notes":  [
-                                                                        "API_FOOTBALL_KEY is optional now and only used as a sports enhancer when configured."
+
                                                                     ]
                                                       }
                         },
@@ -175,25 +175,25 @@
                       "name":  "report:provider-foundation",
                       "ok":  true,
                       "exit_code":  0,
-                      "output_tail":  "\n\u003e react-example@0.0.0 report:provider-foundation\n\u003e node scripts/run-provider-foundation-report.mjs\n\n[dotenv@17.3.1] injecting env (39) from functions\\.env.omnicrystal -- tip: ⚙️  write to custom object with { processEnv: myObject }\nProvider foundation report written to C:\\Users\\Fiorenza\\OneDrive\\Desktop\\Codex\\crystal-review-0316\\docs\\provider-foundation-report-2026-03-31.md\nProvider foundation JSON written to C:\\Users\\Fiorenza\\OneDrive\\Desktop\\Codex\\crystal-review-0316\\docs\\provider-foundation-report-2026-03-31.json\nSummary: verdict=foundation-ready, synthetic_smoke_verdict=connector-ready, runtime_config_blockers=0"
+                      "output_tail":  "\n\u003e react-example@0.0.0 report:provider-foundation\n\u003e node scripts/run-provider-foundation-report.mjs\n\n[dotenv@17.3.1] injecting env (39) from functions\\.env.omnicrystal -- tip: 🔐 prevent committing .env to code: https://dotenvx.com/precommit\nProvider foundation report written to C:\\Users\\Fiorenza\\OneDrive\\Desktop\\Codex\\crystal-review-0316\\docs\\provider-foundation-report-2026-03-31.md\nProvider foundation JSON written to C:\\Users\\Fiorenza\\OneDrive\\Desktop\\Codex\\crystal-review-0316\\docs\\provider-foundation-report-2026-03-31.json\nSummary: verdict=foundation-ready, synthetic_smoke_verdict=connector-ready, runtime_config_blockers=0"
                   },
                   {
                       "name":  "check:domain-quality-grid",
                       "ok":  true,
                       "exit_code":  0,
-                      "output_tail":  "\n\u003e react-example@0.0.0 check:domain-quality-grid\n\u003e node scripts/check-domain-quality-grid.mjs\n\n[dotenv@17.3.1] injecting env (39) from functions\\.env.omnicrystal -- tip: 🔐 encrypt with Dotenvx: https://dotenvx.com\nDomain quality grid passed with verdict=sprint_matrix_ready, batch2_gate_verdict=week1_batch2_on_track, batch3_gate_verdict=week1_batch3_on_track, week2_gate_verdict=week2_provider_depth_on_track, week3_gate_verdict=week3_needs_more_edge_depth, top1_hit_rate=0.9302, edge_top1_hit_rate=0.907, top3_miss_count=0, ready_domain_count=42."
+                      "output_tail":  "\n\u003e react-example@0.0.0 check:domain-quality-grid\n\u003e node scripts/check-domain-quality-grid.mjs\n\n[dotenv@17.3.1] injecting env (39) from functions\\.env.omnicrystal -- tip: ⚙️  enable debug logging with { debug: true }\nDomain quality grid passed with verdict=sprint_matrix_ready, batch2_gate_verdict=week1_batch2_on_track, batch3_gate_verdict=week1_batch3_on_track, week2_gate_verdict=week2_provider_depth_on_track, week3_gate_verdict=week3_needs_more_edge_depth, top1_hit_rate=0.9302, edge_top1_hit_rate=0.907, top3_miss_count=0, ready_domain_count=42."
                   },
                   {
                       "name":  "report:domain-quality-grid",
                       "ok":  true,
                       "exit_code":  0,
-                      "output_tail":  "\n\u003e react-example@0.0.0 report:domain-quality-grid\n\u003e node scripts/run-domain-quality-report.mjs\n\n[dotenv@17.3.1] injecting env (39) from functions\\.env.omnicrystal -- tip: ⚙️  override existing env vars with { override: true }\nDomain quality markdown written to C:\\Users\\Fiorenza\\OneDrive\\Desktop\\Codex\\crystal-review-0316\\docs\\domain-quality-matrix-2026-03-31.md\nDomain quality JSON written to C:\\Users\\Fiorenza\\OneDrive\\Desktop\\Codex\\crystal-review-0316\\docs\\domain-quality-matrix-2026-03-31.json\nSummary: verdict=sprint_matrix_ready, total_domains=43, top3_miss_count=0"
+                      "output_tail":  "\n\u003e react-example@0.0.0 report:domain-quality-grid\n\u003e node scripts/run-domain-quality-report.mjs\n\n[dotenv@17.3.1] injecting env (39) from functions\\.env.omnicrystal -- tip: ⚙️  specify custom .env file path with { path: \u0027/custom/path/.env\u0027 }\nDomain quality markdown written to C:\\Users\\Fiorenza\\OneDrive\\Desktop\\Codex\\crystal-review-0316\\docs\\domain-quality-matrix-2026-03-31.md\nDomain quality JSON written to C:\\Users\\Fiorenza\\OneDrive\\Desktop\\Codex\\crystal-review-0316\\docs\\domain-quality-matrix-2026-03-31.json\nSummary: verdict=sprint_matrix_ready, total_domains=43, top3_miss_count=0"
                   },
                   {
                       "name":  "parity:direct-api",
                       "ok":  true,
                       "exit_code":  0,
-                      "output_tail":  "Parity report written to C:\\Users\\Fiorenza\\OneDrive\\Desktop\\Codex\\crystal-review-0316\\docs\\parity-report-2026-03-24.md\nParity JSON written to C:\\Users\\Fiorenza\\OneDrive\\Desktop\\Codex\\crystal-review-0316\\docs\\parity-report-2026-03-24.json\nVerdict: hold at 0/0"
+                      "output_tail":  "Parity report written to C:\\Users\\Fiorenza\\OneDrive\\Desktop\\Codex\\crystal-review-0316\\docs\\parity-report-2026-03-24.md\nParity JSON written to C:\\Users\\Fiorenza\\OneDrive\\Desktop\\Codex\\crystal-review-0316\\docs\\parity-report-2026-03-24.json\nVerdict: 10% ready"
                   }
               ]
 }

@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-03-31T09:30:31.860Z",
+  "generated_at": "2026-03-31T10:39:44.040Z",
   "summary": {
     "total_domains": 43,
     "total_rows": 86,
@@ -7305,12 +7305,12 @@
               },
               {
                 "source_id": "api_football_optional",
-                "status": "optional_source_missing",
-                "configured": false,
-                "available": false,
+                "status": "used",
+                "configured": true,
+                "available": true,
                 "required_for_query": false,
                 "optional_for_query": true,
-                "used_in_run": false
+                "used_in_run": true
               },
               {
                 "source_id": "polymarket_public",
@@ -7338,7 +7338,7 @@
             "blocker_reason": "",
             "threshold_source": "static_defaults",
             "confidence_source": "static_defaults",
-            "confidence_score": 0.884,
+            "confidence_score": 0.888,
             "evidence_convergence": "converged",
             "evidence_strength": "strong",
             "source_coverage_state": "sufficient",
@@ -7437,12 +7437,12 @@
               },
               {
                 "source_id": "api_football_optional",
-                "status": "optional_source_missing",
-                "configured": false,
-                "available": false,
+                "status": "used",
+                "configured": true,
+                "available": true,
                 "required_for_query": false,
                 "optional_for_query": true,
-                "used_in_run": false
+                "used_in_run": true
               },
               {
                 "source_id": "polymarket_public",
@@ -7470,7 +7470,7 @@
             "blocker_reason": "",
             "threshold_source": "static_defaults",
             "confidence_source": "static_defaults",
-            "confidence_score": 0.872,
+            "confidence_score": 0.882,
             "evidence_convergence": "converged",
             "evidence_strength": "strong",
             "source_coverage_state": "sufficient",
@@ -9055,125 +9055,12 @@
               },
               {
                 "source_id": "api_football_optional",
-                "status": "optional_source_missing",
-                "configured": false,
-                "available": false,
-                "required_for_query": false,
-                "optional_for_query": true,
-                "used_in_run": false
-              },
-              {
-                "source_id": "polymarket_public",
                 "status": "used",
                 "configured": true,
                 "available": true,
                 "required_for_query": false,
                 "optional_for_query": true,
                 "used_in_run": true
-              },
-              {
-                "source_id": "google_trends",
-                "status": "used",
-                "configured": true,
-                "available": true,
-                "required_for_query": false,
-                "optional_for_query": true,
-                "used_in_run": true
-              }
-            ]
-          },
-          "quality": {
-            "publication_state": "blocked",
-            "quality_verdict": "blocked_no_pick",
-            "blocker_reason": "provider_required_no_pick",
-            "threshold_source": "static_defaults",
-            "confidence_source": "static_defaults",
-            "confidence_score": 0.86,
-            "evidence_convergence": "converged",
-            "evidence_strength": "strong",
-            "source_coverage_state": "sufficient",
-            "domain_pack_strength": "",
-            "decision_ready_state": "",
-            "decision_blocker_reason": "",
-            "targeted_provider_used": false,
-            "sports_semantic_ready": true,
-            "sports_overlay_confidence": 0.79,
-            "sports_overlay_blocker_reason": "sports_probability_mode_benchmark_only",
-            "sports_publish_gate_ready": false,
-            "market_consensus_strength": 0.67,
-            "market_disagreement_score": 0.24,
-            "price_move_pressure": 0.38,
-            "narrative_hype_score": 0.58,
-            "sportsbook_readiness_state": "benchmark_only",
-            "still_thin_reason": "",
-            "expected_quality_verdict": "blocked_no_pick",
-            "quality_alignment": true,
-            "publishable": false,
-            "notes": [
-              "Personalized sports outcomes stay out of the critical path until B is live.",
-              "Crystal has the matchup grounded, but it will not publish the sports pick until the semantic overlay and parity gate are both ready.",
-              "Sports overlay blocker: sports probability mode benchmark only."
-            ]
-          },
-          "gating": {
-            "row_state": "quality_follow_up",
-            "action_recommendation": "tighten_shared_quality_or_domain_pack",
-            "missing_required_source_count": 0,
-            "registry_only_source_count": 0
-          },
-          "candidate_paid_private_sources": []
-        },
-        {
-          "domain_id": "B.3.6.sports_outcomes_probability_mode",
-          "domain_label": "Sports Outcomes (Probability Mode)",
-          "cluster": "derived_personal_and_meta",
-          "week2_focus": true,
-          "week3_focus": true,
-          "variant": "edge",
-          "query": "Should I back Juventus or Inter this week?",
-          "routing": {
-            "top_domain": "B.3.6.sports_outcomes_probability_mode",
-            "top3": [
-              "B.3.6.sports_outcomes_probability_mode",
-              "B.3.8.personal_decisions_and_tradeoffs",
-              "B.3.4.personal_finance_outcomes"
-            ],
-            "top3_hit": true,
-            "silent_general_fallback": false
-          },
-          "variable_selection": {
-            "selected_variable_count": 0,
-            "selected_variables": [],
-            "adapter_activation_map": []
-          },
-          "provider_requirement_map": {
-            "required_sources": [
-              "thesportsdb_public"
-            ],
-            "optional_sources": [
-              "api_football_optional",
-              "polymarket_public",
-              "google_trends"
-            ],
-            "registry_only_sources": [],
-            "provider_states": [
-              {
-                "source_id": "thesportsdb_public",
-                "status": "used",
-                "configured": true,
-                "available": true,
-                "required_for_query": true,
-                "optional_for_query": false,
-                "used_in_run": true
-              },
-              {
-                "source_id": "api_football_optional",
-                "status": "optional_source_missing",
-                "configured": false,
-                "available": false,
-                "required_for_query": false,
-                "optional_for_query": true,
-                "used_in_run": false
               },
               {
                 "source_id": "polymarket_public",
@@ -9230,11 +9117,128 @@
           },
           "gating": {
             "row_state": "quality_follow_up",
+            "action_recommendation": "tighten_shared_quality_or_domain_pack",
+            "missing_required_source_count": 0,
+            "registry_only_source_count": 0
+          },
+          "candidate_paid_private_sources": [
+            "api_football_optional"
+          ]
+        },
+        {
+          "domain_id": "B.3.6.sports_outcomes_probability_mode",
+          "domain_label": "Sports Outcomes (Probability Mode)",
+          "cluster": "derived_personal_and_meta",
+          "week2_focus": true,
+          "week3_focus": true,
+          "variant": "edge",
+          "query": "Should I back Juventus or Inter this week?",
+          "routing": {
+            "top_domain": "B.3.6.sports_outcomes_probability_mode",
+            "top3": [
+              "B.3.6.sports_outcomes_probability_mode",
+              "B.3.8.personal_decisions_and_tradeoffs",
+              "B.3.4.personal_finance_outcomes"
+            ],
+            "top3_hit": true,
+            "silent_general_fallback": false
+          },
+          "variable_selection": {
+            "selected_variable_count": 0,
+            "selected_variables": [],
+            "adapter_activation_map": []
+          },
+          "provider_requirement_map": {
+            "required_sources": [
+              "thesportsdb_public"
+            ],
+            "optional_sources": [
+              "api_football_optional",
+              "polymarket_public",
+              "google_trends"
+            ],
+            "registry_only_sources": [],
+            "provider_states": [
+              {
+                "source_id": "thesportsdb_public",
+                "status": "used",
+                "configured": true,
+                "available": true,
+                "required_for_query": true,
+                "optional_for_query": false,
+                "used_in_run": true
+              },
+              {
+                "source_id": "api_football_optional",
+                "status": "used",
+                "configured": true,
+                "available": true,
+                "required_for_query": false,
+                "optional_for_query": true,
+                "used_in_run": true
+              },
+              {
+                "source_id": "polymarket_public",
+                "status": "used",
+                "configured": true,
+                "available": true,
+                "required_for_query": false,
+                "optional_for_query": true,
+                "used_in_run": true
+              },
+              {
+                "source_id": "google_trends",
+                "status": "used",
+                "configured": true,
+                "available": true,
+                "required_for_query": false,
+                "optional_for_query": true,
+                "used_in_run": true
+              }
+            ]
+          },
+          "quality": {
+            "publication_state": "blocked",
+            "quality_verdict": "blocked_no_pick",
+            "blocker_reason": "provider_required_no_pick",
+            "threshold_source": "static_defaults",
+            "confidence_source": "static_defaults",
+            "confidence_score": 0.852,
+            "evidence_convergence": "informative",
+            "evidence_strength": "strong",
+            "source_coverage_state": "sufficient",
+            "domain_pack_strength": "",
+            "decision_ready_state": "",
+            "decision_blocker_reason": "",
+            "targeted_provider_used": false,
+            "sports_semantic_ready": true,
+            "sports_overlay_confidence": 0.79,
+            "sports_overlay_blocker_reason": "sports_probability_mode_benchmark_only",
+            "sports_publish_gate_ready": false,
+            "market_consensus_strength": 0.67,
+            "market_disagreement_score": 0.24,
+            "price_move_pressure": 0.38,
+            "narrative_hype_score": 0.58,
+            "sportsbook_readiness_state": "benchmark_only",
+            "still_thin_reason": "",
+            "expected_quality_verdict": "blocked_no_pick",
+            "quality_alignment": true,
+            "publishable": false,
+            "notes": [
+              "Personalized sports outcomes stay out of the critical path until B is live.",
+              "Crystal has the matchup grounded, but it will not publish the sports pick until the semantic overlay and parity gate are both ready.",
+              "Sports overlay blocker: sports probability mode benchmark only."
+            ]
+          },
+          "gating": {
+            "row_state": "quality_follow_up",
             "action_recommendation": "deepen_live_domain_pack_and_typed_fusion",
             "missing_required_source_count": 0,
             "registry_only_source_count": 0
           },
-          "candidate_paid_private_sources": []
+          "candidate_paid_private_sources": [
+            "api_football_optional"
+          ]
         }
       ]
     },
@@ -17586,12 +17590,12 @@
           },
           {
             "source_id": "api_football_optional",
-            "status": "optional_source_missing",
-            "configured": false,
-            "available": false,
+            "status": "used",
+            "configured": true,
+            "available": true,
             "required_for_query": false,
             "optional_for_query": true,
-            "used_in_run": false
+            "used_in_run": true
           },
           {
             "source_id": "polymarket_public",
@@ -17619,7 +17623,7 @@
         "blocker_reason": "",
         "threshold_source": "static_defaults",
         "confidence_source": "static_defaults",
-        "confidence_score": 0.884,
+        "confidence_score": 0.888,
         "evidence_convergence": "converged",
         "evidence_strength": "strong",
         "source_coverage_state": "sufficient",
@@ -17718,12 +17722,12 @@
           },
           {
             "source_id": "api_football_optional",
-            "status": "optional_source_missing",
-            "configured": false,
-            "available": false,
+            "status": "used",
+            "configured": true,
+            "available": true,
             "required_for_query": false,
             "optional_for_query": true,
-            "used_in_run": false
+            "used_in_run": true
           },
           {
             "source_id": "polymarket_public",
@@ -17751,7 +17755,7 @@
         "blocker_reason": "",
         "threshold_source": "static_defaults",
         "confidence_source": "static_defaults",
-        "confidence_score": 0.872,
+        "confidence_score": 0.882,
         "evidence_convergence": "converged",
         "evidence_strength": "strong",
         "source_coverage_state": "sufficient",
@@ -19259,125 +19263,12 @@
           },
           {
             "source_id": "api_football_optional",
-            "status": "optional_source_missing",
-            "configured": false,
-            "available": false,
-            "required_for_query": false,
-            "optional_for_query": true,
-            "used_in_run": false
-          },
-          {
-            "source_id": "polymarket_public",
             "status": "used",
             "configured": true,
             "available": true,
             "required_for_query": false,
             "optional_for_query": true,
             "used_in_run": true
-          },
-          {
-            "source_id": "google_trends",
-            "status": "used",
-            "configured": true,
-            "available": true,
-            "required_for_query": false,
-            "optional_for_query": true,
-            "used_in_run": true
-          }
-        ]
-      },
-      "quality": {
-        "publication_state": "blocked",
-        "quality_verdict": "blocked_no_pick",
-        "blocker_reason": "provider_required_no_pick",
-        "threshold_source": "static_defaults",
-        "confidence_source": "static_defaults",
-        "confidence_score": 0.86,
-        "evidence_convergence": "converged",
-        "evidence_strength": "strong",
-        "source_coverage_state": "sufficient",
-        "domain_pack_strength": "",
-        "decision_ready_state": "",
-        "decision_blocker_reason": "",
-        "targeted_provider_used": false,
-        "sports_semantic_ready": true,
-        "sports_overlay_confidence": 0.79,
-        "sports_overlay_blocker_reason": "sports_probability_mode_benchmark_only",
-        "sports_publish_gate_ready": false,
-        "market_consensus_strength": 0.67,
-        "market_disagreement_score": 0.24,
-        "price_move_pressure": 0.38,
-        "narrative_hype_score": 0.58,
-        "sportsbook_readiness_state": "benchmark_only",
-        "still_thin_reason": "",
-        "expected_quality_verdict": "blocked_no_pick",
-        "quality_alignment": true,
-        "publishable": false,
-        "notes": [
-          "Personalized sports outcomes stay out of the critical path until B is live.",
-          "Crystal has the matchup grounded, but it will not publish the sports pick until the semantic overlay and parity gate are both ready.",
-          "Sports overlay blocker: sports probability mode benchmark only."
-        ]
-      },
-      "gating": {
-        "row_state": "quality_follow_up",
-        "action_recommendation": "tighten_shared_quality_or_domain_pack",
-        "missing_required_source_count": 0,
-        "registry_only_source_count": 0
-      },
-      "candidate_paid_private_sources": []
-    },
-    {
-      "domain_id": "B.3.6.sports_outcomes_probability_mode",
-      "domain_label": "Sports Outcomes (Probability Mode)",
-      "cluster": "derived_personal_and_meta",
-      "week2_focus": true,
-      "week3_focus": true,
-      "variant": "edge",
-      "query": "Should I back Juventus or Inter this week?",
-      "routing": {
-        "top_domain": "B.3.6.sports_outcomes_probability_mode",
-        "top3": [
-          "B.3.6.sports_outcomes_probability_mode",
-          "B.3.8.personal_decisions_and_tradeoffs",
-          "B.3.4.personal_finance_outcomes"
-        ],
-        "top3_hit": true,
-        "silent_general_fallback": false
-      },
-      "variable_selection": {
-        "selected_variable_count": 0,
-        "selected_variables": [],
-        "adapter_activation_map": []
-      },
-      "provider_requirement_map": {
-        "required_sources": [
-          "thesportsdb_public"
-        ],
-        "optional_sources": [
-          "api_football_optional",
-          "polymarket_public",
-          "google_trends"
-        ],
-        "registry_only_sources": [],
-        "provider_states": [
-          {
-            "source_id": "thesportsdb_public",
-            "status": "used",
-            "configured": true,
-            "available": true,
-            "required_for_query": true,
-            "optional_for_query": false,
-            "used_in_run": true
-          },
-          {
-            "source_id": "api_football_optional",
-            "status": "optional_source_missing",
-            "configured": false,
-            "available": false,
-            "required_for_query": false,
-            "optional_for_query": true,
-            "used_in_run": false
           },
           {
             "source_id": "polymarket_public",
@@ -19434,11 +19325,128 @@
       },
       "gating": {
         "row_state": "quality_follow_up",
+        "action_recommendation": "tighten_shared_quality_or_domain_pack",
+        "missing_required_source_count": 0,
+        "registry_only_source_count": 0
+      },
+      "candidate_paid_private_sources": [
+        "api_football_optional"
+      ]
+    },
+    {
+      "domain_id": "B.3.6.sports_outcomes_probability_mode",
+      "domain_label": "Sports Outcomes (Probability Mode)",
+      "cluster": "derived_personal_and_meta",
+      "week2_focus": true,
+      "week3_focus": true,
+      "variant": "edge",
+      "query": "Should I back Juventus or Inter this week?",
+      "routing": {
+        "top_domain": "B.3.6.sports_outcomes_probability_mode",
+        "top3": [
+          "B.3.6.sports_outcomes_probability_mode",
+          "B.3.8.personal_decisions_and_tradeoffs",
+          "B.3.4.personal_finance_outcomes"
+        ],
+        "top3_hit": true,
+        "silent_general_fallback": false
+      },
+      "variable_selection": {
+        "selected_variable_count": 0,
+        "selected_variables": [],
+        "adapter_activation_map": []
+      },
+      "provider_requirement_map": {
+        "required_sources": [
+          "thesportsdb_public"
+        ],
+        "optional_sources": [
+          "api_football_optional",
+          "polymarket_public",
+          "google_trends"
+        ],
+        "registry_only_sources": [],
+        "provider_states": [
+          {
+            "source_id": "thesportsdb_public",
+            "status": "used",
+            "configured": true,
+            "available": true,
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "api_football_optional",
+            "status": "used",
+            "configured": true,
+            "available": true,
+            "required_for_query": false,
+            "optional_for_query": true,
+            "used_in_run": true
+          },
+          {
+            "source_id": "polymarket_public",
+            "status": "used",
+            "configured": true,
+            "available": true,
+            "required_for_query": false,
+            "optional_for_query": true,
+            "used_in_run": true
+          },
+          {
+            "source_id": "google_trends",
+            "status": "used",
+            "configured": true,
+            "available": true,
+            "required_for_query": false,
+            "optional_for_query": true,
+            "used_in_run": true
+          }
+        ]
+      },
+      "quality": {
+        "publication_state": "blocked",
+        "quality_verdict": "blocked_no_pick",
+        "blocker_reason": "provider_required_no_pick",
+        "threshold_source": "static_defaults",
+        "confidence_source": "static_defaults",
+        "confidence_score": 0.852,
+        "evidence_convergence": "informative",
+        "evidence_strength": "strong",
+        "source_coverage_state": "sufficient",
+        "domain_pack_strength": "",
+        "decision_ready_state": "",
+        "decision_blocker_reason": "",
+        "targeted_provider_used": false,
+        "sports_semantic_ready": true,
+        "sports_overlay_confidence": 0.79,
+        "sports_overlay_blocker_reason": "sports_probability_mode_benchmark_only",
+        "sports_publish_gate_ready": false,
+        "market_consensus_strength": 0.67,
+        "market_disagreement_score": 0.24,
+        "price_move_pressure": 0.38,
+        "narrative_hype_score": 0.58,
+        "sportsbook_readiness_state": "benchmark_only",
+        "still_thin_reason": "",
+        "expected_quality_verdict": "blocked_no_pick",
+        "quality_alignment": true,
+        "publishable": false,
+        "notes": [
+          "Personalized sports outcomes stay out of the critical path until B is live.",
+          "Crystal has the matchup grounded, but it will not publish the sports pick until the semantic overlay and parity gate are both ready.",
+          "Sports overlay blocker: sports probability mode benchmark only."
+        ]
+      },
+      "gating": {
+        "row_state": "quality_follow_up",
         "action_recommendation": "deepen_live_domain_pack_and_typed_fusion",
         "missing_required_source_count": 0,
         "registry_only_source_count": 0
       },
-      "candidate_paid_private_sources": []
+      "candidate_paid_private_sources": [
+        "api_football_optional"
+      ]
     },
     {
       "domain_id": "B.3.7.travel_personal_outcomes",

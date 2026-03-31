@@ -1,5 +1,5 @@
 ﻿{
-    "generated_at":  "2026-03-31T11:36:45.6828732+02:00",
+    "generated_at":  "2026-03-31T12:47:03.7724624+02:00",
     "local_api_base":  "https://api-paaqyfwena-ew.a.run.app",
     "remote_service_url":  "https://crystal-core-paaqyfwena-ew.a.run.app",
     "queries":  [
@@ -9,13 +9,13 @@
                         "remote_status":  "completed",
                         "local_domain":  "A.24.governance_policy_and_public_timeline",
                         "remote_domain":  "A.24.governance_policy_and_public_timeline",
-                        "local_call":  "Lean Si 64/36",
-                        "remote_call":  "Lean No 61/39",
-                        "local_winner":  "Si",
+                        "local_call":  "Lean No 64/36",
+                        "remote_call":  "Lean No 64/36",
+                        "local_winner":  "No",
                         "remote_winner":  "No",
                         "local_band":  "limited",
                         "remote_band":  "limited",
-                        "probability_delta":  0.03,
+                        "probability_delta":  0,
                         "local_transport":  "local_core",
                         "remote_transport":  "remote",
                         "local_failures":  "",
@@ -97,8 +97,8 @@
                         "remote_status":  "completed",
                         "local_domain":  "A.23.markets_and_asset_regimes",
                         "remote_domain":  "A.23.markets_and_asset_regimes",
-                        "local_call":  "Bitcoin is likely to trade within a defined range over the next 30 days, roughly between $27,000 and $31,000, with no strong directional breakout expected.",
-                        "remote_call":  "Bitcoin is expected to trade within a defined range with mild downside bias over the next 30 days.",
+                        "local_call":  "Bitcoin is expected to trade within a defined range over the next 30 days with no clear directional breakout.",
+                        "remote_call":  "Bitcoin is likely to trade within a moderately wide range with a slight upward bias over the next 30 days.",
                         "local_winner":  "",
                         "remote_winner":  "",
                         "local_band":  "",
@@ -227,7 +227,7 @@
     "summary":  {
                     "remote_max_completed_streak":  5,
                     "binary_comparable_count":  4,
-                    "binary_winner_mismatch_rate":  0.25,
+                    "binary_winner_mismatch_rate":  0,
                     "median_probability_delta":  0,
                     "missing_binary_contract_rate":  0,
                     "direct_api_502_count":  0,
@@ -236,9 +236,9 @@
                     "sports_probe_publish_gate_ready":  false,
                     "sports_probe_market_overlay_available":  false,
                     "sports_probe_sportsbook_readiness_state":  "market_context_thin",
-                    "verdict":  "hold at 0/0",
+                    "verdict":  "10% ready",
                     "blockers":  [
-                                     "binary winner mismatch present"
+
                                  ]
                 }
 }

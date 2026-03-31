@@ -1,8 +1,8 @@
 ﻿# Phase A Close-Out - 2026-03-31
 
 ## Current Verdict
-- Phase A verdict: **phase_a_blocked**
-- Rollout decision: **hold at 0/0**
+- Phase A verdict: **phase_a_ready_for_sprint_baseline**
+- Rollout decision: **canary live at 10/0; promote only through the canary rollout runbook**
 - Deploy requested in this run: `True`
 
 ## Entry Gate Snapshot
@@ -10,7 +10,7 @@
 |---|---|---|
 | TheSportsDB primary selected | Green | SPORTS_PROVIDER is set to thesportsdb and the free tier can ground sports without a private key. |
 | FRED_API_KEY present in env | Green | FRED_API_KEY is present in functions/.env.omnicrystal. |
-| Sports parity closed | Blocked | winner_mismatch_rate=0.25, missing_binary_contract_rate=0, sports_probe_ready=True |
+| Sports parity closed | Green | winner_mismatch_rate=0, missing_binary_contract_rate=0, sports_probe_ready=True |
 | TheSportsDB active in runtime | Green | status=available, configured=True, available=True |
 | FRED active in runtime | Green | status=available, configured=True, available=True |
 | GTFS Rome First | Green | gtfs_static feed_count=1, gtfs_realtime feed_count=1 |
@@ -30,9 +30,9 @@
 | check:markets-assets | passed | 0 |  > react-example@0.0.0 check:markets-assets > node scripts/check-markets-assets.mjs  Markets/assets benchmark passed on 11 cases with verdict=markets-ready and A.0.general rate=0. |
 | report:markets-assets | passed | 0 |  > react-example@0.0.0 report:markets-assets > node scripts/run-markets-quality-report.mjs  Markets quality report written to C:\Users\Fiorenza\OneDrive\Desktop\Codex\crystal-re... |
 | check:provider-foundation | passed | 0 |  > react-example@0.0.0 check:provider-foundation > node scripts/check-provider-foundation.mjs  [dotenv@17.3.1] injecting env (39) from functions\.env.omnicrystal -- tip: ⚙️  loa... |
-| report:provider-foundation | passed | 0 |  > react-example@0.0.0 report:provider-foundation > node scripts/run-provider-foundation-report.mjs  [dotenv@17.3.1] injecting env (39) from functions\.env.omnicrystal -- tip: ⚙... |
-| check:domain-quality-grid | passed | 0 |  > react-example@0.0.0 check:domain-quality-grid > node scripts/check-domain-quality-grid.mjs  [dotenv@17.3.1] injecting env (39) from functions\.env.omnicrystal -- tip: 🔐 encr... |
-| report:domain-quality-grid | passed | 0 |  > react-example@0.0.0 report:domain-quality-grid > node scripts/run-domain-quality-report.mjs  [dotenv@17.3.1] injecting env (39) from functions\.env.omnicrystal -- tip: ⚙️  ov... |
+| report:provider-foundation | passed | 0 |  > react-example@0.0.0 report:provider-foundation > node scripts/run-provider-foundation-report.mjs  [dotenv@17.3.1] injecting env (39) from functions\.env.omnicrystal -- tip: �... |
+| check:domain-quality-grid | passed | 0 |  > react-example@0.0.0 check:domain-quality-grid > node scripts/check-domain-quality-grid.mjs  [dotenv@17.3.1] injecting env (39) from functions\.env.omnicrystal -- tip: ⚙️  ena... |
+| report:domain-quality-grid | passed | 0 |  > react-example@0.0.0 report:domain-quality-grid > node scripts/run-domain-quality-report.mjs  [dotenv@17.3.1] injecting env (39) from functions\.env.omnicrystal -- tip: ⚙️  sp... |
 | parity:direct-api | passed | 0 | Parity report written to C:\Users\Fiorenza\OneDrive\Desktop\Codex\crystal-review-0316\docs\parity-report-2026-03-24.md Parity JSON written to C:\Users\Fiorenza\OneDrive\Desktop\... |
 
 ## Runtime Baseline
@@ -94,4 +94,4 @@ powershell -ExecutionPolicy Bypass -File scripts/run-phase-a-closeout.ps1 -Deplo
 ```
 
 ## Notes
-- Technical Phase A entry gate is still blocked. Keep rollout at `0/0` and do not advance to canary discussion.
+- Technical Phase A baseline is green and signed-in QA is already certified. Canary is already live and should now be governed by the rollout runbook gates.

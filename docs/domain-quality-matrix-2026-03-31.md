@@ -1,6 +1,6 @@
 # Crystal domain quality matrix
 
-Generated at: 2026-03-31T09:30:31.860Z
+Generated at: 2026-03-31T10:39:44.040Z
 Domains covered: 43
 Rows scanned: 86
 Top-1 hit rate: 93%
@@ -188,4 +188,4 @@ Hard blockers: A.29.sports_performance_and_outcomes
 
 ## Domains Requiring Follow-Up
 
-- B.3.6.sports_outcomes_probability_mode: provider_required_no_pick | provider hints: none | action: tighten_shared_quality_or_domain_pack
+- B.3.6.sports_outcomes_probability_mode: provider_required_no_pick | provider hints: api_football_optional | action: tighten_shared_quality_or_domain_pack

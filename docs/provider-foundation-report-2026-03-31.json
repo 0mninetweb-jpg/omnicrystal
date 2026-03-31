@@ -1,6 +1,6 @@
 {
   "summary": {
-    "generated_at": "2026-03-31T09:30:30.240Z",
+    "generated_at": "2026-03-31T10:39:38.990Z",
     "report_date": "2026-03-31",
     "total_cases": 6,
     "top3_miss_count": 0,
@@ -236,14 +236,12 @@
       "category": "sports",
       "access_profile": "optional_non_default",
       "implementation_status": "implemented",
-      "configured": false,
-      "available": false,
-      "status": "config_missing",
+      "configured": true,
+      "available": true,
+      "status": "available",
       "provider": "api-football",
       "base_url": "https://v3.football.api-sports.io",
-      "notes": [
-        "API_FOOTBALL_KEY is optional now and only used as a sports enhancer when configured."
-      ]
+      "notes": []
     }
   ],
   "runtime_config_blockers": [],

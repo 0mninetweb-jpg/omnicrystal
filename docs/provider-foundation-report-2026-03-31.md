@@ -38,7 +38,7 @@
 | oecd_api | available | yes | yes | - |
 | eia_api | config_missing | no | no | EIA_API_KEY is required to activate EIA in runtime. |
 | thesportsdb_public | available | yes | yes | Using TheSportsDB free tier (key 123) as the primary sports runtime source. |
-| api_football_optional | config_missing | no | no | API_FOOTBALL_KEY is optional now and only used as a sports enhancer when configured. |
+| api_football_optional | available | yes | yes | - |
 
 ## Synthetic Connector Smoke
 | Cluster | Query | Domain | Sources | Missing required | Location | Mobility | Public data |
