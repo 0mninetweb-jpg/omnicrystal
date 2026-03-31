@@ -109,6 +109,12 @@ export interface PublicationBasis {
   blocker_reason?: string | null;
   quality_verdict?: string | null;
   provider_required_no_pick?: boolean;
+  sports_pick_state?: string | null;
+  sports_grounded?: boolean;
+  fixture_window_state?: string | null;
+  fixture_window_open?: boolean;
+  sports_extraction_provenance?: string[] | null;
+  sports_confidence_tier?: string | null;
   sports_semantic_ready?: boolean;
   sports_overlay_confidence?: number | null;
   sports_overlay_blocker_reason?: string | null;
@@ -125,6 +131,12 @@ export interface SportsGrounding {
   provider_configured: boolean;
   fixture_resolved: boolean;
   parity_ready: boolean;
+  sports_pick_state?: string | null;
+  sports_grounded?: boolean;
+  fixture_window_state?: string | null;
+  fixture_window_open?: boolean;
+  sports_extraction_provenance?: string[] | null;
+  sports_confidence_tier?: string | null;
   semantic_ready?: boolean;
   overlay_confidence?: number | null;
   overlay_blocker_reason?: string | null;
@@ -161,6 +173,8 @@ export interface SportsSemanticOverlay {
   travel_fatigue?: number;
   motivation_context?: number;
   narrative_consensus?: string | null;
+  used_source_ids?: string[];
+  extraction_provenance?: string[];
   notes?: string[];
 }
 
@@ -353,6 +367,12 @@ export interface CardData {
   sports_overlay_confidence?: number | null;
   sports_overlay_blocker_reason?: string | null;
   sports_publish_gate_ready?: boolean;
+  sports_pick_state?: string | null;
+  sports_grounded?: boolean;
+  fixture_window_state?: string | null;
+  fixture_window_open?: boolean;
+  sports_extraction_provenance?: string[] | null;
+  sports_confidence_tier?: string | null;
   market_consensus_strength?: number | null;
   market_disagreement_score?: number | null;
   price_move_pressure?: number | null;

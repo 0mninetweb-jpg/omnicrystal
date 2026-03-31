@@ -1,6 +1,6 @@
 {
   "summary": {
-    "generated_at": "2026-03-31T13:05:18.766Z",
+    "generated_at": "2026-03-31T16:57:14.971Z",
     "report_date": "2026-03-31",
     "total_cases": 10,
     "binary_cases": 8,
@@ -57,7 +57,8 @@
         "wikidata",
         "gdelt",
         "rss_allowlist",
-        "historical-cache"
+        "historical-cache",
+        "google_trends"
       ],
       "missing_required_sources": []
     }
@@ -1233,10 +1234,6 @@
         "energy_like": false,
         "environment_like": false,
         "required_sources": [
-          "wikidata",
-          "gdelt",
-          "rss_allowlist",
-          "google_trends",
           "thesportsdb_public"
         ],
         "optional_sources": [
@@ -1251,7 +1248,6 @@
           "historical-cache"
         ],
         "missing_required_sources": [
-          "google_trends",
           "thesportsdb_public"
         ],
         "missing_optional_sources": [
@@ -1260,58 +1256,6 @@
           "google_trends"
         ],
         "provider_states": [
-          {
-            "source_id": "wikidata",
-            "title": "wikidata",
-            "category": "entity_resolution",
-            "access_profile": "public",
-            "implementation_status": "implemented",
-            "configured": true,
-            "available": true,
-            "status": "used",
-            "required_for_query": true,
-            "optional_for_query": false,
-            "used_in_run": true
-          },
-          {
-            "source_id": "gdelt",
-            "title": "gdelt",
-            "category": "news_attention",
-            "access_profile": "public",
-            "implementation_status": "implemented",
-            "configured": true,
-            "available": true,
-            "status": "used",
-            "required_for_query": true,
-            "optional_for_query": false,
-            "used_in_run": true
-          },
-          {
-            "source_id": "rss_allowlist",
-            "title": "rss allowlist",
-            "category": "news_attention",
-            "access_profile": "public",
-            "implementation_status": "implemented",
-            "configured": true,
-            "available": true,
-            "status": "used",
-            "required_for_query": true,
-            "optional_for_query": false,
-            "used_in_run": true
-          },
-          {
-            "source_id": "google_trends",
-            "title": "google trends",
-            "category": "attention",
-            "access_profile": "public",
-            "implementation_status": "implemented",
-            "configured": true,
-            "available": true,
-            "status": "required_not_used",
-            "required_for_query": true,
-            "optional_for_query": true,
-            "used_in_run": false
-          },
           {
             "source_id": "thesportsdb_public",
             "title": "TheSportsDB",
@@ -1360,6 +1304,58 @@
             "required_for_query": false,
             "optional_for_query": true,
             "used_in_run": false
+          },
+          {
+            "source_id": "google_trends",
+            "title": "google trends",
+            "category": "attention",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "available",
+            "required_for_query": false,
+            "optional_for_query": true,
+            "used_in_run": false
+          },
+          {
+            "source_id": "wikidata",
+            "title": "wikidata",
+            "category": "entity_resolution",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": false,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "gdelt",
+            "title": "gdelt",
+            "category": "news_attention",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": false,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "rss_allowlist",
+            "title": "rss allowlist",
+            "category": "news_attention",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": false,
+            "optional_for_query": false,
+            "used_in_run": true
           },
           {
             "source_id": "historical-cache",
@@ -1445,6 +1441,7 @@
         "wikidata",
         "gdelt",
         "rss_allowlist",
+        "google_trends",
         "historical-cache"
       ],
       "source_usage": {
@@ -1468,11 +1465,10 @@
           "wikidata",
           "gdelt",
           "rss_allowlist",
+          "google_trends",
           "historical-cache"
         ],
-        "missing_required_sources": [
-          "google_trends"
-        ],
+        "missing_required_sources": [],
         "missing_optional_sources": [],
         "provider_states": [
           {
@@ -1522,10 +1518,10 @@
             "implementation_status": "implemented",
             "configured": true,
             "available": true,
-            "status": "required_not_used",
+            "status": "used",
             "required_for_query": true,
             "optional_for_query": false,
-            "used_in_run": false
+            "used_in_run": true
           },
           {
             "source_id": "historical-cache",

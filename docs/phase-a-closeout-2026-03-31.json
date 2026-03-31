@@ -1,9 +1,9 @@
 ﻿{
-    "generated_at":  "2026-03-31T15:13:24.7298253+02:00",
+    "generated_at":  "2026-04-01T01:01:20.7946416+02:00",
     "report_date":  "2026-03-31",
     "verdict":  "phase_a_ready_for_sprint_baseline",
     "rollout_verdict":  "canary live at 10/0; promote only through the canary rollout runbook",
-    "deploy_requested":  true,
+    "deploy_requested":  false,
     "env_presence":  {
                          "thesportsdb_primary_selected":  true,
                          "api_football_key_present":  true,
@@ -12,6 +12,7 @@
     "gates":  {
                   "sports_parity_closed":  true,
                   "sports_probe_ready":  true,
+                  "sports_probability_probe_ready":  true,
                   "winner_mismatch_rate":  0,
                   "missing_binary_contract_rate":  0,
                   "fred_api_available":  true,
@@ -22,7 +23,7 @@
                   "rollout_frozen":  false,
                   "rollout_stage":  "10/0",
                   "checks_green":  true,
-                  "parity_direct_api_soft_fail":  false,
+                  "parity_direct_api_soft_fail":  true,
                   "manual_signed_in_qa":  "certified",
                   "entry_gate_green":  true
               },
@@ -130,16 +131,10 @@
                     },
     "steps":  [
                   {
-                      "name":  "deploy:phase-a",
-                      "ok":  true,
-                      "exit_code":  0,
-                      "output_tail":  "\u001b[36m\u001b[1mi  functions:\u001b[22m\u001b[39m ensuring required API \u001b[1mrun.googleapis.com\u001b[22m is enabled...\n\u001b[36m\u001b[1mi  functions:\u001b[22m\u001b[39m ensuring required API \u001b[1meventarc.googleapis.com\u001b[22m is enabled...\n\u001b[36m\u001b[1mi  functions:\u001b[22m\u001b[39m ensuring required API \u001b[1mpubsub.googleapis.com\u001b[22m is enabled...\n\u001b[36m\u001b[1mi  functions:\u001b[22m\u001b[39m ensuring required API \u001b[1mstorage.googleapis.com\u001b[22m is enabled...\n\u001b[36m\u001b[1mi  functions:\u001b[22m\u001b[39m generating the service identity for \u001b[1mpubsub.googleapis.com\u001b[22m...\n\u001b[36m\u001b[1mi  functions:\u001b[22m\u001b[39m generating the service identity for \u001b[1meventarc.googleapis.com\u001b[22m...\n\u001b[36m\u001b[1mi  functions:\u001b[22m\u001b[39m ensuring required API \u001b[1msecretmanager.googleapis.com\u001b[22m is enabled...\n\u001b[32m\u001b[1m+  functions:\u001b[22m\u001b[39m \u001b[1mfunctions\u001b[22m source uploaded successfully\n\u001b[36m\u001b[1mi  functions:\u001b[22m\u001b[39m updating Node.js 22 (2nd Gen) function \u001b[1mapi(europe-west1)\u001b[22m...\n\u001b[32m\u001b[1m+ \u001b[22m\u001b[39m \u001b[1m\u001b[32mfunctions[api(europe-west1)]\u001b[39m\u001b[22m Successful update operation.\n\u001b[1mFunction URL\u001b[22m (api(europe-west1)): https://api-paaqyfwena-ew.a.run.app\n\n\u001b[32m\u001b[1m+ \u001b[22m\u001b[39m \u001b[1m\u001b[4mDeploy complete!\u001b[24m\u001b[22m\n\n\u001b[1mProject Console:\u001b[22m https://console.firebase.google.com/project/omnicrystal/overview"
-                  },
-                  {
                       "name":  "check:prediction-core",
                       "ok":  true,
                       "exit_code":  0,
-                      "output_tail":  "\n\u003e react-example@0.0.0 check:prediction-core\n\u003e node scripts/check-prediction-core.mjs\n\nPrediction core benchmark passed on 125 routing cases.\nSynthetic scorecard check passed with publication_state=published.\nSports publish gate checks passed with blocked=blocked and ready=published."
+                      "output_tail":  "\n\u003e react-example@0.0.0 check:prediction-core\n\u003e node scripts/check-prediction-core.mjs\n\nPrediction core benchmark passed on 125 routing cases.\nSynthetic scorecard check passed with publication_state=published.\nSports publish gate checks passed with blocked=limited and ready=limited."
                   },
                   {
                       "name":  "check:policy-governance",
@@ -169,31 +164,31 @@
                       "name":  "check:provider-foundation",
                       "ok":  true,
                       "exit_code":  0,
-                      "output_tail":  "\n\u003e react-example@0.0.0 check:provider-foundation\n\u003e node scripts/check-provider-foundation.mjs\n\n[dotenv@17.3.1] injecting env (39) from functions\\.env.omnicrystal -- tip: ⚙️  enable debug logging with { debug: true }\nProvider foundation smoke passed on 6 cases with runtime_config_verdict=config-ready and blockers=0."
+                      "output_tail":  "\n\u003e react-example@0.0.0 check:provider-foundation\n\u003e node scripts/check-provider-foundation.mjs\n\n[dotenv@17.3.1] injecting env (39) from functions\\.env.omnicrystal -- tip: 🔐 prevent building .env in docker: https://dotenvx.com/prebuild\nProvider foundation smoke passed on 6 cases with runtime_config_verdict=config-ready and blockers=0."
                   },
                   {
                       "name":  "report:provider-foundation",
                       "ok":  true,
                       "exit_code":  0,
-                      "output_tail":  "\n\u003e react-example@0.0.0 report:provider-foundation\n\u003e node scripts/run-provider-foundation-report.mjs\n\n[dotenv@17.3.1] injecting env (39) from functions\\.env.omnicrystal -- tip: ⚡️ secrets for agents: https://dotenvx.com/as2\nProvider foundation report written to C:\\Users\\Fiorenza\\OneDrive\\Desktop\\Codex\\crystal-review-0316\\docs\\provider-foundation-report-2026-03-31.md\nProvider foundation JSON written to C:\\Users\\Fiorenza\\OneDrive\\Desktop\\Codex\\crystal-review-0316\\docs\\provider-foundation-report-2026-03-31.json\nSummary: verdict=foundation-ready, synthetic_smoke_verdict=connector-ready, runtime_config_blockers=0"
+                      "output_tail":  "\n\u003e react-example@0.0.0 report:provider-foundation\n\u003e node scripts/run-provider-foundation-report.mjs\n\n[dotenv@17.3.1] injecting env (39) from functions\\.env.omnicrystal -- tip: 🛠️  run anywhere with `dotenvx run -- yourcommand`\nProvider foundation report written to C:\\Users\\Fiorenza\\OneDrive\\Desktop\\Codex\\crystal-review-0316\\docs\\provider-foundation-report-2026-03-31.md\nProvider foundation JSON written to C:\\Users\\Fiorenza\\OneDrive\\Desktop\\Codex\\crystal-review-0316\\docs\\provider-foundation-report-2026-03-31.json\nSummary: verdict=foundation-ready, synthetic_smoke_verdict=connector-ready, runtime_config_blockers=0"
                   },
                   {
                       "name":  "check:domain-quality-grid",
                       "ok":  true,
                       "exit_code":  0,
-                      "output_tail":  "\n\u003e react-example@0.0.0 check:domain-quality-grid\n\u003e node scripts/check-domain-quality-grid.mjs\n\n[dotenv@17.3.1] injecting env (39) from functions\\.env.omnicrystal -- tip: ⚙️  suppress all logs with { quiet: true }\nDomain quality grid passed with verdict=sprint_matrix_ready, batch2_gate_verdict=week1_batch2_on_track, batch3_gate_verdict=week1_batch3_on_track, week2_gate_verdict=week2_provider_depth_on_track, week3_gate_verdict=week3_needs_more_edge_depth, top1_hit_rate=0.9302, edge_top1_hit_rate=0.907, top3_miss_count=0, ready_domain_count=42."
+                      "output_tail":  "\n\u003e react-example@0.0.0 check:domain-quality-grid\n\u003e node scripts/check-domain-quality-grid.mjs\n\n[dotenv@17.3.1] injecting env (39) from functions\\.env.omnicrystal -- tip: 🛡️ auth for agents: https://vestauth.com\nDomain quality grid passed with verdict=sprint_matrix_ready, batch2_gate_verdict=week1_batch2_on_track, batch3_gate_verdict=week1_batch3_on_track, week2_gate_verdict=week2_provider_depth_on_track, week3_gate_verdict=week3_edge_predictive_lift_ready, top1_hit_rate=0.9651, edge_top1_hit_rate=0.9302, top3_miss_count=0, ready_domain_count=43."
                   },
                   {
                       "name":  "report:domain-quality-grid",
                       "ok":  true,
                       "exit_code":  0,
-                      "output_tail":  "\n\u003e react-example@0.0.0 report:domain-quality-grid\n\u003e node scripts/run-domain-quality-report.mjs\n\n[dotenv@17.3.1] injecting env (39) from functions\\.env.omnicrystal -- tip: 🔐 prevent building .env in docker: https://dotenvx.com/prebuild\nDomain quality markdown written to C:\\Users\\Fiorenza\\OneDrive\\Desktop\\Codex\\crystal-review-0316\\docs\\domain-quality-matrix-2026-03-31.md\nDomain quality JSON written to C:\\Users\\Fiorenza\\OneDrive\\Desktop\\Codex\\crystal-review-0316\\docs\\domain-quality-matrix-2026-03-31.json\nSummary: verdict=sprint_matrix_ready, total_domains=43, top3_miss_count=0"
+                      "output_tail":  "\n\u003e react-example@0.0.0 report:domain-quality-grid\n\u003e node scripts/run-domain-quality-report.mjs\n\n[dotenv@17.3.1] injecting env (39) from functions\\.env.omnicrystal -- tip: 🤖 agentic secret storage: https://dotenvx.com/as2\nDomain quality markdown written to C:\\Users\\Fiorenza\\OneDrive\\Desktop\\Codex\\crystal-review-0316\\docs\\domain-quality-matrix-2026-03-31.md\nDomain quality JSON written to C:\\Users\\Fiorenza\\OneDrive\\Desktop\\Codex\\crystal-review-0316\\docs\\domain-quality-matrix-2026-03-31.json\nSummary: verdict=sprint_matrix_ready, total_domains=43, top3_miss_count=0"
                   },
                   {
                       "name":  "parity:direct-api",
-                      "ok":  true,
-                      "exit_code":  0,
-                      "output_tail":  "Parity report written to C:\\Users\\Fiorenza\\OneDrive\\Desktop\\Codex\\crystal-review-0316\\docs\\parity-report-2026-03-24.md\nParity JSON written to C:\\Users\\Fiorenza\\OneDrive\\Desktop\\Codex\\crystal-review-0316\\docs\\parity-report-2026-03-24.json\nVerdict: 10% ready"
+                      "ok":  false,
+                      "exit_code":  1,
+                      "output_tail":  "powershell : Invoke-RestMethod : \r\nIn C:\\Users\\Fiorenza\\OneDrive\\Desktop\\Codex\\crystal-review-0316\\scripts\\run-phase-a-closeout.ps1:219 car:3\r\n+   powershell -ExecutionPolicy Bypass -File (Join-Path $repoRoot \"scri ...\r\n+   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\r\n    + CategoryInfo          : NotSpecified: (Invoke-RestMethod : :String) [], RemoteException\r\n    + FullyQualifiedErrorId : NativeCommandError"
                   }
               ]
 }

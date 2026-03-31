@@ -13,6 +13,7 @@ const {
   isSupportedDomain,
   resolveDomainId,
 } = require("../catalogRegistry");
+const SPORTS_PROBABILITY_MODE_DOMAIN = "B.3.6.sports_outcomes_probability_mode";
 const {
   buildSportsForecastContext,
   getSportsRuntimeHealth,
@@ -1626,7 +1627,7 @@ function isSportsLikeQuery(normalizedQuery = {}, queryText = "", domainConfig = 
     safeText(normalizedQuery?.primary_domain_id || normalizedQuery?.domain_id || domainConfig?.domain_id),
     GENERAL_FORECAST_DOMAIN
   );
-  if (domainId === SPORTS_MATCH_OUTCOMES_DOMAIN) return true;
+  if (domainId === SPORTS_MATCH_OUTCOMES_DOMAIN || domainId === SPORTS_PROBABILITY_MODE_DOMAIN) return true;
   return looksLikeSportsMatchQuery(safeText(queryText || normalizedQuery?.original_query));
 }
 
@@ -1639,11 +1640,16 @@ function applySportsGroundingToQueryPlan(normalizedQuery = {}, sportsGrounding =
   if (!sideA || !sideB) {
     return normalizedQuery;
   }
+  const targetDomain = resolveDomainId(
+    safeText(normalizedQuery?.primary_domain_id || normalizedQuery?.domain_id),
+    SPORTS_MATCH_OUTCOMES_DOMAIN
+  );
+  const sportsDomain = targetDomain === SPORTS_PROBABILITY_MODE_DOMAIN ? SPORTS_PROBABILITY_MODE_DOMAIN : SPORTS_MATCH_OUTCOMES_DOMAIN;
 
   return {
     ...normalizedQuery,
-    primary_domain_id: SPORTS_MATCH_OUTCOMES_DOMAIN,
-    domain_id: SPORTS_MATCH_OUTCOMES_DOMAIN,
+    primary_domain_id: sportsDomain,
+    domain_id: sportsDomain,
     intent_shape: "binary_outcome",
     resolution_frame: "event",
     question_side_a: sideA,
@@ -1671,13 +1677,36 @@ function buildSportsGroundedDossierPrediction({
   const historicalAnchors = extractHistoricalAnchorLines(verifiedEvidencePack?.historical_baseline_20y, 3);
   const questionSideA = safeText(sportsGrounding?.question_side_a || normalizedQuery?.question_side_a);
   const questionSideB = safeText(sportsGrounding?.question_side_b || normalizedQuery?.question_side_b);
+  const previewBinaryContract =
+    questionSideA && questionSideB
+      ? buildBinaryContract(
+          {
+            question_side_a: questionSideA,
+            question_side_b: questionSideB,
+            winning_side: safeText(sportsGrounding?.winning_side),
+            winning_probability: Number.isFinite(Number(sportsGrounding?.winning_probability))
+              ? Number(sportsGrounding.winning_probability)
+              : null,
+            flip_conditions: invalidators,
+          },
+          {
+            question_side_a: questionSideA,
+            question_side_b: questionSideB,
+          },
+          null,
+          safeText(sportsGrounding?.winning_side),
+          {
+            fallbackProbability: Number.isFinite(Number(sportsGrounding?.winning_probability))
+              ? Number(sportsGrounding.winning_probability)
+              : 0.56,
+            publicationState: "limited",
+            confidenceScore: clamp01(sportsGrounding?.overlay_confidence, 0.56),
+            evidenceQuality,
+          }
+        )
+      : null;
 
-  if (
-    !sportsGrounding?.provider_configured ||
-    !sportsGrounding?.fixture_resolved ||
-    !sportsGrounding?.parity_ready ||
-    sportsGrounding?.publish_gate_ready === false
-  ) {
+  if (!sportsGrounding?.provider_configured) {
     const coverageReason = sportsGrounding?.provider_configured
       ? sportsGrounding?.fixture_resolved
         ? "Crystal has the match grounded, but the sports semantic publish gate is not closed yet for a responsible pick."
@@ -1686,7 +1715,7 @@ function buildSportsGroundedDossierPrediction({
     const payload = {
       structured_dossier: {
         query_normalized: safeText(queryText),
-        domain_map: [SPORTS_MATCH_OUTCOMES_DOMAIN],
+        domain_map: [domainConfig.domain_id],
         outcome_target: coverageReason,
         horizon: safeText(normalizedQuery?.horizon?.horizon_id || normalizedQuery?.horizons?.[0]?.horizon_id, "event"),
         selected_variables: [],
@@ -1714,6 +1743,112 @@ function buildSportsGroundedDossierPrediction({
             sportsGrounding?.fixture_resolved
               ? "Stand down until lineup, injury, and preview coverage is aligned tightly enough to close the sports publish gate."
               : "Stand down until the runtime can ground the match with provider data.",
+          ],
+          3
+        ),
+        historical_anchors: historicalAnchors,
+        why_this_side: coverageReason,
+        recommended_posture: "Treat this as a coverage gap. Crystal should not invent a sports edge without provider grounding.",
+        scenario_set: [],
+      },
+    };
+    return normalizeDossierStagePayload(payload, {
+      baselineConsensusPack,
+      variableSelectionPack: { selected_variables: [] },
+      normalizedQuery,
+      evidenceQuality,
+    });
+  }
+
+  if ((!sportsGrounding?.fixture_resolved || sportsGrounding?.publish_gate_ready === false) && previewBinaryContract) {
+    const coverageReason = sportsGrounding?.fixture_resolved
+      ? "Crystal grounded the fixture and can show a current lean, but the live sports evidence is still only partially converged."
+      : "Crystal resolved the matchup sides, but it is still waiting for a live fixture window before promoting the read into a full sports card.";
+    const payload = {
+      structured_dossier: {
+        query_normalized: safeText(queryText),
+        domain_map: [domainConfig.domain_id],
+        outcome_target: previewBinaryContract.display_call || coverageReason,
+        horizon: safeText(normalizedQuery?.horizon?.horizon_id || normalizedQuery?.horizons?.[0]?.horizon_id, "event"),
+        selected_variables: [],
+        ranked_drivers: keyDrivers,
+        macro_context: [],
+        case_specific_context: [],
+        uncertainty_map: normalizeTextList([safeText(sportsGrounding?.reason), coverageReason], 4),
+        data_quality_map: normalizeTextList(
+          [safeText(sportsGrounding?.overlay_blocker_reason), safeText(sportsGrounding?.sportsbook_readiness_state)],
+          4
+        ),
+      },
+      feature_bundle: [],
+      baseline_consensus_pack: baselineConsensusPack || {},
+      raw_prediction: {
+        primary_call: previewBinaryContract.display_call || coverageReason,
+        probability_split: buildCompatibleProbabilitySplit(previewBinaryContract),
+        binary_contract: previewBinaryContract,
+        confidence_score: clamp01(sportsGrounding?.overlay_confidence, 0.56),
+        key_drivers: keyDrivers,
+        counter_signals: counterSignals,
+        invalidators,
+        historical_anchors: historicalAnchors,
+        why_this_side: coverageReason,
+        recommended_posture: sportsGrounding?.fixture_resolved
+          ? "Treat this as a grounded lean with live invalidators, not as a full-confidence sports pick."
+          : "Treat this as matchup context only until Crystal can anchor the active fixture window.",
+        scenario_set: [
+          {
+            scenario_id: "scenario_primary",
+            label: previewBinaryContract.winning_side,
+            probability: previewBinaryContract.winning_probability,
+          },
+          {
+            scenario_id: "scenario_secondary",
+            label:
+              previewBinaryContract.winning_side === questionSideA ? questionSideB : questionSideA,
+            probability: Number((1 - previewBinaryContract.winning_probability).toFixed(3)),
+          },
+        ],
+      },
+    };
+    return normalizeDossierStagePayload(payload, {
+      baselineConsensusPack,
+      variableSelectionPack: { selected_variables: [] },
+      normalizedQuery,
+      evidenceQuality,
+    });
+  }
+
+  if (!sportsGrounding?.fixture_resolved || !sportsGrounding?.parity_ready) {
+    const coverageReason = "Crystal could not resolve the sports fixture cleanly enough to publish a grounded match pick.";
+    const payload = {
+      structured_dossier: {
+        query_normalized: safeText(queryText),
+        domain_map: [domainConfig.domain_id],
+        outcome_target: coverageReason,
+        horizon: safeText(normalizedQuery?.horizon?.horizon_id || normalizedQuery?.horizons?.[0]?.horizon_id, "event"),
+        selected_variables: [],
+        ranked_drivers: [],
+        macro_context: [],
+        case_specific_context: [],
+        uncertainty_map: normalizeTextList([safeText(sportsGrounding?.reason), coverageReason], 3),
+        data_quality_map: normalizeTextList(
+          ["sports_provider_required", safeText(sportsGrounding?.overlay_blocker_reason)],
+          3
+        ),
+      },
+      feature_bundle: [],
+      baseline_consensus_pack: baselineConsensusPack || {},
+      raw_prediction: {
+        primary_call: coverageReason,
+        probability_split: null,
+        binary_contract: null,
+        confidence_score: 0.18,
+        key_drivers: [],
+        counter_signals: normalizeTextList([coverageReason], 2),
+        invalidators: normalizeTextList(
+          [
+            "Configure the primary sports provider and resolve the fixture before trusting a sports pick.",
+            "Stand down until the runtime can ground the match with provider data.",
           ],
           3
         ),
@@ -2171,6 +2306,9 @@ function buildQualityAwareFallbackVerdict({ queryText, scorecard = {}, binaryCon
   if (qualityVerdict === "blocked_no_pick") {
     return "Blocked pending sports publish gate";
   }
+  if (qualityVerdict === "grounded_lean") {
+    return safeText(scorecard?.primary_call, "Grounded lean: fixture resolved, edge still partial");
+  }
   if (qualityVerdict === "coverage_gap") {
     return "Coverage gap: hold as watchlist";
   }
@@ -2193,6 +2331,9 @@ function buildQualityAwareRecommendedAction(scorecard = {}) {
   const qualityVerdict = safeText(scorecard?.publication_basis?.quality_verdict);
   if (qualityVerdict === "blocked_no_pick") {
     return "Treat this as a grounded matchup read only. Wait for fresher lineup, injury, and preview confirmation before using it as a publishable sports pick.";
+  }
+  if (qualityVerdict === "grounded_lean") {
+    return "Use this as a grounded lean, not a max-confidence pick. Watch lineups, late injuries, and market divergence before acting more aggressively.";
   }
   if (qualityVerdict === "coverage_gap") {
     return "Treat this as a watchlist item and wait for stronger source coverage before acting with conviction.";
@@ -2360,6 +2501,14 @@ function buildFinalCard({
       : undefined,
     sports_overlay_blocker_reason: safeText(verifiedEvidencePack?.sports_grounding?.overlay_blocker_reason) || undefined,
     sports_publish_gate_ready: verifiedEvidencePack?.sports_grounding?.publish_gate_ready === true,
+    sports_pick_state: safeText(verifiedEvidencePack?.sports_grounding?.sports_pick_state) || undefined,
+    sports_grounded: verifiedEvidencePack?.sports_grounding?.sports_grounded === true,
+    fixture_window_state: safeText(verifiedEvidencePack?.sports_grounding?.fixture_window_state) || undefined,
+    fixture_window_open: verifiedEvidencePack?.sports_grounding?.fixture_window_open === true,
+    sports_extraction_provenance: Array.isArray(verifiedEvidencePack?.sports_grounding?.sports_extraction_provenance)
+      ? verifiedEvidencePack.sports_grounding.sports_extraction_provenance
+      : undefined,
+    sports_confidence_tier: safeText(verifiedEvidencePack?.sports_grounding?.sports_confidence_tier) || undefined,
     market_consensus_strength: Number.isFinite(Number(verifiedEvidencePack?.sports_grounding?.market_consensus_strength))
       ? Number(verifiedEvidencePack.sports_grounding.market_consensus_strength)
       : verifiedEvidencePack?.sports_market_overlay?.market_consensus_strength,

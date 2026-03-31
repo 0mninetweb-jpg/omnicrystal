@@ -33,7 +33,7 @@ const { createCrystalCoreRuntime, __testables } = require("../functions/crystalC
 
 const queries = [
   "Bitcoin next 30 days",
-  "Inter vs Juventus",
+  "Inter Milan vs Roma 2026-04-05",
   "Best time to visit Tokyo in the next 90 days",
   "Cosa passera al referendum costituzionale di marzo in Italia? si o no",
 ];

@@ -254,9 +254,10 @@ $apiFootballState = Get-ProviderState -ProviderStates $providerStates -SourceId 
 
 $rolloutFrozen = ($null -ne $health -and $health.crystalCore.rollout.signed_in_percent -eq 0 -and $health.crystalCore.rollout.guest_percent -eq 0)
 $sportsProbeReady = ($null -ne $parityReport -and [bool]$parityReport.summary.sports_probe_ready)
+$sportsProbabilityProbeReady = ($null -ne $parityReport -and [bool]$parityReport.summary.sports_probability_probe_ready)
 $missingBinaryContractRate = if ($null -ne $parityReport) { [double]$parityReport.summary.missing_binary_contract_rate } else { -1 }
 $winnerMismatchRate = if ($null -ne $parityReport) { [double]$parityReport.summary.binary_winner_mismatch_rate } else { -1 }
-$parityGreen = ($null -ne $parityReport -and $sportsProbeReady -and $missingBinaryContractRate -eq 0 -and $winnerMismatchRate -eq 0)
+$parityGreen = ($null -ne $parityReport -and $sportsProbeReady -and $sportsProbabilityProbeReady -and $missingBinaryContractRate -eq 0 -and $winnerMismatchRate -eq 0)
 $fredAvailable = ($null -ne $fredState -and [bool]$fredState.available)
 $gtfsStaticReady = ($null -ne $gtfsStaticState -and [bool]$gtfsStaticState.available -and [int]$gtfsStaticState.feed_count -gt 0)
 $gtfsRealtimeReady = ($null -ne $gtfsRealtimeState -and [bool]$gtfsRealtimeState.available -and [int]$gtfsRealtimeState.feed_count -gt 0)
@@ -301,7 +302,7 @@ $gateRows = @(
     gate = "Sports parity closed"
     status = Get-GateStatus $parityGreen
     notes = if ($null -ne $parityReport) {
-      "winner_mismatch_rate=$winnerMismatchRate, missing_binary_contract_rate=$missingBinaryContractRate, sports_probe_ready=$sportsProbeReady"
+      "winner_mismatch_rate=$winnerMismatchRate, missing_binary_contract_rate=$missingBinaryContractRate, a29_ready=$sportsProbeReady, b36_ready=$sportsProbabilityProbeReady"
     } else {
       "Parity report not available."
     }
@@ -388,6 +389,7 @@ $report = [ordered]@{
   gates = [ordered]@{
     sports_parity_closed = $parityGreen
     sports_probe_ready = $sportsProbeReady
+    sports_probability_probe_ready = $sportsProbabilityProbeReady
     winner_mismatch_rate = if ($winnerMismatchRate -lt 0) { $null } else { $winnerMismatchRate }
     missing_binary_contract_rate = if ($missingBinaryContractRate -lt 0) { $null } else { $missingBinaryContractRate }
     fred_api_available = $fredAvailable
@@ -553,7 +555,7 @@ if (-not $fredKeyPresent) {
   $markdown += '- `FRED_API_KEY` remains the only hard secret blocker in `functions/.env.omnicrystal` before the final deploy.'
 }
 if (-not $sportsProbeReady) {
-  $markdown += '- Sports parity remains blocked until `Inter vs Juventus` becomes provider-grounded through the TheSportsDB shared path on both local and remote.'
+$markdown += '- Sports parity now evaluates dated fixtures through the TheSportsDB live backbone; generic rivalry queries remain regression checks for grounded holds.'
 }
 if (-not $fredAvailable) {
   $markdown += '- `fred_api` is still not active in runtime, so macro confidence remains below the intended Week 4 baseline.'

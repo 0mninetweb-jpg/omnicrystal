@@ -11,7 +11,7 @@ export interface ForecastUiFilters {
   confidence: ForecastConfidence;
 }
 
-export type ForecastCardState = 'published' | 'limited' | 'coverage_gap';
+export type ForecastCardState = 'published' | 'limited' | 'grounded_lean' | 'coverage_gap';
 
 export interface ForecastResolvedContext {
   query: string;

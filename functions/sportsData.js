@@ -3,6 +3,7 @@ const DEFAULT_THESPORTSDB_BASE_URL = "https://www.thesportsdb.com/api/v1/json";
 const DEFAULT_API_FOOTBALL_BASE_URL = "https://v3.football.api-sports.io";
 const DEFAULT_THESPORTSDB_FREE_KEY = "123";
 const DEFAULT_SPORTS_SEMANTIC_OVERLAY_MODE = "observe";
+const DEFAULT_SPORTS_RELEASE_MODE = "a29_b36_live";
 const googleTrends = require("google-trends-api");
 
 const {
@@ -75,6 +76,16 @@ const SPORTS_SEARCH_ALLOWLIST = [
   { source_id: "sports_search_sky", labels: ["Sky Sports"], domains: ["skysports.com"] },
   { source_id: "sports_search_guardian", labels: ["The Guardian", "Guardian"], domains: ["theguardian.com"] },
   { source_id: "sports_search_football_italia", labels: ["Football Italia"], domains: ["football-italia.net"] },
+];
+
+const SPORTS_BROAD_WEB_BLOCKLIST = [
+  "facebook.com",
+  "instagram.com",
+  "reddit.com",
+  "tiktok.com",
+  "youtube.com",
+  "x.com",
+  "twitter.com",
 ];
 
 const SPORTS_OFFICIAL_DOMAIN_MAP = {
@@ -361,6 +372,24 @@ function getSportsSemanticOverlayMode() {
   return normalizeSportsSemanticOverlayMode(process.env.SPORTS_SEMANTIC_OVERLAY_MODE);
 }
 
+function normalizeSportsReleaseMode(value = "") {
+  const normalized = safeText(value, DEFAULT_SPORTS_RELEASE_MODE).toLowerCase();
+  if (["off", "observe", "a29_live", "a29_b36_live"].includes(normalized)) return normalized;
+  return DEFAULT_SPORTS_RELEASE_MODE;
+}
+
+function getSportsReleaseMode() {
+  return normalizeSportsReleaseMode(process.env.SPORTS_RELEASE_MODE);
+}
+
+function sportsA29LiveEnabled() {
+  return ["a29_live", "a29_b36_live"].includes(getSportsReleaseMode());
+}
+
+function sportsB36LiveEnabled() {
+  return getSportsReleaseMode() === "a29_b36_live";
+}
+
 function safeNumber(value, fallback = null) {
   const num = Number(value);
   return Number.isFinite(num) ? num : fallback;
@@ -376,6 +405,9 @@ function looksLikeSportsMatchQuery(queryText = "") {
   const normalized = normalizeWhitespace(queryText).toLowerCase();
   if (!normalized) return false;
   if (/\b(partit[ae]|calcio|serie a|champions|europa|conference|scommett|risultat[io]|vinc|goal|under|over|1x|x2|segno)\b/.test(normalized)) {
+    return true;
+  }
+  if (/\b(will\s+.+?\s+beat\s+.+|should i back\s+.+|bet on\s+.+|pick\s+.+\s+(?:or|vs?|contro)\s+.+|moneyline|to win)\b/.test(normalized)) {
     return true;
   }
   if (/\b\d{1,2}:\d{2}\b/.test(normalized)) {
@@ -441,6 +473,94 @@ function splitFixtureLabel(label) {
   }
 
   return null;
+}
+
+function buildFixtureCandidateLabel(homeTeam = "", awayTeam = "", date = "") {
+  const left = stripFixtureDateNoise(homeTeam);
+  const right = stripFixtureDateNoise(awayTeam);
+  if (!left || !right) return "";
+  return uniqueStrings([`${left} vs ${right}${date ? ` ${date}` : ""}`, `${left} contro ${right}${date ? ` ${date}` : ""}`])[0] || "";
+}
+
+function isBinaryYesNo(value = "") {
+  const normalized = normalizeSignalText(value);
+  return ["yes", "no", "si", "sì"].includes(normalized);
+}
+
+function parseWillBeatFixture(queryText = "") {
+  const normalized = normalizeWhitespace(queryText);
+  if (!normalized) return null;
+  const match = normalized.match(/\bwill\s+(.+?)\s+beat\s+(.+?)(?:\s+on\b|[?!.]|$)/i);
+  if (!match) return null;
+  const homeTeam = stripFixtureDateNoise(match[1]);
+  const awayTeam = stripFixtureDateNoise(match[2]);
+  if (!homeTeam || !awayTeam) return null;
+  return { homeTeam, awayTeam };
+}
+
+function parseBackOrFixture(queryText = "") {
+  const normalized = normalizeWhitespace(queryText);
+  if (!normalized) return null;
+  const match = normalized.match(/\b(?:back|pick|take)\s+(.+?)\s+(?:or|vs?|contro)\s+(.+?)(?:\s+(?:this|next|on)\b|[?!.]|$)/i);
+  if (!match) return null;
+  const homeTeam = stripFixtureDateNoise(match[1]);
+  const awayTeam = stripFixtureDateNoise(match[2]);
+  if (!homeTeam || !awayTeam) return null;
+  return { homeTeam, awayTeam };
+}
+
+function inferSportsFixtureCandidates(queryText = "", queryPlan = {}) {
+  const date = extractFixtureDate(queryText, queryPlan);
+  const candidates = [];
+  const seen = new Set();
+  const pushCandidate = (label = "") => {
+    const normalized = normalizeWhitespace(label);
+    if (!normalized) return;
+    const key = normalizeSignalText(normalized);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    candidates.push({
+      entity_type: "fixture",
+      label: normalized,
+    });
+  };
+
+  const queryPlanEntities = Array.isArray(queryPlan?.entities)
+    ? queryPlan.entities.filter((entity) => entity?.entity_type === "fixture" || looksLikeFixtureLabel(entity?.label))
+    : [];
+  for (const entity of queryPlanEntities) {
+    pushCandidate(safeText(entity?.label, safeText(entity?.entity_id)));
+  }
+
+  const sideALabel = safeText(queryPlan?.question_side_a);
+  const sideBLabel = safeText(queryPlan?.question_side_b);
+  if (sideALabel && sideBLabel && !isBinaryYesNo(sideALabel) && !isBinaryYesNo(sideBLabel)) {
+    pushCandidate(buildFixtureCandidateLabel(sideALabel, sideBLabel, date));
+  }
+
+  const directSplit = splitFixtureLabel(queryText);
+  if (directSplit) {
+    pushCandidate(buildFixtureCandidateLabel(directSplit.homeTeam, directSplit.awayTeam, date));
+  }
+
+  const parsedBinary = parseWillBeatFixture(queryText) || parseBackOrFixture(queryText);
+  if (parsedBinary) {
+    pushCandidate(buildFixtureCandidateLabel(parsedBinary.homeTeam, parsedBinary.awayTeam, date));
+  }
+
+  const originalQuery = safeText(queryPlan?.original_query);
+  if (originalQuery && originalQuery !== queryText) {
+    const originalSplit = splitFixtureLabel(originalQuery);
+    if (originalSplit) {
+      pushCandidate(buildFixtureCandidateLabel(originalSplit.homeTeam, originalSplit.awayTeam, date));
+    }
+    const originalBinary = parseWillBeatFixture(originalQuery) || parseBackOrFixture(originalQuery);
+    if (originalBinary) {
+      pushCandidate(buildFixtureCandidateLabel(originalBinary.homeTeam, originalBinary.awayTeam, date));
+    }
+  }
+
+  return candidates;
 }
 
 function normalizeProvider(value = "") {
@@ -540,6 +660,7 @@ function getSportsRuntimeHealth() {
     title: config.primaryProviderLabel,
     base_url: config.theSportsDbBaseUrl,
     mode: "free-tier-live",
+    release_mode: getSportsReleaseMode(),
     coverage: ["fixtures", "recent-form", "league-table"],
     enhancers: getSportsProviderStates().filter((provider) => provider.source_id !== config.primarySourceId && provider.available).map((provider) => provider.source_id),
   };
@@ -652,6 +773,7 @@ function getSportsSourceWeight(sourceTier = "") {
   if (sourceTier === "official") return 1.24;
   if (sourceTier === "allowlist_search") return 1.12;
   if (sourceTier === "allowlist_feed") return 1;
+  if (sourceTier === "broad_web") return 0.72;
   if (sourceTier === "gdelt") return 0.82;
   return 1;
 }
@@ -758,6 +880,41 @@ async function fetchGoogleNewsSearchItems(query = "", sourceId = "sports_google_
   } catch (_error) {
     return [];
   }
+}
+
+function isBlockedBroadWebHost(host = "") {
+  const normalized = normalizeSourceHost(host);
+  if (!normalized) return false;
+  return SPORTS_BROAD_WEB_BLOCKLIST.some((blockedHost) => sourceHostMatchesDomain(normalized, blockedHost));
+}
+
+async function fetchSportsBroadWebItems(fixture = {}) {
+  const homeTeam = safeText(fixture?.homeTeamLabel);
+  const awayTeam = safeText(fixture?.awayTeamLabel);
+  if (!homeTeam || !awayTeam) return [];
+  const leagueName = safeText(fixture?.leagueName);
+  const queryDate = safeText(fixture?.queryDate);
+  const querySet = uniqueStrings([
+    `${homeTeam} ${awayTeam} ${leagueName}`.trim(),
+    `${homeTeam} ${awayTeam} preview`.trim(),
+    `${homeTeam} ${awayTeam} lineup injury`.trim(),
+    `${homeTeam} ${awayTeam} team news ${queryDate}`.trim(),
+  ]).slice(0, 4);
+  const results = [];
+  for (const query of querySet) {
+    const items = await fetchGoogleNewsSearchItems(query, "sports_google_news_broad", "broad_web");
+    for (const item of items) {
+      const host = getSourceHost(item);
+      if (!host || isBlockedBroadWebHost(host)) continue;
+      results.push({
+        ...item,
+        source_id: safeText(item.source_id, "sports_google_news_broad"),
+        source_tier: "broad_web",
+      });
+    }
+    if (results.length >= 10) break;
+  }
+  return dedupeSportsSemanticItems(results).slice(0, 10);
 }
 
 function matchesOfficialSource(item = {}, allowedDomains = [], officialLabels = []) {
@@ -1075,7 +1232,9 @@ async function buildSportsMarketOverlay({ db, admin, fetchJson, queryText = "", 
   const isProbabilityMode = resolveDomainId(domainId, GENERAL_FORECAST_DOMAIN) === SPORTS_PROBABILITY_MODE_DOMAIN;
   const sportsbookReadinessState = isProbabilityMode
     ? usedSourceIds.length > 0
-      ? "benchmark_only"
+      ? sportsB36LiveEnabled()
+        ? "probability_mode_live"
+        : "benchmark_only"
       : "market_context_thin"
     : usedSourceIds.length === 0
       ? "forecast_only"
@@ -1178,8 +1337,12 @@ async function buildSportsSemanticOverlay({ fetchJson, queryText = "", fixture =
     officialItems.length + allowlistSearchItems.length < 3
       ? await fetchSportsRssItems(fixture)
       : [];
+  const broadWebItems =
+    officialItems.length + allowlistSearchItems.length + feedItems.length < 5
+      ? await fetchSportsBroadWebItems(fixture)
+      : [];
   const gdeltItems =
-    officialItems.length + allowlistSearchItems.length + feedItems.length < 3
+    officialItems.length + allowlistSearchItems.length + feedItems.length + broadWebItems.length < 3
       ? await fetchSportsGdeltItems(fetchJson, fixture)
       : [];
 
@@ -1188,6 +1351,7 @@ async function buildSportsSemanticOverlay({ fetchJson, queryText = "", fixture =
       .concat(officialItems)
       .concat(allowlistSearchItems)
       .concat(feedItems)
+      .concat(broadWebItems)
       .concat(gdeltItems)
   )
     .map((item) => {
@@ -1206,14 +1370,26 @@ async function buildSportsSemanticOverlay({ fetchJson, queryText = "", fixture =
         source_weight: getSportsSourceWeight(safeText(item.source_tier)),
       };
     })
-    .filter((item) => item.fixture_specific === true && item.entity_alignment >= 0.84)
+    .filter(
+      (item) =>
+        item.fixture_specific === true &&
+        item.entity_alignment >= (safeText(item.source_tier) === "broad_web" ? 0.74 : 0.84)
+    )
     .slice(0, 6);
 
   const sourceCount = snippets.length;
   const entityAlignmentScore = Number(
     clamp01(weightedAverageBy(snippets, (item) => item.entity_alignment, (item) => item.source_weight), 0).toFixed(3)
   );
+  const freshnessCandidates = snippets.filter((item) => Number.isFinite(item.hours_old));
+  const freshAlignedCandidates = freshnessCandidates.filter((item) => item.hours_old <= 72);
   const freshnessHours = weightedAverageBy(
+    freshAlignedCandidates.length ? freshAlignedCandidates : freshnessCandidates,
+    (item) => item.hours_old,
+    (item) => item.source_weight
+  );
+  const staleByCoverage = freshAlignedCandidates.length === 0 && freshnessCandidates.length > 0;
+  const absoluteFreshnessHours = weightedAverageBy(
     snippets.filter((item) => Number.isFinite(item.hours_old)),
     (item) => item.hours_old,
     (item) => item.source_weight
@@ -1243,7 +1419,7 @@ async function buildSportsSemanticOverlay({ fetchJson, queryText = "", fixture =
 
   let blockerReason = "";
   if (sourceCount < 3) blockerReason = "sports_semantic_source_count_thin";
-  else if ((freshnessHours ?? 999) > 72) blockerReason = "sports_semantic_stale";
+  else if (staleByCoverage || (absoluteFreshnessHours ?? 999) > 72) blockerReason = "sports_semantic_stale";
   else if (entityAlignmentScore < 0.72) blockerReason = "sports_semantic_entity_alignment_thin";
   else if (contradictionScore > 0.32) blockerReason = "sports_semantic_conflicted";
 
@@ -1295,6 +1471,8 @@ async function buildSportsSemanticOverlay({ fetchJson, queryText = "", fixture =
     travel_fatigue: travelFatigue,
     motivation_context: motivationContext,
     narrative_consensus: narrativeConsensus,
+    used_source_ids: uniqueStrings(snippets.map((item) => safeText(item.source_id)).filter(Boolean)),
+    extraction_provenance: uniqueStrings(snippets.map((item) => safeText(item.source_tier)).filter(Boolean)),
     notes: uniqueStrings(
       snippets
         .map((item) => safeText(item.title))
@@ -2239,6 +2417,14 @@ function mergeSportsGroundedReadWithOverlay(groundedRead = {}, semanticOverlay =
     price_move_pressure: marketOverlay?.price_move_pressure == null ? null : Number(marketOverlay.price_move_pressure),
     narrative_hype_score: marketOverlay?.narrative_hype_score == null ? null : Number(marketOverlay.narrative_hype_score),
     sportsbook_readiness_state: safeText(marketOverlay?.sportsbook_readiness_state),
+    sports_pick_state: safeText(overlayState?.sports_pick_state),
+    sports_grounded: overlayState?.sports_grounded === true,
+    fixture_window_state: safeText(overlayState?.fixture_window_state),
+    fixture_window_open: overlayState?.fixture_window_open === true,
+    sports_confidence_tier: safeText(overlayState?.sports_confidence_tier),
+    sports_extraction_provenance: Array.isArray(overlayState?.sports_extraction_provenance)
+      ? overlayState.sports_extraction_provenance
+      : [],
   };
 }
 
@@ -2372,19 +2558,7 @@ async function buildSportsForecastContext({ queryText, queryPlan, fetchJson, db,
     SPORTS_MATCH_OUTCOMES_DOMAIN
   );
   const date = extractFixtureDate(queryText, queryPlan);
-  const entities = Array.isArray(queryPlan?.entities)
-    ? queryPlan.entities.filter((entity) => entity?.entity_type === "fixture" || looksLikeFixtureLabel(entity?.label))
-    : [];
-  const fixtureCandidates = entities.length
-    ? entities
-    : looksLikeFixtureLabel(queryText)
-      ? [
-          {
-            entity_type: "fixture",
-            label: safeText(queryText),
-          },
-        ]
-      : [];
+  const fixtureCandidates = inferSportsFixtureCandidates(queryText, queryPlan);
 
   if (!config.configured) {
     return {
@@ -2456,23 +2630,45 @@ async function buildSportsForecastContext({ queryText, queryPlan, fetchJson, db,
       : null;
   const resolvedSportsDomain = resolveDomainId(domainId, GENERAL_FORECAST_DOMAIN);
   const controlledA29Mode = getSportsSemanticOverlayMode() === "a29" && resolvedSportsDomain === SPORTS_MATCH_OUTCOMES_DOMAIN;
-  const fixtureWindowOpen = semanticOverlay?.fixture_window_open !== false;
+  const a29LiveEnabled = resolvedSportsDomain === SPORTS_MATCH_OUTCOMES_DOMAIN && sportsA29LiveEnabled();
+  const b36LiveEnabled = resolvedSportsDomain === SPORTS_PROBABILITY_MODE_DOMAIN && sportsB36LiveEnabled();
+  const sportsGrounded = Boolean(primaryFixture?.resolved && primaryFixture?.grounded_read?.fixture_resolved);
+  const fixtureWindowState = safeText(primaryFixture?.fixtureWindowState, safeText(semanticOverlay?.fixture_window_state, "unanchored"));
+  const fixtureWindowOpen = primaryFixture?.fixtureWindowOpen === true || semanticOverlay?.fixture_window_open === true;
+  const hardWindowHold = fixtureWindowState === "past" || fixtureWindowState === "date_mismatch";
+  const semanticStrong =
+    semanticOverlay?.ready === true ||
+    (semanticOverlay?.enabled === true &&
+      Number(semanticOverlay?.source_count || 0) >= 3 &&
+      Number(semanticOverlay?.entity_alignment_score || 0) >= 0.74 &&
+      Number(semanticOverlay?.contradiction_score || 1) <= 0.34 &&
+      Number(semanticOverlay?.freshness_hours ?? 999) <= 48);
+  const semanticPartial =
+    semanticOverlay?.enabled === true &&
+    Number(semanticOverlay?.source_count || 0) >= 1 &&
+    Number(semanticOverlay?.entity_alignment_score || 0) >= 0.58 &&
+    Number(semanticOverlay?.contradiction_score || 1) <= 0.48;
+  const marketCoherent =
+    marketOverlay?.available === true &&
+    Number(marketOverlay?.market_consensus_strength || 0) >= 0.48 &&
+    Number(marketOverlay?.market_disagreement_score || 1) <= 0.42;
+  const marketHelpful =
+    marketOverlay?.available === true ||
+    Number(marketOverlay?.market_consensus_strength || 0) >= 0.42 ||
+    Number(marketOverlay?.narrative_hype_score || 0) >= 0.58;
   const semanticSupportReady =
     fixtureWindowOpen &&
-    (semanticOverlay?.ready === true ||
-      (semanticOverlay?.enabled === true &&
-        Number(semanticOverlay?.source_count || 0) >= 2 &&
-        Number(semanticOverlay?.entity_alignment_score || 0) >= 0.72 &&
-        Number(semanticOverlay?.contradiction_score || 1) <= 0.34 &&
-        Number(semanticOverlay?.freshness_hours ?? 999) <= 36 &&
-        ((Number(marketOverlay?.market_consensus_strength || 0) >= 0.54 && Number(marketOverlay?.market_disagreement_score || 0) <= 0.38) ||
-          Number(marketOverlay?.narrative_hype_score || 0) >= 0.68)) ||
+    (semanticStrong ||
+      (semanticPartial &&
+        marketCoherent &&
+        Number(semanticOverlay?.freshness_hours ?? 999) <= 48 &&
+        Boolean(primaryFixture?.grounded_read?.parity_ready)) ||
       (controlledA29Mode &&
         semanticOverlay?.enabled === true &&
-        Number(semanticOverlay?.source_count || 0) >= 3 &&
-        Number(semanticOverlay?.entity_alignment_score || 0) >= 0.44 &&
-        Number(semanticOverlay?.contradiction_score || 1) <= 0.28 &&
-        Number(semanticOverlay?.freshness_hours ?? 999) <= 24 &&
+        Number(semanticOverlay?.source_count || 0) >= 2 &&
+        Number(semanticOverlay?.entity_alignment_score || 0) >= 0.68 &&
+        Number(semanticOverlay?.contradiction_score || 1) <= 0.38 &&
+        Number(semanticOverlay?.freshness_hours ?? 999) <= 36 &&
         Boolean(primaryFixture?.grounded_read?.parity_ready)));
   let overlayBlockerReason = safeText(semanticOverlay?.blocker_reason);
   if (semanticSupportReady) {
@@ -2489,23 +2685,78 @@ async function buildSportsForecastContext({ queryText, queryPlan, fetchJson, db,
       0.12
     ).toFixed(3)
   );
-  const publishGateReady =
-    semanticSupportReady &&
-    controlledA29Mode;
+  const parityReady = Boolean(primaryFixture?.grounded_read?.parity_ready);
+  const a29PublishableControlled =
+    a29LiveEnabled &&
+    sportsGrounded &&
+    parityReady &&
+    fixtureWindowOpen &&
+    (semanticSupportReady || (semanticPartial && marketHelpful));
+  const a29PublishableFull = a29PublishableControlled && semanticStrong && (marketCoherent || marketOverlay?.available !== true);
+  const b36PublishableControlled =
+    b36LiveEnabled &&
+    sportsGrounded &&
+    parityReady &&
+    fixtureWindowOpen &&
+    semanticPartial &&
+    marketHelpful;
+  const b36PublishableFull = b36PublishableControlled && semanticStrong && marketCoherent;
+  let sportsPickState = "hold";
+  if (sportsGrounded) {
+    if (a29PublishableFull || b36PublishableFull) {
+      sportsPickState = "publishable_full";
+    } else if (a29PublishableControlled || b36PublishableControlled) {
+      sportsPickState = "publishable_controlled";
+    } else if (!hardWindowHold) {
+      sportsPickState = "grounded_lean";
+    }
+  }
+  const publishGateReady = sportsPickState === "publishable_controlled" || sportsPickState === "publishable_full";
+  if (!overlayBlockerReason && sportsPickState === "grounded_lean" && !fixtureWindowOpen) {
+    overlayBlockerReason = "sports_fixture_window_not_live";
+  }
+  if (!overlayBlockerReason && sportsPickState === "grounded_lean") {
+    overlayBlockerReason = semanticPartial ? "sports_publish_gate_partial" : "sports_semantic_overlay_pending";
+  }
+  const sportsConfidenceTier =
+    sportsPickState === "publishable_full"
+      ? "high"
+      : sportsPickState === "publishable_controlled"
+        ? "controlled"
+        : sportsPickState === "grounded_lean"
+          ? "lean"
+          : "hold";
+  const extractionProvenance = uniqueStrings(
+    []
+      .concat(Array.isArray(semanticOverlay?.extraction_provenance) ? semanticOverlay.extraction_provenance : [])
+      .concat(Array.isArray(marketOverlay?.used_source_ids) ? marketOverlay.used_source_ids : [])
+      .concat(primaryFixture?.used_source_ids || [])
+  );
   const primaryGroundedRead = mergeSportsGroundedReadWithOverlay(primaryFixture?.grounded_read || null, semanticOverlay || null, marketOverlay || null, {
-    semantic_ready: semanticSupportReady,
+    semantic_ready: semanticStrong,
     overlay_confidence: overlayConfidence,
     overlay_blocker_reason: overlayBlockerReason,
     publish_gate_ready: publishGateReady,
+    sports_pick_state: sportsPickState,
+    sports_grounded: sportsGrounded,
+    fixture_window_state: fixtureWindowState,
+    fixture_window_open: fixtureWindowOpen,
+    sports_confidence_tier: sportsConfidenceTier,
+    sports_extraction_provenance: extractionProvenance,
   });
-  const parityReady = Boolean(primaryGroundedRead?.parity_ready);
-  const semanticReady = Boolean(semanticSupportReady);
+  const semanticReady = Boolean(semanticStrong);
   const sportsbookReadinessState =
     resolvedSportsDomain === SPORTS_PROBABILITY_MODE_DOMAIN
-      ? safeText(marketOverlay?.sportsbook_readiness_state, "benchmark_only")
+      ? publishGateReady
+        ? "probability_mode_live"
+        : sportsPickState === "grounded_lean"
+          ? "probability_mode_preview"
+          : "benchmark_only"
       : publishGateReady
         ? "forecast_betting_aware"
-        : safeText(marketOverlay?.sportsbook_readiness_state, semanticReady ? "forecast_context_only" : "forecast_only");
+        : sportsPickState === "grounded_lean"
+          ? "forecast_context_only"
+          : safeText(marketOverlay?.sportsbook_readiness_state, semanticReady ? "forecast_context_only" : "forecast_only");
   const semanticContextLines =
     semanticOverlay?.enabled
       ? [
@@ -2517,6 +2768,7 @@ async function buildSportsForecastContext({ queryText, queryPlan, fetchJson, db,
           semanticOverlay.contradiction_score != null ? `Contradiction score: ${semanticOverlay.contradiction_score}.` : "",
           safeText(semanticOverlay.fixture_window_state) ? `Fixture window: ${safeText(semanticOverlay.fixture_window_state).replace(/_/g, " ")}.` : "",
           semanticOverlay.narrative_consensus ? `Narrative consensus: ${semanticOverlay.narrative_consensus}.` : "",
+          semanticOverlay.extraction_provenance?.length ? `Provenance: ${semanticOverlay.extraction_provenance.join(", ")}.` : "",
           ...(Array.isArray(semanticOverlay.notes) ? semanticOverlay.notes.slice(0, 3).map((note) => `- ${note}`) : []),
         ].filter(Boolean)
       : [];
@@ -2544,6 +2796,7 @@ async function buildSportsForecastContext({ queryText, queryPlan, fetchJson, db,
       fixtures
         .flatMap((fixture) => fixture?.used_source_ids || [])
         .concat(semanticOverlay?.enabled ? ["sports_semantic_overlay"] : [])
+        .concat(Array.isArray(semanticOverlay?.used_source_ids) ? semanticOverlay.used_source_ids : [])
         .concat(Array.isArray(marketOverlay?.used_source_ids) ? marketOverlay.used_source_ids : [])
     ),
     parity_ready: parityReady,
@@ -2560,6 +2813,12 @@ async function buildSportsForecastContext({ queryText, queryPlan, fetchJson, db,
     price_move_pressure: marketOverlay?.price_move_pressure == null ? null : Number(marketOverlay.price_move_pressure),
     narrative_hype_score: marketOverlay?.narrative_hype_score == null ? null : Number(marketOverlay.narrative_hype_score),
     sportsbook_readiness_state: sportsbookReadinessState,
+    pick_state: sportsPickState,
+    grounded: sportsGrounded,
+    fixture_window_state: fixtureWindowState,
+    fixture_window_open: fixtureWindowOpen,
+    sports_confidence_tier: sportsConfidenceTier,
+    sports_extraction_provenance: extractionProvenance,
     fixtures,
     notes: uniqueStrings(
       fixtures
@@ -2567,10 +2826,11 @@ async function buildSportsForecastContext({ queryText, queryPlan, fetchJson, db,
         .map((fixture) => `${fixture.label}: ${safeText(fixture.note)}`)
         .concat(Array.isArray(semanticOverlay?.notes) ? semanticOverlay.notes : [])
         .concat(Array.isArray(marketOverlay?.notes) ? marketOverlay.notes : [])
+        .concat(sportsPickState === "grounded_lean" ? ["Crystal grounded the fixture and can show a lean, but the live sports evidence is still only partial."] : [])
     ).slice(0, 6),
     contextText:
       contextLines.length > 0 || semanticContextLines.length > 0 || marketContextLines.length > 0
-        ? ["SPORTS DATA", ...contextLines, ...semanticContextLines, ...marketContextLines].join("\n")
+        ? ["SPORTS DATA", `Sports pick state: ${sportsPickState}.`, ...contextLines, ...semanticContextLines, ...marketContextLines].join("\n")
         : "",
     grounded_read: primaryGroundedRead,
     signals: Array.isArray(primaryGroundedRead?.signals) ? primaryGroundedRead.signals : [],
@@ -2588,6 +2848,10 @@ module.exports = {
   getSportsConfig,
   getSportsProviderStates,
   getSportsSemanticOverlayMode,
-  isSportsDomain: (domain) => resolveDomainId(safeText(domain), "") === SPORTS_MATCH_OUTCOMES_DOMAIN,
+  getSportsReleaseMode,
+  isSportsDomain: (domain) => {
+    const resolved = resolveDomainId(safeText(domain), "");
+    return resolved === SPORTS_MATCH_OUTCOMES_DOMAIN || resolved === SPORTS_PROBABILITY_MODE_DOMAIN;
+  },
   looksLikeSportsMatchQuery,
 };

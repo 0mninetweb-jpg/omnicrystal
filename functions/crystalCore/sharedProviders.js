@@ -615,6 +615,19 @@ function buildRequiredSourcesForQuery({
   const acledLive = isLiveProviderAvailable("acled");
   const privateListingLive = isLiveProviderAvailable("private_listing_feed");
 
+  if (sportsLike) {
+    return {
+      geo_like: false,
+      mobility_like: false,
+      travel_like: false,
+      macro_public_like: false,
+      energy_like: false,
+      environment_like: false,
+      required_sources: ["thesportsdb_public"],
+      optional_sources: ["api_football_optional", "polymarket_public", "google_trends"],
+    };
+  }
+
   if (
     weatherBackboneDomain ||
     /\b(weather|rain|storm|temperature|climate|hazard|flood|drought|seasonal|agriculture|wildfire)\b|water stress|crop stress|crop yield/.test(corpus)
@@ -855,11 +868,6 @@ function buildRequiredSourcesForQuery({
     if (openskyLive && /\b(travel|visit|tourism|flight|airport)\b/.test(corpus)) {
       optionalSources.push("opensky");
     }
-  }
-
-  if (sportsLike) {
-    requiredSources.push("thesportsdb_public");
-    optionalSources.push("api_football_optional", "polymarket_public", "google_trends");
   }
 
   return {

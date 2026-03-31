@@ -32,6 +32,7 @@ const {
   SPORTS_MATCH_OUTCOMES_DOMAIN,
   SPORTS_FIXTURE_CARD_TYPE,
   buildSportsForecastContext,
+  getSportsReleaseMode,
   getSportsSemanticOverlayMode,
   getSportsRuntimeHealth,
   isSportsDomain,
@@ -74,6 +75,7 @@ const STRIPE_SECRET_KEY = defineSecret("STRIPE_SECRET_KEY");
 const STRIPE_WEBHOOK_SECRET = defineSecret("STRIPE_WEBHOOK_SECRET");
 
 const SUPPORTED_DOMAINS = Array.from(new Set([GENERAL_FORECAST_DOMAIN, ...CATALOG_DOMAIN_IDS]));
+const SPORTS_PROBABILITY_MODE_DOMAIN = "B.3.6.sports_outcomes_probability_mode";
 
 if (!admin.apps.length) {
   admin.initializeApp();
@@ -206,7 +208,8 @@ function createCardCacheKey(queryText, queryPlan = {}, engine = "standard") {
         ? queryPlan.entities.map((entity) => `${entity?.entity_type || "entity"}:${entity?.label || entity?.entity_id || ""}`)
         : [],
       sportsSemanticOverlayMode: sportsLikeQuery ? getSportsSemanticOverlayMode() : "",
-      sportsCacheVersion: sportsLikeQuery ? "sports-v1.5" : "",
+      sportsReleaseMode: sportsLikeQuery ? getSportsReleaseMode() : "",
+      sportsCacheVersion: sportsLikeQuery ? "sports-v1.7" : "",
     })
   );
 }
@@ -2986,22 +2989,52 @@ Return an object with:
 - supporting_domains[]`;
 }
 
-function buildSportsQueryPlanPrompt(queryText) {
+function isSportsProbabilityQuery(queryText = "") {
+  const normalized = safeText(queryText).trim().toLowerCase();
+  if (!normalized) return false;
+  return /\b(will\s+.+?\s+beat\s+.+|should i back|bet on|moneyline|to win|pick\s+.+\s+(?:or|vs?|versus|contro)\s+.+)\b/.test(
+    normalized
+  );
+}
+
+function inferSportsTargetDomain(queryText = "", queryPlan = {}) {
+  const existingDomain = resolveDomainId(
+    safeText(queryPlan?.primary_domain_id || queryPlan?.domain || queryPlan?.domain_id),
+    GENERAL_FORECAST_DOMAIN
+  );
+  if (existingDomain === SPORTS_PROBABILITY_MODE_DOMAIN) {
+    return SPORTS_PROBABILITY_MODE_DOMAIN;
+  }
+  return isSportsProbabilityQuery(safeText(queryText || queryPlan?.original_query))
+    ? SPORTS_PROBABILITY_MODE_DOMAIN
+    : SPORTS_MATCH_OUTCOMES_DOMAIN;
+}
+
+function buildSportsQueryPlanPrompt(queryText, targetDomain = SPORTS_MATCH_OUTCOMES_DOMAIN) {
+  const probabilityMode = targetDomain === SPORTS_PROBABILITY_MODE_DOMAIN;
   return `Convert the following sports question into a Crystal B2C QueryPlan JSON object.
 
 Query: "${queryText}"
 
 Rules:
-- domain_id must be exactly "${SPORTS_MATCH_OUTCOMES_DOMAIN}".
+- domain_id must be exactly "${targetDomain}".
 - card_types must include "${SPORTS_FIXTURE_CARD_TYPE}".
 - Each match must be its own entity with entity_type "fixture".
 - Each fixture label must use the format "Home Team vs Away Team".
 - If the user lists a matchday date, reflect it in the horizon with "7d" when the matches are close, otherwise "30d".
+- intent_shape must be "binary_outcome".
+- resolution_frame must be "event".
+- When the wording is probabilistic or asks who to back, preserve question_side_a and question_side_b for a binary sports contract.
+- ${probabilityMode ? 'This is the sports probability mode, so keep the framing about who wins the matchup and preserve the binary sides.' : 'This is the sports matchup forecast route, so keep the framing grounded on the fixture itself.'}
 - mode.type must be "predict_only".
 
 Return JSON only with:
 - plan_version
 - domain_id
+- question_side_a
+- question_side_b
+- intent_shape
+- resolution_frame
 - mode.type
 - entities[]
 - horizons[]
@@ -3059,7 +3092,8 @@ Restituisci un oggetto con almeno questi campi:
   };
 }
 
-function buildSportsForecastPayload({ queryText, queryPlan, contextString, sportsContext }) {
+function buildSportsForecastPayload({ queryText, queryPlan, contextString, sportsContext, targetDomain = SPORTS_MATCH_OUTCOMES_DOMAIN }) {
+  const probabilityMode = targetDomain === SPORTS_PROBABILITY_MODE_DOMAIN;
   return {
     systemInstruction: `Sei Crystal, un motore predittivo editoriale per previsioni sportive.
 Restituisci solo JSON valido.
@@ -3075,16 +3109,17 @@ ${sportsContext.contextText || "SPORTS DATA\nNo structured sports data is availa
 
 Genera una CrystalCard sports con queste regole:
 1. card_type deve essere "${SPORTS_FIXTURE_CARD_TYPE}".
-2. domain deve essere "${SPORTS_MATCH_OUTCOMES_DOMAIN}".
+2. domain deve essere "${targetDomain}".
 3. verdict: 2-4 frasi con il quadro generale e i segnali più forti.
 4. summary: una sintesi asciutta, senza marketing copy.
 5. ranked_list: massimo 5 fixture ordinate per convinzione, con note concrete.
 6. fixture_reads: una riga per ogni partita, con label, primary_call, confidence, rationale, evidence[] e caution se serve.
 7. drivers: 3-5 driver reali e sportivi, niente etichette generiche.
 8. trust_layer: esplicita se il dato e parziale o incompleto.
-9. prediction_market_frame deve restare nullo se non hai un mercato esterno chiaro.
+9. ${probabilityMode ? "Se il matchup e grounded, restituisci anche probability_split e binary_contract chiari; niente staking, bankroll o imperative betting language." : "prediction_market_frame deve restare nullo se non hai un mercato esterno chiaro."}
 10. Non includere narrativa geopolitica o WorldSim nel verdetto principale.
 11. Aggiungi what_to_watch, evidence_drawer, card_state e version_id.
+12. ${probabilityMode ? "Usa un framing forecast-first, betting-aware: indica il lato favorito, la probabilita, cosa puo far saltare il lean, ma non dire mai 'bet this now'." : "Se la confidence non e piena ma il matchup e grounded, puoi restituire un lean controllato invece di una scusa generica."}
 
 Restituisci almeno:
 - card_id
@@ -3103,17 +3138,63 @@ Restituisci almeno:
 - drivers
 - what_to_watch
 - evidence_drawer
-- trust_layer`,
+- trust_layer
+${probabilityMode ? "- probability_split\n- binary_contract\n- invalidators" : ""}`,
   };
 }
 
 function applySportsPublishGateToCardPayload(payload = {}, sportsContext = {}, queryPlan = {}) {
   const groundedRead = sportsContext?.grounded_read || {};
-  const publishGateReady = sportsContext?.publish_gate_ready === true;
+  const targetDomain = inferSportsTargetDomain(safeText(queryPlan?.original_query), queryPlan);
+  const sportsPickState = safeText(
+    sportsContext?.pick_state || groundedRead?.sports_pick_state,
+    groundedRead?.fixture_resolved ? "grounded_lean" : "hold"
+  );
+  const grounded = Boolean(
+    sportsContext?.grounded === true ||
+      groundedRead?.sports_grounded === true ||
+      groundedRead?.fixture_resolved
+  );
+  const publishGateReady =
+    sportsContext?.publish_gate_ready === true ||
+    sportsPickState === "publishable_controlled" ||
+    sportsPickState === "publishable_full";
   const blockerReason = safeText(sportsContext?.overlay_blocker_reason, "sports_semantic_overlay_pending");
+  const fixtureWindowState = safeText(
+    sportsContext?.fixture_window_state || groundedRead?.fixture_window_state,
+    grounded ? "resolved" : "unresolved"
+  );
+  const fixtureWindowOpen = sportsContext?.fixture_window_open === true || groundedRead?.fixture_window_open === true;
+  const confidenceTier = safeText(
+    sportsContext?.sports_confidence_tier || groundedRead?.sports_confidence_tier,
+    publishGateReady ? "controlled" : grounded ? "lean" : "hold"
+  );
+  const extractionProvenance = uniqueStrings(
+    []
+      .concat(Array.isArray(sportsContext?.sports_extraction_provenance) ? sportsContext.sports_extraction_provenance : [])
+      .concat(Array.isArray(groundedRead?.sports_extraction_provenance) ? groundedRead.sports_extraction_provenance : [])
+      .concat(Array.isArray(sportsContext?.semantic_overlay?.extraction_provenance) ? sportsContext.semantic_overlay.extraction_provenance : [])
+  );
+  const summaryByState =
+    sportsPickState === "publishable_full"
+      ? safeText(payload?.summary, "Crystal grounded the fixture and the current sports evidence is strong enough to publish the full read.")
+      : sportsPickState === "publishable_controlled"
+        ? safeText(payload?.summary, "Crystal grounded the fixture and can publish a controlled sports read with live invalidators.")
+        : grounded
+          ? "Crystal grounded the fixture and can show a current lean, but the sports evidence is still partial."
+          : "Crystal could not resolve the sports fixture cleanly enough to publish a grounded match pick.";
+  const verdictByState =
+    sportsPickState === "publishable_full"
+      ? safeText(payload?.verdict, "Publishable sports read")
+      : sportsPickState === "publishable_controlled"
+        ? safeText(payload?.verdict, "Controlled sports read")
+        : grounded
+          ? "Grounded sports lean"
+          : "Hold pending fixture resolution";
   const coverageNotes = uniqueStrings([
     groundedRead?.fixture_resolved ? "Crystal already grounded the matchup with TheSportsDB." : "",
-    publishGateReady ? "" : `The sports publish gate is still blocked because ${blockerReason.replace(/_/g, " ")}.`,
+    grounded && !publishGateReady ? `The sports read is still partial because ${blockerReason.replace(/_/g, " ")}.` : "",
+    fixtureWindowState ? `Fixture window: ${fixtureWindowState.replace(/_/g, " ")}.` : "",
     safeText(groundedRead?.reason),
     ...normalizeTextList(groundedRead?.invalidators, 3),
   ]).slice(0, 4);
@@ -3123,18 +3204,49 @@ function applySportsPublishGateToCardPayload(payload = {}, sportsContext = {}, q
   const howToRaiseConfidence = uniqueStrings([
     "Use explicit team names and, when possible, the match date or competition.",
     "Re-run closer to kickoff so lineup, injury, and preview coverage can thicken.",
-    publishGateReady ? "" : "Treat this as a grounded matchup read until the sports publish gate is fully ready.",
+    publishGateReady ? "" : "Treat this as a grounded matchup read until the live sports evidence thickens further.",
   ]).slice(0, 4);
+  const publicationState = publishGateReady ? "published" : grounded ? "limited" : "blocked";
+  const fallbackBinaryContract =
+    targetDomain === SPORTS_PROBABILITY_MODE_DOMAIN && groundedRead?.question_side_a && groundedRead?.question_side_b
+      ? buildBinaryContract(
+          {
+            question_side_a: safeText(groundedRead?.question_side_a),
+            question_side_b: safeText(groundedRead?.question_side_b),
+            winning_side: safeText(groundedRead?.winning_side),
+            winning_probability: Number.isFinite(Number(groundedRead?.winning_probability))
+              ? Number(groundedRead.winning_probability)
+              : null,
+            flip_conditions: normalizeTextList(groundedRead?.invalidators, 4),
+          },
+          {
+            question_side_a: safeText(groundedRead?.question_side_a),
+            question_side_b: safeText(groundedRead?.question_side_b),
+          },
+          null,
+          safeText(payload?.summary || payload?.verdict),
+          {
+            fallbackProbability: Number.isFinite(Number(groundedRead?.winning_probability))
+              ? Number(groundedRead.winning_probability)
+              : null,
+            publicationState,
+            confidenceScore: Number.isFinite(Number(sportsContext?.overlay_confidence))
+              ? Number(sportsContext.overlay_confidence)
+              : 0.58,
+          }
+        )
+      : null;
+  const binaryContract = payload?.binary_contract || fallbackBinaryContract || null;
+  const probabilitySplit =
+    payload?.probability_split ||
+    (binaryContract ? buildCompatibleProbabilitySplit(binaryContract) : null);
 
   return {
     ...payload,
-    card_state: publishGateReady ? safeText(payload?.card_state, "published") : "blocked",
-    summary: publishGateReady
-      ? safeText(payload?.summary)
-      : "Crystal has the matchup grounded, but the sports semantic publish gate is not closed yet for a responsible pick.",
-    verdict: publishGateReady
-      ? safeText(payload?.verdict)
-      : "Blocked pending sports semantic publish gate",
+    domain: targetDomain,
+    card_state: publicationState,
+    summary: summaryByState,
+    verdict: verdictByState,
     what_to_watch: whatToWatch,
     how_to_raise_confidence: howToRaiseConfidence,
     counter_signals: uniqueStrings(
@@ -3146,12 +3258,22 @@ function applySportsPublishGateToCardPayload(payload = {}, sportsContext = {}, q
     evidence_drawer: {
       ...(payload?.evidence_drawer || {}),
       coverage_notes: coverageNotes,
-      gating_reason: publishGateReady ? safeText(payload?.evidence_drawer?.gating_reason, "published") : "blocked_by_sports_publish_gate",
+      gating_reason: publishGateReady
+        ? safeText(payload?.evidence_drawer?.gating_reason, "published")
+        : grounded
+          ? "grounded_lean"
+          : "blocked_by_sports_publish_gate",
     },
     trust_layer: {
       ...(payload?.trust_layer || {}),
-      data_sufficiency_flag: publishGateReady ? safeText(payload?.trust_layer?.data_sufficiency_flag, "partial") : "partial",
+      data_sufficiency_flag: publishGateReady
+        ? safeText(payload?.trust_layer?.data_sufficiency_flag, "sufficient")
+        : grounded
+          ? "partial"
+          : "insufficient",
     },
+    probability_split: probabilitySplit,
+    binary_contract: binaryContract,
     sports_grounding: {
       provider_required: true,
       provider_configured: Boolean(sportsContext?.provider_configured ?? sportsContext?.configured),
@@ -3182,9 +3304,21 @@ function applySportsPublishGateToCardPayload(payload = {}, sportsContext = {}, q
       counter_signals: normalizeTextList(groundedRead?.counter_signals, 4),
       invalidators: normalizeTextList(groundedRead?.invalidators, 4),
       reason: safeText(groundedRead?.reason),
+      sports_pick_state: sportsPickState,
+      sports_grounded: grounded,
+      fixture_window_state: fixtureWindowState,
+      fixture_window_open: fixtureWindowOpen,
+      sports_confidence_tier: confidenceTier,
+      sports_extraction_provenance: extractionProvenance,
     },
     sports_semantic_overlay: sportsContext?.semantic_overlay || null,
     sports_market_overlay: sportsContext?.market_overlay || null,
+    sports_pick_state: sportsPickState,
+    sports_grounded: grounded,
+    fixture_window_state: fixtureWindowState,
+    fixture_window_open: fixtureWindowOpen,
+    sports_extraction_provenance: extractionProvenance,
+    sports_confidence_tier: confidenceTier,
     sports_semantic_ready: sportsContext?.semantic_ready === true,
     sports_overlay_confidence: Number.isFinite(Number(sportsContext?.overlay_confidence)) ? Number(sportsContext.overlay_confidence) : null,
     sports_overlay_blocker_reason: blockerReason,
@@ -3207,18 +3341,19 @@ function applySportsPublishGateToCardPayload(payload = {}, sportsContext = {}, q
 
 async function compileQuery(queryText, options = {}) {
   if (looksLikeSportsMatchQuery(queryText)) {
+    const targetDomain = inferSportsTargetDomain(queryText);
     const payload = await withRetry(() =>
       llmRuntime.generateJson({
         modelKind: "query",
         temperature: 0,
         systemInstruction:
           "You convert a sports question into a Crystal B2C QueryPlan JSON object. Return JSON only. Use the sports domain and one fixture entity per match.",
-        prompt: buildSportsQueryPlanPrompt(queryText),
+        prompt: buildSportsQueryPlanPrompt(queryText, targetDomain),
       })
     );
 
     const normalizedSportsPlan = normalizeQueryPlanPayload(payload, {
-      fallbackDomain: SPORTS_MATCH_OUTCOMES_DOMAIN,
+      fallbackDomain: targetDomain,
       defaultCardType: SPORTS_FIXTURE_CARD_TYPE,
       defaultEntityType: "fixture",
       queryText,
@@ -3227,8 +3362,8 @@ async function compileQuery(queryText, options = {}) {
     });
     return {
       ...normalizedSportsPlan,
-      primary_domain_id: SPORTS_MATCH_OUTCOMES_DOMAIN,
-      domain_id: SPORTS_MATCH_OUTCOMES_DOMAIN,
+      primary_domain_id: targetDomain,
+      domain_id: targetDomain,
       card_types: [{ card_type_id: SPORTS_FIXTURE_CARD_TYPE }],
     };
   }
@@ -3266,9 +3401,31 @@ async function predict(queryText, queryPlan, userContext, options = {}) {
           asOfUtc: options?.asOfUtc,
         })
       : queryPlan;
+  const sportsLikeQuery = looksLikeSportsMatchQuery(queryText);
+  if (sportsLikeQuery) {
+    const sportsDomain = inferSportsTargetDomain(queryText, queryPlan || {});
+    queryPlan = normalizeQueryPlanPayload(
+      {
+        ...(queryPlan || {}),
+        primary_domain_id: sportsDomain,
+        domain_id: sportsDomain,
+        intent_shape: safeText(queryPlan?.intent_shape, "binary_outcome"),
+        resolution_frame: safeText(queryPlan?.resolution_frame, "event"),
+        card_types: [{ card_type_id: SPORTS_FIXTURE_CARD_TYPE }],
+      },
+      {
+        fallbackDomain: sportsDomain,
+        defaultCardType: SPORTS_FIXTURE_CARD_TYPE,
+        defaultEntityType: "fixture",
+        queryText,
+        timeZone: options?.timeZone,
+        asOfUtc: options?.asOfUtc,
+      }
+    );
+  }
   const domain = resolveDomainId(queryPlan?.primary_domain_id || queryPlan?.domain || queryPlan?.domain_id || "");
   const domainConfig = getDomain(domain);
-  const sportsForecast = isSportsDomain(domain);
+  const sportsForecast = isSportsDomain(domain) || sportsLikeQuery;
   const city =
     queryPlan?.filters?.location ||
     queryPlan?.entities?.find((entity) => entity.entity_type === "city" || entity.entity_type === "location")?.label ||
@@ -3341,6 +3498,7 @@ CONTESTO UTENTE:
       queryPlan,
       contextString,
       sportsContext,
+      targetDomain: domain,
     });
 
     const payload = await withRetry(() =>

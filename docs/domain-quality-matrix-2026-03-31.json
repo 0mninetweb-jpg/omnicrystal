@@ -1,44 +1,36 @@
 {
-  "generated_at": "2026-03-31T13:05:44.326Z",
+  "generated_at": "2026-03-31T16:57:40.927Z",
   "summary": {
     "total_domains": 43,
     "total_rows": 86,
-    "top1_hit_rate": 0.9302,
+    "top1_hit_rate": 0.9651,
     "top3_miss_count": 0,
     "silent_general_fallback_count": 0,
-    "publishable_canonical_domains": 42,
-    "domains_with_blocker_reason": 1,
-    "ready_domain_count": 42,
+    "publishable_canonical_domains": 43,
+    "domains_with_blocker_reason": 0,
+    "ready_domain_count": 43,
     "provider_gap_domain_count": 0,
-    "quality_follow_up_domain_count": 1,
+    "quality_follow_up_domain_count": 0,
     "thin_evidence_coverage_count": 0,
-    "edge_publishable_count": 41,
-    "edge_quality_follow_up_count": 1,
-    "edge_top1_hit_rate": 0.907,
+    "edge_publishable_count": 42,
+    "edge_quality_follow_up_count": 0,
+    "edge_top1_hit_rate": 0.9302,
     "edge_blocker_reason_counts": [
       {
         "reason": "none",
-        "count": 42
-      },
-      {
-        "reason": "provider_required_no_pick",
-        "count": 1
+        "count": 43
       }
     ],
     "edge_thin_evidence_coverage_count": 0,
     "edge_thin_signal_convergence_count": 0,
     "edge_directional_signal_not_publish_ready_count": 0,
-    "edge_provider_required_no_pick_count": 1,
+    "edge_provider_required_no_pick_count": 0,
     "rows_with_registry_only_sources": 8,
-    "weak_domain_count": 1,
+    "weak_domain_count": 0,
     "blocker_reason_counts": [
       {
         "reason": "none",
-        "count": 42
-      },
-      {
-        "reason": "provider_required_no_pick",
-        "count": 1
+        "count": 43
       }
     ],
     "week1_baseline": {
@@ -57,8 +49,8 @@
     },
     "week1_delta": {
       "baseline_date": "2026-03-28",
-      "top1_hit_rate_delta": 0.3402,
-      "publishable_canonical_domains_delta": 38,
+      "top1_hit_rate_delta": 0.3751,
+      "publishable_canonical_domains_delta": 39,
       "provider_gap_domain_count_delta": -30,
       "silent_general_fallback_delta": 0
     },
@@ -79,8 +71,8 @@
     },
     "batch3_delta": {
       "baseline_date": "2026-03-28",
-      "top1_hit_rate_delta": 0.2202,
-      "publishable_canonical_domains_delta": 10,
+      "top1_hit_rate_delta": 0.2551,
+      "publishable_canonical_domains_delta": 11,
       "thin_evidence_coverage_count_delta": -10,
       "provider_gap_domain_count_delta": 0,
       "silent_general_fallback_delta": 0
@@ -106,13 +98,13 @@
     },
     "week2_delta": {
       "baseline_date": "2026-03-28",
-      "edge_publishable_count_delta": 39,
-      "edge_quality_follow_up_count_delta": -40,
-      "edge_top1_hit_rate_delta": 0.2791,
+      "edge_publishable_count_delta": 40,
+      "edge_quality_follow_up_count_delta": -41,
+      "edge_top1_hit_rate_delta": 0.3023,
       "thin_evidence_coverage_count_delta": -15,
       "thin_signal_convergence_count_delta": -19,
       "directional_signal_not_publish_ready_count_delta": -3,
-      "provider_required_no_pick_count_delta": -1
+      "provider_required_no_pick_count_delta": -2
     },
     "week3_baseline": {
       "date": "2026-03-28",
@@ -137,10 +129,10 @@
     },
     "week3_delta": {
       "baseline_date": "2026-03-28",
-      "publishable_canonical_domains_delta": 0,
-      "edge_publishable_count_delta": 26,
-      "edge_quality_follow_up_count_delta": -26,
-      "edge_top1_hit_rate_delta": 0.1861,
+      "publishable_canonical_domains_delta": 1,
+      "edge_publishable_count_delta": 27,
+      "edge_quality_follow_up_count_delta": -27,
+      "edge_top1_hit_rate_delta": 0.2093,
       "edge_thin_evidence_coverage_count_delta": -7,
       "edge_thin_signal_convergence_count_delta": -13,
       "provider_gap_domain_count_delta": 0,
@@ -149,15 +141,13 @@
     "batch2_gate_verdict": "week1_batch2_on_track",
     "batch3_gate_verdict": "week1_batch3_on_track",
     "week2_gate_verdict": "week2_provider_depth_on_track",
-    "week3_gate_verdict": "week3_needs_more_edge_depth",
+    "week3_gate_verdict": "week3_edge_predictive_lift_ready",
     "verdict": "sprint_matrix_ready"
   },
   "week4_status": {
     "rollout_bucket": "0/0",
-    "canary_posture": "defer_until_after_prediction_quality_sprint",
-    "hard_blockers": [
-      "A.29.sports_performance_and_outcomes"
-    ]
+    "canary_posture": "sports_feature_flag_candidate",
+    "hard_blockers": []
   },
   "domains": [
     {
@@ -2357,7 +2347,7 @@
             "top3": [
               "A.9.travel_flows_and_disruption",
               "B.3.7.travel_personal_outcomes",
-              "A.21.trade_supply_and_disruption_signals"
+              "B.3.6.sports_outcomes_probability_mode"
             ],
             "top3_hit": true,
             "silent_general_fallback": false
@@ -3159,8 +3149,8 @@
             "top_domain": "B.3.8.personal_decisions_and_tradeoffs",
             "top3": [
               "B.3.8.personal_decisions_and_tradeoffs",
-              "A.12.housing_and_real_estate_signals",
-              "B.3.3.work_and_career_outcomes"
+              "B.3.6.sports_outcomes_probability_mode",
+              "A.12.housing_and_real_estate_signals"
             ],
             "top3_hit": true,
             "silent_general_fallback": false
@@ -7247,11 +7237,11 @@
           "week2_focus": true,
           "week3_focus": true,
           "variant": "canonical",
-          "query": "Inter vs Juventus",
+          "query": "Inter Milan vs Roma 2026-04-05",
           "routing": {
-            "top_domain": "B.3.6.sports_outcomes_probability_mode",
+            "top_domain": "A.29.sports_performance_and_outcomes",
             "top3": [
-              "B.3.6.sports_outcomes_probability_mode",
+              "A.29.sports_performance_and_outcomes",
               "A.29.sports_performance_and_outcomes",
               "A.9.travel_flows_and_disruption"
             ],
@@ -7265,8 +7255,6 @@
           },
           "provider_requirement_map": {
             "required_sources": [
-              "nominatim",
-              "overpass",
               "thesportsdb_public"
             ],
             "optional_sources": [
@@ -7276,24 +7264,6 @@
             ],
             "registry_only_sources": [],
             "provider_states": [
-              {
-                "source_id": "nominatim",
-                "status": "used",
-                "configured": true,
-                "available": true,
-                "required_for_query": true,
-                "optional_for_query": false,
-                "used_in_run": true
-              },
-              {
-                "source_id": "overpass",
-                "status": "used",
-                "configured": true,
-                "available": true,
-                "required_for_query": true,
-                "optional_for_query": false,
-                "used_in_run": true
-              },
               {
                 "source_id": "thesportsdb_public",
                 "status": "used",
@@ -7379,11 +7349,11 @@
           "week2_focus": true,
           "week3_focus": true,
           "variant": "edge",
-          "query": "Juventus contro Inter",
+          "query": "Lazio vs Parma 2026-04-04",
           "routing": {
-            "top_domain": "B.3.6.sports_outcomes_probability_mode",
+            "top_domain": "A.29.sports_performance_and_outcomes",
             "top3": [
-              "B.3.6.sports_outcomes_probability_mode",
+              "A.29.sports_performance_and_outcomes",
               "A.29.sports_performance_and_outcomes",
               "A.9.travel_flows_and_disruption"
             ],
@@ -7397,8 +7367,6 @@
           },
           "provider_requirement_map": {
             "required_sources": [
-              "nominatim",
-              "overpass",
               "thesportsdb_public"
             ],
             "optional_sources": [
@@ -7408,24 +7376,6 @@
             ],
             "registry_only_sources": [],
             "provider_states": [
-              {
-                "source_id": "nominatim",
-                "status": "used",
-                "configured": true,
-                "available": true,
-                "required_for_query": true,
-                "optional_for_query": false,
-                "used_in_run": true
-              },
-              {
-                "source_id": "overpass",
-                "status": "used",
-                "configured": true,
-                "available": true,
-                "required_for_query": true,
-                "optional_for_query": false,
-                "used_in_run": true
-              },
               {
                 "source_id": "thesportsdb_public",
                 "status": "used",
@@ -7470,8 +7420,8 @@
             "blocker_reason": "",
             "threshold_source": "static_defaults",
             "confidence_source": "static_defaults",
-            "confidence_score": 0.882,
-            "evidence_convergence": "converged",
+            "confidence_score": 0.86,
+            "evidence_convergence": "informative",
             "evidence_strength": "strong",
             "source_coverage_state": "sufficient",
             "domain_pack_strength": "",
@@ -7925,8 +7875,8 @@
             "top_domain": "B.3.1.love_and_social_outcomes",
             "top3": [
               "B.3.1.love_and_social_outcomes",
-              "A.0.general.general_forecast",
-              "B.3.8.personal_decisions_and_tradeoffs"
+              "B.3.6.sports_outcomes_probability_mode",
+              "A.0.general.general_forecast"
             ],
             "top3_hit": true,
             "silent_general_fallback": false
@@ -8048,7 +7998,7 @@
             "top3": [
               "B.3.2.study_and_exams_outcomes",
               "A.18.education_system_and_skills_pipeline",
-              "B.3.8.personal_decisions_and_tradeoffs"
+              "B.3.6.sports_outcomes_probability_mode"
             ],
             "top3_hit": true,
             "silent_general_fallback": false
@@ -8281,8 +8231,8 @@
             "top_domain": "B.3.3.work_and_career_outcomes",
             "top3": [
               "B.3.3.work_and_career_outcomes",
-              "B.3.8.personal_decisions_and_tradeoffs",
-              "B.3.1.love_and_social_outcomes"
+              "B.3.6.sports_outcomes_probability_mode",
+              "B.3.8.personal_decisions_and_tradeoffs"
             ],
             "top3_hit": true,
             "silent_general_fallback": false
@@ -8395,8 +8345,8 @@
             "top_domain": "B.3.3.work_and_career_outcomes",
             "top3": [
               "B.3.3.work_and_career_outcomes",
-              "A.15.jobs_and_labor_market_signals",
-              "A.22.industry_and_business_cycles"
+              "B.3.6.sports_outcomes_probability_mode",
+              "A.15.jobs_and_labor_market_signals"
             ],
             "top3_hit": true,
             "silent_general_fallback": false
@@ -8520,7 +8470,7 @@
             "top3": [
               "B.3.4.personal_finance_outcomes",
               "B.3.8.personal_decisions_and_tradeoffs",
-              "B.3.3.work_and_career_outcomes"
+              "B.3.6.sports_outcomes_probability_mode"
             ],
             "top3_hit": true,
             "silent_general_fallback": false
@@ -8622,7 +8572,7 @@
             "top3": [
               "B.3.8.personal_decisions_and_tradeoffs",
               "B.3.4.personal_finance_outcomes",
-              "B.3.3.work_and_career_outcomes"
+              "B.3.6.sports_outcomes_probability_mode"
             ],
             "top3_hit": true,
             "silent_general_fallback": false
@@ -8756,7 +8706,7 @@
             "top3": [
               "B.3.5.business_idea_outcomes",
               "A.22.industry_and_business_cycles",
-              "B.3.8.personal_decisions_and_tradeoffs"
+              "B.3.6.sports_outcomes_probability_mode"
             ],
             "top3_hit": true,
             "silent_general_fallback": false
@@ -8878,8 +8828,8 @@
             "top_domain": "B.3.5.business_idea_outcomes",
             "top3": [
               "B.3.5.business_idea_outcomes",
-              "B.3.8.personal_decisions_and_tradeoffs",
-              "B.3.4.personal_finance_outcomes"
+              "B.3.6.sports_outcomes_probability_mode",
+              "B.3.8.personal_decisions_and_tradeoffs"
             ],
             "top3_hit": true,
             "silent_general_fallback": false
@@ -8985,10 +8935,10 @@
       "domain_id": "B.3.6.sports_outcomes_probability_mode",
       "domain_title": "Sports Outcomes (Probability Mode)",
       "cluster": "derived_personal_and_meta",
-      "domain_state": "blocked",
-      "domain_status_reason": "Personalized sports outcomes stay out of the critical path until B is live.",
+      "domain_state": "published",
+      "domain_status_reason": "Sports probability mode is live behind the sports release path, with forecast-first constraints and no staking advice.",
       "calibration_target": false,
-      "needs_follow_up": true,
+      "needs_follow_up": false,
       "rows": [
         {
           "domain_id": "B.3.6.sports_outcomes_probability_mode",
@@ -8997,13 +8947,13 @@
           "week2_focus": true,
           "week3_focus": true,
           "variant": "canonical",
-          "query": "Will Inter beat Juventus in my next watched match?",
+          "query": "Will Inter Milan beat Roma on 2026-04-05?",
           "routing": {
-            "top_domain": "A.29.sports_performance_and_outcomes",
+            "top_domain": "B.3.6.sports_outcomes_probability_mode",
             "top3": [
-              "A.29.sports_performance_and_outcomes",
               "B.3.6.sports_outcomes_probability_mode",
-              "A.9.travel_flows_and_disruption"
+              "B.3.6.sports_outcomes_probability_mode",
+              "A.29.sports_performance_and_outcomes"
             ],
             "top3_hit": true,
             "silent_general_fallback": false
@@ -9015,8 +8965,6 @@
           },
           "provider_requirement_map": {
             "required_sources": [
-              "nominatim",
-              "overpass",
               "thesportsdb_public"
             ],
             "optional_sources": [
@@ -9026,24 +8974,6 @@
             ],
             "registry_only_sources": [],
             "provider_states": [
-              {
-                "source_id": "nominatim",
-                "status": "used",
-                "configured": true,
-                "available": true,
-                "required_for_query": true,
-                "optional_for_query": false,
-                "used_in_run": true
-              },
-              {
-                "source_id": "overpass",
-                "status": "used",
-                "configured": true,
-                "available": true,
-                "required_for_query": true,
-                "optional_for_query": false,
-                "used_in_run": true
-              },
               {
                 "source_id": "thesportsdb_public",
                 "status": "used",
@@ -9083,12 +9013,12 @@
             ]
           },
           "quality": {
-            "publication_state": "blocked",
-            "quality_verdict": "blocked_no_pick",
-            "blocker_reason": "provider_required_no_pick",
+            "publication_state": "published",
+            "quality_verdict": "publishable",
+            "blocker_reason": "",
             "threshold_source": "static_defaults",
             "confidence_source": "static_defaults",
-            "confidence_score": 0.864,
+            "confidence_score": 0.888,
             "evidence_convergence": "converged",
             "evidence_strength": "strong",
             "source_coverage_state": "sufficient",
@@ -9098,32 +9028,29 @@
             "targeted_provider_used": false,
             "sports_semantic_ready": true,
             "sports_overlay_confidence": 0.79,
-            "sports_overlay_blocker_reason": "sports_probability_mode_benchmark_only",
-            "sports_publish_gate_ready": false,
+            "sports_overlay_blocker_reason": "",
+            "sports_publish_gate_ready": true,
             "market_consensus_strength": 0.67,
             "market_disagreement_score": 0.24,
             "price_move_pressure": 0.38,
             "narrative_hype_score": 0.58,
-            "sportsbook_readiness_state": "benchmark_only",
+            "sportsbook_readiness_state": "probability_mode_live",
             "still_thin_reason": "",
-            "expected_quality_verdict": "blocked_no_pick",
+            "expected_quality_verdict": "publishable",
             "quality_alignment": true,
-            "publishable": false,
+            "publishable": true,
             "notes": [
-              "Personalized sports outcomes stay out of the critical path until B is live.",
-              "Crystal has the matchup grounded, but it will not publish the sports pick until the semantic overlay and parity gate are both ready.",
-              "Sports overlay blocker: sports probability mode benchmark only."
+              "Sports probability mode is live behind the sports release path, with forecast-first constraints and no staking advice.",
+              "The evidence stack is sufficiently converged for a public card."
             ]
           },
           "gating": {
-            "row_state": "quality_follow_up",
-            "action_recommendation": "tighten_shared_quality_or_domain_pack",
+            "row_state": "ready",
+            "action_recommendation": "preserve_baseline",
             "missing_required_source_count": 0,
             "registry_only_source_count": 0
           },
-          "candidate_paid_private_sources": [
-            "api_football_optional"
-          ]
+          "candidate_paid_private_sources": []
         },
         {
           "domain_id": "B.3.6.sports_outcomes_probability_mode",
@@ -9132,13 +9059,13 @@
           "week2_focus": true,
           "week3_focus": true,
           "variant": "edge",
-          "query": "Should I back Juventus or Inter this week?",
+          "query": "Should I back Lazio or Parma on 2026-04-04?",
           "routing": {
             "top_domain": "B.3.6.sports_outcomes_probability_mode",
             "top3": [
               "B.3.6.sports_outcomes_probability_mode",
-              "B.3.8.personal_decisions_and_tradeoffs",
-              "B.3.4.personal_finance_outcomes"
+              "B.3.6.sports_outcomes_probability_mode",
+              "A.29.sports_performance_and_outcomes"
             ],
             "top3_hit": true,
             "silent_general_fallback": false
@@ -9198,12 +9125,12 @@
             ]
           },
           "quality": {
-            "publication_state": "blocked",
-            "quality_verdict": "blocked_no_pick",
-            "blocker_reason": "provider_required_no_pick",
+            "publication_state": "published",
+            "quality_verdict": "publishable",
+            "blocker_reason": "",
             "threshold_source": "static_defaults",
             "confidence_source": "static_defaults",
-            "confidence_score": 0.852,
+            "confidence_score": 0.86,
             "evidence_convergence": "informative",
             "evidence_strength": "strong",
             "source_coverage_state": "sufficient",
@@ -9213,32 +9140,29 @@
             "targeted_provider_used": false,
             "sports_semantic_ready": true,
             "sports_overlay_confidence": 0.79,
-            "sports_overlay_blocker_reason": "sports_probability_mode_benchmark_only",
-            "sports_publish_gate_ready": false,
+            "sports_overlay_blocker_reason": "",
+            "sports_publish_gate_ready": true,
             "market_consensus_strength": 0.67,
             "market_disagreement_score": 0.24,
             "price_move_pressure": 0.38,
             "narrative_hype_score": 0.58,
-            "sportsbook_readiness_state": "benchmark_only",
+            "sportsbook_readiness_state": "probability_mode_live",
             "still_thin_reason": "",
-            "expected_quality_verdict": "blocked_no_pick",
+            "expected_quality_verdict": "publishable",
             "quality_alignment": true,
-            "publishable": false,
+            "publishable": true,
             "notes": [
-              "Personalized sports outcomes stay out of the critical path until B is live.",
-              "Crystal has the matchup grounded, but it will not publish the sports pick until the semantic overlay and parity gate are both ready.",
-              "Sports overlay blocker: sports probability mode benchmark only."
+              "Sports probability mode is live behind the sports release path, with forecast-first constraints and no staking advice.",
+              "The evidence stack is sufficiently converged for a public card."
             ]
           },
           "gating": {
-            "row_state": "quality_follow_up",
-            "action_recommendation": "deepen_live_domain_pack_and_typed_fusion",
+            "row_state": "ready",
+            "action_recommendation": "preserve_baseline",
             "missing_required_source_count": 0,
             "registry_only_source_count": 0
           },
-          "candidate_paid_private_sources": [
-            "api_football_optional"
-          ]
+          "candidate_paid_private_sources": []
         }
       ]
     },
@@ -9520,7 +9444,7 @@
             "top3": [
               "B.3.8.personal_decisions_and_tradeoffs",
               "B.3.3.work_and_career_outcomes",
-              "B.3.4.personal_finance_outcomes"
+              "B.3.6.sports_outcomes_probability_mode"
             ],
             "top3_hit": true,
             "silent_general_fallback": false
@@ -9642,7 +9566,7 @@
             "top3": [
               "B.3.8.personal_decisions_and_tradeoffs",
               "B.3.4.personal_finance_outcomes",
-              "B.3.3.work_and_career_outcomes"
+              "B.3.6.sports_outcomes_probability_mode"
             ],
             "top3_hit": true,
             "silent_general_fallback": false
@@ -12862,7 +12786,7 @@
         "top3": [
           "A.9.travel_flows_and_disruption",
           "B.3.7.travel_personal_outcomes",
-          "A.21.trade_supply_and_disruption_signals"
+          "B.3.6.sports_outcomes_probability_mode"
         ],
         "top3_hit": true,
         "silent_general_fallback": false
@@ -13631,8 +13555,8 @@
         "top_domain": "B.3.8.personal_decisions_and_tradeoffs",
         "top3": [
           "B.3.8.personal_decisions_and_tradeoffs",
-          "A.12.housing_and_real_estate_signals",
-          "B.3.3.work_and_career_outcomes"
+          "B.3.6.sports_outcomes_probability_mode",
+          "A.12.housing_and_real_estate_signals"
         ],
         "top3_hit": true,
         "silent_general_fallback": false
@@ -17532,11 +17456,11 @@
       "week2_focus": true,
       "week3_focus": true,
       "variant": "canonical",
-      "query": "Inter vs Juventus",
+      "query": "Inter Milan vs Roma 2026-04-05",
       "routing": {
-        "top_domain": "B.3.6.sports_outcomes_probability_mode",
+        "top_domain": "A.29.sports_performance_and_outcomes",
         "top3": [
-          "B.3.6.sports_outcomes_probability_mode",
+          "A.29.sports_performance_and_outcomes",
           "A.29.sports_performance_and_outcomes",
           "A.9.travel_flows_and_disruption"
         ],
@@ -17550,8 +17474,6 @@
       },
       "provider_requirement_map": {
         "required_sources": [
-          "nominatim",
-          "overpass",
           "thesportsdb_public"
         ],
         "optional_sources": [
@@ -17561,24 +17483,6 @@
         ],
         "registry_only_sources": [],
         "provider_states": [
-          {
-            "source_id": "nominatim",
-            "status": "used",
-            "configured": true,
-            "available": true,
-            "required_for_query": true,
-            "optional_for_query": false,
-            "used_in_run": true
-          },
-          {
-            "source_id": "overpass",
-            "status": "used",
-            "configured": true,
-            "available": true,
-            "required_for_query": true,
-            "optional_for_query": false,
-            "used_in_run": true
-          },
           {
             "source_id": "thesportsdb_public",
             "status": "used",
@@ -17664,11 +17568,11 @@
       "week2_focus": true,
       "week3_focus": true,
       "variant": "edge",
-      "query": "Juventus contro Inter",
+      "query": "Lazio vs Parma 2026-04-04",
       "routing": {
-        "top_domain": "B.3.6.sports_outcomes_probability_mode",
+        "top_domain": "A.29.sports_performance_and_outcomes",
         "top3": [
-          "B.3.6.sports_outcomes_probability_mode",
+          "A.29.sports_performance_and_outcomes",
           "A.29.sports_performance_and_outcomes",
           "A.9.travel_flows_and_disruption"
         ],
@@ -17682,8 +17586,6 @@
       },
       "provider_requirement_map": {
         "required_sources": [
-          "nominatim",
-          "overpass",
           "thesportsdb_public"
         ],
         "optional_sources": [
@@ -17693,24 +17595,6 @@
         ],
         "registry_only_sources": [],
         "provider_states": [
-          {
-            "source_id": "nominatim",
-            "status": "used",
-            "configured": true,
-            "available": true,
-            "required_for_query": true,
-            "optional_for_query": false,
-            "used_in_run": true
-          },
-          {
-            "source_id": "overpass",
-            "status": "used",
-            "configured": true,
-            "available": true,
-            "required_for_query": true,
-            "optional_for_query": false,
-            "used_in_run": true
-          },
           {
             "source_id": "thesportsdb_public",
             "status": "used",
@@ -17755,8 +17639,8 @@
         "blocker_reason": "",
         "threshold_source": "static_defaults",
         "confidence_source": "static_defaults",
-        "confidence_score": 0.882,
-        "evidence_convergence": "converged",
+        "confidence_score": 0.86,
+        "evidence_convergence": "informative",
         "evidence_strength": "strong",
         "source_coverage_state": "sufficient",
         "domain_pack_strength": "",
@@ -18188,8 +18072,8 @@
         "top_domain": "B.3.1.love_and_social_outcomes",
         "top3": [
           "B.3.1.love_and_social_outcomes",
-          "A.0.general.general_forecast",
-          "B.3.8.personal_decisions_and_tradeoffs"
+          "B.3.6.sports_outcomes_probability_mode",
+          "A.0.general.general_forecast"
         ],
         "top3_hit": true,
         "silent_general_fallback": false
@@ -18300,7 +18184,7 @@
         "top3": [
           "B.3.2.study_and_exams_outcomes",
           "A.18.education_system_and_skills_pipeline",
-          "B.3.8.personal_decisions_and_tradeoffs"
+          "B.3.6.sports_outcomes_probability_mode"
         ],
         "top3_hit": true,
         "silent_general_fallback": false
@@ -18522,8 +18406,8 @@
         "top_domain": "B.3.3.work_and_career_outcomes",
         "top3": [
           "B.3.3.work_and_career_outcomes",
-          "B.3.8.personal_decisions_and_tradeoffs",
-          "B.3.1.love_and_social_outcomes"
+          "B.3.6.sports_outcomes_probability_mode",
+          "B.3.8.personal_decisions_and_tradeoffs"
         ],
         "top3_hit": true,
         "silent_general_fallback": false
@@ -18636,8 +18520,8 @@
         "top_domain": "B.3.3.work_and_career_outcomes",
         "top3": [
           "B.3.3.work_and_career_outcomes",
-          "A.15.jobs_and_labor_market_signals",
-          "A.22.industry_and_business_cycles"
+          "B.3.6.sports_outcomes_probability_mode",
+          "A.15.jobs_and_labor_market_signals"
         ],
         "top3_hit": true,
         "silent_general_fallback": false
@@ -18750,7 +18634,7 @@
         "top3": [
           "B.3.4.personal_finance_outcomes",
           "B.3.8.personal_decisions_and_tradeoffs",
-          "B.3.3.work_and_career_outcomes"
+          "B.3.6.sports_outcomes_probability_mode"
         ],
         "top3_hit": true,
         "silent_general_fallback": false
@@ -18852,7 +18736,7 @@
         "top3": [
           "B.3.8.personal_decisions_and_tradeoffs",
           "B.3.4.personal_finance_outcomes",
-          "B.3.3.work_and_career_outcomes"
+          "B.3.6.sports_outcomes_probability_mode"
         ],
         "top3_hit": true,
         "silent_general_fallback": false
@@ -18975,7 +18859,7 @@
         "top3": [
           "B.3.5.business_idea_outcomes",
           "A.22.industry_and_business_cycles",
-          "B.3.8.personal_decisions_and_tradeoffs"
+          "B.3.6.sports_outcomes_probability_mode"
         ],
         "top3_hit": true,
         "silent_general_fallback": false
@@ -19097,8 +18981,8 @@
         "top_domain": "B.3.5.business_idea_outcomes",
         "top3": [
           "B.3.5.business_idea_outcomes",
-          "B.3.8.personal_decisions_and_tradeoffs",
-          "B.3.4.personal_finance_outcomes"
+          "B.3.6.sports_outcomes_probability_mode",
+          "B.3.8.personal_decisions_and_tradeoffs"
         ],
         "top3_hit": true,
         "silent_general_fallback": false
@@ -19205,13 +19089,13 @@
       "week2_focus": true,
       "week3_focus": true,
       "variant": "canonical",
-      "query": "Will Inter beat Juventus in my next watched match?",
+      "query": "Will Inter Milan beat Roma on 2026-04-05?",
       "routing": {
-        "top_domain": "A.29.sports_performance_and_outcomes",
+        "top_domain": "B.3.6.sports_outcomes_probability_mode",
         "top3": [
-          "A.29.sports_performance_and_outcomes",
           "B.3.6.sports_outcomes_probability_mode",
-          "A.9.travel_flows_and_disruption"
+          "B.3.6.sports_outcomes_probability_mode",
+          "A.29.sports_performance_and_outcomes"
         ],
         "top3_hit": true,
         "silent_general_fallback": false
@@ -19223,8 +19107,6 @@
       },
       "provider_requirement_map": {
         "required_sources": [
-          "nominatim",
-          "overpass",
           "thesportsdb_public"
         ],
         "optional_sources": [
@@ -19234,24 +19116,6 @@
         ],
         "registry_only_sources": [],
         "provider_states": [
-          {
-            "source_id": "nominatim",
-            "status": "used",
-            "configured": true,
-            "available": true,
-            "required_for_query": true,
-            "optional_for_query": false,
-            "used_in_run": true
-          },
-          {
-            "source_id": "overpass",
-            "status": "used",
-            "configured": true,
-            "available": true,
-            "required_for_query": true,
-            "optional_for_query": false,
-            "used_in_run": true
-          },
           {
             "source_id": "thesportsdb_public",
             "status": "used",
@@ -19291,12 +19155,12 @@
         ]
       },
       "quality": {
-        "publication_state": "blocked",
-        "quality_verdict": "blocked_no_pick",
-        "blocker_reason": "provider_required_no_pick",
+        "publication_state": "published",
+        "quality_verdict": "publishable",
+        "blocker_reason": "",
         "threshold_source": "static_defaults",
         "confidence_source": "static_defaults",
-        "confidence_score": 0.864,
+        "confidence_score": 0.888,
         "evidence_convergence": "converged",
         "evidence_strength": "strong",
         "source_coverage_state": "sufficient",
@@ -19306,32 +19170,29 @@
         "targeted_provider_used": false,
         "sports_semantic_ready": true,
         "sports_overlay_confidence": 0.79,
-        "sports_overlay_blocker_reason": "sports_probability_mode_benchmark_only",
-        "sports_publish_gate_ready": false,
+        "sports_overlay_blocker_reason": "",
+        "sports_publish_gate_ready": true,
         "market_consensus_strength": 0.67,
         "market_disagreement_score": 0.24,
         "price_move_pressure": 0.38,
         "narrative_hype_score": 0.58,
-        "sportsbook_readiness_state": "benchmark_only",
+        "sportsbook_readiness_state": "probability_mode_live",
         "still_thin_reason": "",
-        "expected_quality_verdict": "blocked_no_pick",
+        "expected_quality_verdict": "publishable",
         "quality_alignment": true,
-        "publishable": false,
+        "publishable": true,
         "notes": [
-          "Personalized sports outcomes stay out of the critical path until B is live.",
-          "Crystal has the matchup grounded, but it will not publish the sports pick until the semantic overlay and parity gate are both ready.",
-          "Sports overlay blocker: sports probability mode benchmark only."
+          "Sports probability mode is live behind the sports release path, with forecast-first constraints and no staking advice.",
+          "The evidence stack is sufficiently converged for a public card."
         ]
       },
       "gating": {
-        "row_state": "quality_follow_up",
-        "action_recommendation": "tighten_shared_quality_or_domain_pack",
+        "row_state": "ready",
+        "action_recommendation": "preserve_baseline",
         "missing_required_source_count": 0,
         "registry_only_source_count": 0
       },
-      "candidate_paid_private_sources": [
-        "api_football_optional"
-      ]
+      "candidate_paid_private_sources": []
     },
     {
       "domain_id": "B.3.6.sports_outcomes_probability_mode",
@@ -19340,13 +19201,13 @@
       "week2_focus": true,
       "week3_focus": true,
       "variant": "edge",
-      "query": "Should I back Juventus or Inter this week?",
+      "query": "Should I back Lazio or Parma on 2026-04-04?",
       "routing": {
         "top_domain": "B.3.6.sports_outcomes_probability_mode",
         "top3": [
           "B.3.6.sports_outcomes_probability_mode",
-          "B.3.8.personal_decisions_and_tradeoffs",
-          "B.3.4.personal_finance_outcomes"
+          "B.3.6.sports_outcomes_probability_mode",
+          "A.29.sports_performance_and_outcomes"
         ],
         "top3_hit": true,
         "silent_general_fallback": false
@@ -19406,12 +19267,12 @@
         ]
       },
       "quality": {
-        "publication_state": "blocked",
-        "quality_verdict": "blocked_no_pick",
-        "blocker_reason": "provider_required_no_pick",
+        "publication_state": "published",
+        "quality_verdict": "publishable",
+        "blocker_reason": "",
         "threshold_source": "static_defaults",
         "confidence_source": "static_defaults",
-        "confidence_score": 0.852,
+        "confidence_score": 0.86,
         "evidence_convergence": "informative",
         "evidence_strength": "strong",
         "source_coverage_state": "sufficient",
@@ -19421,32 +19282,29 @@
         "targeted_provider_used": false,
         "sports_semantic_ready": true,
         "sports_overlay_confidence": 0.79,
-        "sports_overlay_blocker_reason": "sports_probability_mode_benchmark_only",
-        "sports_publish_gate_ready": false,
+        "sports_overlay_blocker_reason": "",
+        "sports_publish_gate_ready": true,
         "market_consensus_strength": 0.67,
         "market_disagreement_score": 0.24,
         "price_move_pressure": 0.38,
         "narrative_hype_score": 0.58,
-        "sportsbook_readiness_state": "benchmark_only",
+        "sportsbook_readiness_state": "probability_mode_live",
         "still_thin_reason": "",
-        "expected_quality_verdict": "blocked_no_pick",
+        "expected_quality_verdict": "publishable",
         "quality_alignment": true,
-        "publishable": false,
+        "publishable": true,
         "notes": [
-          "Personalized sports outcomes stay out of the critical path until B is live.",
-          "Crystal has the matchup grounded, but it will not publish the sports pick until the semantic overlay and parity gate are both ready.",
-          "Sports overlay blocker: sports probability mode benchmark only."
+          "Sports probability mode is live behind the sports release path, with forecast-first constraints and no staking advice.",
+          "The evidence stack is sufficiently converged for a public card."
         ]
       },
       "gating": {
-        "row_state": "quality_follow_up",
-        "action_recommendation": "deepen_live_domain_pack_and_typed_fusion",
+        "row_state": "ready",
+        "action_recommendation": "preserve_baseline",
         "missing_required_source_count": 0,
         "registry_only_source_count": 0
       },
-      "candidate_paid_private_sources": [
-        "api_football_optional"
-      ]
+      "candidate_paid_private_sources": []
     },
     {
       "domain_id": "B.3.7.travel_personal_outcomes",
@@ -19706,7 +19564,7 @@
         "top3": [
           "B.3.8.personal_decisions_and_tradeoffs",
           "B.3.3.work_and_career_outcomes",
-          "B.3.4.personal_finance_outcomes"
+          "B.3.6.sports_outcomes_probability_mode"
         ],
         "top3_hit": true,
         "silent_general_fallback": false
@@ -19828,7 +19686,7 @@
         "top3": [
           "B.3.8.personal_decisions_and_tradeoffs",
           "B.3.4.personal_finance_outcomes",
-          "B.3.3.work_and_career_outcomes"
+          "B.3.6.sports_outcomes_probability_mode"
         ],
         "top3_hit": true,
         "silent_general_fallback": false
@@ -21078,21 +20936,17 @@
       {
         "cluster": "derived_personal_and_meta",
         "domain_count": 12,
-        "publishable_canonical_count": 11,
-        "publishable_edge_count": 11,
+        "publishable_canonical_count": 12,
+        "publishable_edge_count": 12,
         "provider_gap_count": 0,
-        "quality_follow_up_count": 1,
-        "edge_quality_follow_up_count": 1,
-        "ready_count": 11,
+        "quality_follow_up_count": 0,
+        "edge_quality_follow_up_count": 0,
+        "ready_count": 12,
         "routing_blocker_count": 0,
         "blocker_reason_counts": [
           {
             "reason": "none",
-            "count": 11
-          },
-          {
-            "reason": "provider_required_no_pick",
-            "count": 1
+            "count": 12
           }
         ]
       }

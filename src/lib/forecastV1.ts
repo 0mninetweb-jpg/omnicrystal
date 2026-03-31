@@ -139,6 +139,16 @@ function formatRelativeTimeSummary(card: CardData) {
 }
 
 function getPrimaryState(card: CardData) {
+  const sportsPickState = safeText(
+    card.publication_basis?.sports_pick_state,
+    safeText(card.sports_pick_state, safeText(card.sports_grounding?.sports_pick_state))
+  );
+  const sportsGrounded =
+    card.publication_basis?.sports_grounded === true ||
+    card.sports_grounded === true ||
+    card.sports_grounding?.sports_grounded === true ||
+    (card.sports_grounding?.fixture_resolved === true && card.sports_grounding?.provider_configured === true);
+  if (sportsGrounded && sportsPickState === 'grounded_lean') return 'grounded_lean' as const;
   if (card.card_state === 'blocked') return 'coverage_gap' as const;
   if (card.card_state === 'limited') return 'limited' as const;
   return 'published' as const;
@@ -266,29 +276,46 @@ function buildActionItem(card: CardData, context: ForecastResolvedContext): Fore
 
 function buildCoverageCompanion(card: CardData, context: ForecastResolvedContext): ForecastCoverageStackItem | null {
   const state = getPrimaryState(card);
+  const sportsPickState = safeText(
+    card.publication_basis?.sports_pick_state,
+    safeText(card.sports_pick_state, safeText(card.sports_grounding?.sports_pick_state))
+  );
+  const sportsGrounded =
+    card.publication_basis?.sports_grounded === true ||
+    card.sports_grounded === true ||
+    card.sports_grounding?.sports_grounded === true ||
+    (card.sports_grounding?.fixture_resolved === true && card.sports_grounding?.provider_configured === true);
   const sportsBlockedNoPick =
     card.publication_basis?.blocker_reason === 'provider_required_no_pick' && card.sports_grounding?.provider_required === true;
   const sportsFixtureWindowBlocked = card.sports_overlay_blocker_reason === 'sports_fixture_window_not_live';
-  const evidenceNotes = sportsBlockedNoPick
+  const sportsGroundedLean = sportsGrounded && sportsPickState === 'grounded_lean';
+  const evidenceNotes = sportsBlockedNoPick || sportsGroundedLean
     ? uniqueList([
         card.sports_grounding?.fixture_resolved ? 'Crystal already grounded the matchup with TheSportsDB.' : '',
+        card.fixture_window_state || card.sports_grounding?.fixture_window_state
+          ? `Fixture window: ${safeText(card.fixture_window_state, safeText(card.sports_grounding?.fixture_window_state)).replace(/_/g, ' ')}.`
+          : '',
         card.sports_overlay_blocker_reason
           ? sportsFixtureWindowBlocked
             ? 'The matchup is grounded, but there is no active fixture window yet for a match-specific sports pick.'
-            : `The sports publish gate is still blocked because ${card.sports_overlay_blocker_reason.replace(/_/g, ' ')}.`
-          : 'Crystal still needs fresher lineup, injury, and preview confirmation before publishing the pick.',
+            : `The sports evidence is still thin because ${card.sports_overlay_blocker_reason.replace(/_/g, ' ')}.`
+          : sportsGroundedLean
+            ? 'Crystal has a current lean, but lineup, injury, or market context is still only partially converged.'
+            : 'Crystal still needs fresher lineup, injury, and preview confirmation before publishing the pick.',
         ...(Array.isArray(card.invalidators) ? card.invalidators.slice(0, 2) : []),
       ])
     : Array.isArray(card.evidence_drawer?.coverage_notes)
       ? card.evidence_drawer.coverage_notes
       : [];
-  const refinementHints = sportsBlockedNoPick
+  const refinementHints = sportsBlockedNoPick || sportsGroundedLean
     ? [
         'Use explicit team names and, when possible, the match date or competition.',
         sportsFixtureWindowBlocked
           ? 'Re-run when the next fixture is inside the active match week, or include the exact fixture date.'
           : 'Re-run closer to kickoff so lineup, injury, and preview coverage can thicken.',
-        'Treat this as a grounded matchup read until the sports publish gate is fully ready.',
+        sportsGroundedLean
+          ? 'Use the current lean as context, then check invalidators before treating it as a higher-confidence sports call.'
+          : 'Treat this as a grounded matchup read until the sports publish gate is fully ready.',
       ]
     : Array.isArray(card.how_to_raise_confidence)
       ? card.how_to_raise_confidence.slice(0, 3)
@@ -305,7 +332,11 @@ function buildCoverageCompanion(card: CardData, context: ForecastResolvedContext
   }
 
   const explanation =
-    sportsBlockedNoPick
+    sportsGroundedLean
+      ? sportsFixtureWindowBlocked
+        ? 'Crystal grounded the fixture and can already show a lean, but the active match window is not open enough yet for a stronger pick.'
+        : 'Crystal grounded the fixture and can show a current lean, but the sports evidence stack is still only partially converged.'
+      : sportsBlockedNoPick
       ? sportsFixtureWindowBlocked
         ? 'Crystal has already grounded this matchup, but there is no live fixture window yet, so it keeps the sports pick on hold.'
         : 'Crystal has already grounded this matchup, but the sports semantic publish gate is still closed, so the pick stays on hold.'
@@ -324,8 +355,11 @@ function buildCoverageCompanion(card: CardData, context: ForecastResolvedContext
     geography: context.geography,
     horizon: context.horizon,
     versionId: context.versionId,
-    title: state === 'coverage_gap' ? 'Coverage gap' : 'Coverage notes',
-    primaryOutcome: safeText(card.verdict, card.summary),
+    title: state === 'grounded_lean' ? 'Grounded lean' : state === 'coverage_gap' ? 'Coverage gap' : 'Coverage notes',
+    primaryOutcome:
+      state === 'grounded_lean'
+        ? safeText(card.primary_call, safeText(card.verdict, card.summary))
+        : safeText(card.verdict, card.summary),
     explanation,
     missingSignals: evidenceNotes.slice(0, 3),
     refinementHints,
@@ -378,7 +412,7 @@ export function buildForecastStack(card: CardData, context: ForecastResolvedCont
       horizon: context.horizon,
       versionId: context.versionId,
       title: safeText(card.title, 'Crystal forecast'),
-      primaryOutcome: safeText(card.verdict, safeText(card.primary_call, safeText(card.summary, 'Crystal is still evaluating this question.'))),
+      primaryOutcome: safeText(card.primary_call, safeText(card.verdict, safeText(card.summary, 'Crystal is still evaluating this question.'))),
       summary: safeText(card.summary, 'No summary available yet.'),
       primaryCall: safeText(card.binary_contract?.display_call, safeText(card.primary_call, undefined)),
       binaryContract: card.binary_contract || null,

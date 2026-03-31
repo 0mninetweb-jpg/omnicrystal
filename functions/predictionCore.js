@@ -1,5 +1,7 @@
 const { GENERAL_FORECAST_DOMAIN, SPORTS_MATCH_OUTCOMES_DOMAIN, CATALOG_DOMAINS, getDomain } = require("./catalogRegistry");
 
+const SPORTS_PROBABILITY_MODE_DOMAIN = "B.3.6.sports_outcomes_probability_mode";
+
 const DOMAIN_STATE_SCORE = {
   published: 0.05,
   limited: 0.03,
@@ -425,6 +427,10 @@ const DOMAIN_KEYWORD_HINTS = {
     "back juventus",
     "back inter",
     "bet on",
+    "will inter beat",
+    "will juventus beat",
+    "to win",
+    "moneyline",
     "support juventus",
     "support inter",
   ],
@@ -1803,7 +1809,12 @@ function extractBinaryFrame(queryText) {
 function looksLikeSportsFixtureQuery(queryText = "") {
   const normalized = normalizeText(queryText);
   if (!normalized) return false;
-  if (!/\b(vs|versus|contro)\b/.test(normalized) && !/\b(partita|calcio|serie a|champions|goal|fixture|match)\b/.test(normalized)) {
+  if (
+    !/\b(vs|versus|contro)\b/.test(normalized) &&
+    !/\b(partita|calcio|serie a|champions|goal|fixture|match|moneyline|to win)\b/.test(normalized) &&
+    !/\bwill\s+.+?\s+beat\s+.+/.test(normalized) &&
+    !/\b(?:should i back|bet on|pick|take)\s+.+/.test(normalized)
+  ) {
     return false;
   }
   if (/\b(compare|comparison|meglio di|better than|bitcoin|crypto|stock|stocks|market|markets|gold|oil)\b/.test(normalized)) {
@@ -1812,11 +1823,26 @@ function looksLikeSportsFixtureQuery(queryText = "") {
   return true;
 }
 
+function looksLikeSportsProbabilityQuery(queryText = "") {
+  const normalized = normalizeText(queryText);
+  if (!normalized) return false;
+  if (!looksLikeSportsFixtureQuery(queryText)) return false;
+  return /\b(will\s+.+?\s+beat\s+.+|should i back|bet on|moneyline|to win|pick\s+.+\s+(?:or|vs|versus|contro)\s+.+)\b/.test(
+    normalized
+  );
+}
+
 function extractFixtureSides(queryText = "") {
   if (!looksLikeSportsFixtureQuery(queryText)) return null;
   const raw = normalizeDisplayLabel(queryText);
   if (!raw) return null;
-  const match = raw.match(/^(.+?)\s+(?:vs\.?|versus|contro)\s+(.+)$/i);
+  let match = raw.match(/^(.+?)\s+(?:vs\.?|versus|contro)\s+(.+)$/i);
+  if (!match) {
+    match = raw.match(/^will\s+(.+?)\s+beat\s+(.+?)(?:\s+on\b|[?!.]|$)/i);
+  }
+  if (!match) {
+    match = raw.match(/^(?:should i back|bet on|pick|take)\s+(.+?)\s+(?:or|vs\.?|versus|contro)\s+(.+?)(?:\s+(?:this|next|on)\b|[?!.]|$)/i);
+  }
   if (!match) return null;
   const sideA = normalizeDisplayLabel(match[1]);
   const sideB = normalizeDisplayLabel(match[2]);
@@ -2039,10 +2065,7 @@ function getSpecialDomainBonus(domain, queryText = "", intentShape = "", resolut
   ) {
     return 0.18;
   }
-  if (
-    domainId === "B.3.6.sports_outcomes_probability_mode" &&
-    /\b(should i back|bet on|juventus|inter|match|fixture)\b/.test(normalizedQuery)
-  ) {
+  if (domainId === SPORTS_PROBABILITY_MODE_DOMAIN && looksLikeSportsProbabilityQuery(queryText)) {
     return 0.22;
   }
   if (
@@ -2277,6 +2300,8 @@ function buildRoutingHints(queryText, options = {}) {
     eventDate: policyContext.eventDate,
   });
   let candidateDomains = buildDomainCandidates(queryText);
+  const sportsFixtureLike = looksLikeSportsFixtureQuery(queryText);
+  const sportsProbabilityLike = looksLikeSportsProbabilityQuery(queryText);
   if (policyContext.policyLike) {
     const preferredPolicyDomain = isGeopoliticalPolicyQuery(queryText)
       ? "A.25.geopolitics_and_conflict_dynamics"
@@ -2297,7 +2322,36 @@ function buildRoutingHints(queryText, options = {}) {
         })
         .sort((left, right) => right.score - left.score)
         .slice(0, 6);
-    }
+      }
+  }
+  if (sportsFixtureLike) {
+    const preferredSportsDomain = sportsProbabilityLike ? SPORTS_PROBABILITY_MODE_DOMAIN : SPORTS_MATCH_OUTCOMES_DOMAIN;
+    const secondarySportsDomain = sportsProbabilityLike ? SPORTS_MATCH_OUTCOMES_DOMAIN : SPORTS_PROBABILITY_MODE_DOMAIN;
+    const preferredDomain = getDomain(preferredSportsDomain, preferredSportsDomain);
+    const secondaryDomain = getDomain(secondarySportsDomain, secondarySportsDomain);
+    candidateDomains = candidateDomains
+      .concat([
+        {
+          domain_id: preferredDomain.domain_id,
+          title: preferredDomain.title,
+          short_label: preferredDomain.short_label,
+          current_state: preferredDomain.current_state,
+          score: sportsProbabilityLike ? 0.42 : 0.38,
+          reason: sportsProbabilityLike
+            ? "Sports probability wording points to the dedicated outcome-probability mode."
+            : "Sports fixture wording points to the live sports matchup route.",
+        },
+        {
+          domain_id: secondaryDomain.domain_id,
+          title: secondaryDomain.title,
+          short_label: secondaryDomain.short_label,
+          current_state: secondaryDomain.current_state,
+          score: sportsProbabilityLike ? 0.31 : 0.29,
+          reason: "Crystal keeps the companion sports route active for shared fixture grounding.",
+        },
+      ])
+      .sort((left, right) => right.score - left.score)
+      .slice(0, 6);
   }
   const topCandidate = candidateDomains[0];
   const preferredPolicyFallback =
@@ -2306,8 +2360,11 @@ function buildRoutingHints(queryText, options = {}) {
         ? "A.25.geopolitics_and_conflict_dynamics"
         : "A.24.governance_policy_and_public_timeline"
       : GENERAL_FORECAST_DOMAIN;
-  const primaryDomainId =
-    topCandidate && topCandidate.domain_id !== GENERAL_FORECAST_DOMAIN && topCandidate.score >= 0.18
+  const primaryDomainId = sportsFixtureLike
+    ? sportsProbabilityLike
+      ? SPORTS_PROBABILITY_MODE_DOMAIN
+      : SPORTS_MATCH_OUTCOMES_DOMAIN
+    : topCandidate && topCandidate.domain_id !== GENERAL_FORECAST_DOMAIN && topCandidate.score >= 0.18
       ? topCandidate.domain_id
       : preferredPolicyFallback;
 
@@ -2979,15 +3036,22 @@ function finalizeScorecard(rawScorecard = {}, evidenceBundle = {}, queryPlan = {
       (Array.isArray(evidenceBundle?.source_usage?.missing_required_sources) &&
         evidenceBundle.source_usage.missing_required_sources.length > 0)
   );
+  const sportsGrounded =
+    evidenceBundle?.sports_grounding?.sports_grounded === true ||
+    (evidenceBundle?.sports_grounding?.fixture_resolved === true && evidenceBundle?.sports_grounding?.provider_configured === true);
+  const sportsPickState = safeText(
+    evidenceBundle?.sports_grounding?.sports_pick_state,
+    sportsGrounded ? "grounded_lean" : "hold"
+  );
   const sportsPublishGateReady =
     evidenceBundle?.sports_grounding?.publish_gate_ready === true ||
     (evidenceBundle?.sports_grounding?.publish_gate_ready == null && Boolean(evidenceBundle?.sports_grounding?.parity_ready));
   const providerRequiredNoPick =
     hardStop &&
     Boolean(evidenceBundle?.sports_grounding?.provider_required) &&
-    !sportsPublishGateReady;
+    !sportsGrounded;
   let publicationState = "limited";
-  if (hardStop) {
+  if (hardStop && !sportsGrounded) {
     publicationState = "blocked";
   } else if (
     confidenceScore >= 0.67 &&
@@ -3007,6 +3071,13 @@ function finalizeScorecard(rawScorecard = {}, evidenceBundle = {}, queryPlan = {
     evidenceQuality.agreement_score >= 0.6 &&
     evidenceQuality.conflict_score <= 0.32;
   if (directionalLike && publicationState === "published" && !directionalPublishReady) {
+    publicationState = "limited";
+  }
+  if ((sportsPickState === "publishable_controlled" || sportsPickState === "publishable_full") && sportsGrounded) {
+    publicationState = "published";
+  } else if (sportsPickState === "grounded_lean") {
+    publicationState = "limited";
+  } else if (sportsPickState === "hold" && sportsGrounded && publicationState === "blocked") {
     publicationState = "limited";
   }
 
@@ -3033,7 +3104,7 @@ function finalizeScorecard(rawScorecard = {}, evidenceBundle = {}, queryPlan = {
   );
 
   let primaryCall = safeText(rawScorecard.primary_call || rawScorecard.directional_hypothesis || rawScorecard.verdict);
-  if (!providerRequiredNoPick && binaryContract?.display_call) {
+  if ((!providerRequiredNoPick || sportsGrounded) && binaryContract?.display_call) {
     primaryCall = binaryContract.display_call;
   } else if (!primaryCall) {
     primaryCall = inferPrimaryCallFromSplit(probabilitySplit);
@@ -3110,6 +3181,9 @@ function finalizeScorecard(rawScorecard = {}, evidenceBundle = {}, queryPlan = {
   if (providerRequiredNoPick) {
     blockerReason = "provider_required_no_pick";
     qualityVerdict = "blocked_no_pick";
+  } else if (sportsPickState === "grounded_lean" && sportsGrounded) {
+    blockerReason = safeText(evidenceBundle?.sports_grounding?.overlay_blocker_reason, "sports_publish_gate_partial");
+    qualityVerdict = "grounded_lean";
   } else if (!primaryCall) {
     blockerReason = "missing_primary_call";
     qualityVerdict = "blocked_no_pick";
@@ -3148,6 +3222,9 @@ function finalizeScorecard(rawScorecard = {}, evidenceBundle = {}, queryPlan = {
       publicationState === "published" ? "published_threshold_met" : "",
       hardStop ? "hard_stop_active" : "",
       providerRequiredNoPick ? "provider_required_no_pick" : "",
+      sportsPickState === "grounded_lean" ? "sports_grounded_lean" : "",
+      sportsPickState === "publishable_controlled" ? "sports_publishable_controlled" : "",
+      sportsPickState === "publishable_full" ? "sports_publishable_full" : "",
       requiredSourceGap ? "missing_required_sources" : "",
       binaryQuestion && !binaryContract ? "missing_binary_contract" : "",
       missingPersonalInputs ? "missing_personal_inputs" : "",
@@ -3164,6 +3241,9 @@ function finalizeScorecard(rawScorecard = {}, evidenceBundle = {}, queryPlan = {
       safeText(evidenceBundle.notes?.[0]),
       providerRequiredNoPick
         ? "Crystal has the matchup grounded, but it will not publish the sports pick until the semantic overlay and parity gate are both ready."
+        : "",
+      sportsPickState === "grounded_lean" && sportsGrounded
+        ? "Crystal grounded the fixture and can surface a lean, but the sports evidence stack is still only partially converged."
         : "",
       providerRequiredNoPick && safeText(evidenceBundle?.sports_grounding?.overlay_blocker_reason)
         ? `Sports overlay blocker: ${safeText(evidenceBundle.sports_grounding.overlay_blocker_reason).replace(/_/g, " ")}.`
@@ -3228,6 +3308,14 @@ function finalizeScorecard(rawScorecard = {}, evidenceBundle = {}, queryPlan = {
       required_source_gap: requiredSourceGap,
       hard_stop: hardStop,
       provider_required_no_pick: providerRequiredNoPick,
+      sports_pick_state: sportsPickState || null,
+      sports_grounded: sportsGrounded,
+      fixture_window_state: safeText(evidenceBundle?.sports_grounding?.fixture_window_state) || null,
+      fixture_window_open: evidenceBundle?.sports_grounding?.fixture_window_open === true,
+      sports_extraction_provenance: Array.isArray(evidenceBundle?.sports_grounding?.sports_extraction_provenance)
+        ? evidenceBundle.sports_grounding.sports_extraction_provenance
+        : null,
+      sports_confidence_tier: safeText(evidenceBundle?.sports_grounding?.sports_confidence_tier) || null,
       sports_semantic_ready: evidenceBundle?.sports_grounding?.semantic_ready === true,
       sports_overlay_confidence: Number.isFinite(Number(evidenceBundle?.sports_grounding?.overlay_confidence))
         ? Number(evidenceBundle.sports_grounding.overlay_confidence)

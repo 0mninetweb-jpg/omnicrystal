@@ -730,8 +730,8 @@ const CATALOG_DOMAINS = [
     "session-based",
     "tier_3",
     "wave_3",
-    "blocked",
-    "Personalized sports outcomes stay out of the critical path until B is live.",
+    "published",
+    "Sports probability mode is live behind the sports release path, with forecast-first constraints and no staking advice.",
     []
   ),
   createDomain(

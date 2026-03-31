@@ -186,14 +186,14 @@ const DOMAIN_MATRIX_CASES = [
   { domainId: "A.26.human_history_and_long_run_analogs", canonicalQuery: "Historical analog for Italian political pressure next 12 months", edgeQuery: "Long-run analog for inflation cooling in Europe" },
   { domainId: "A.27.safety_and_incident_risk", canonicalQuery: "What is the safety risk in Milan this weekend?", edgeQuery: "Incident risk near the station area next 30 days" },
   { domainId: "A.28.public_health_and_environmental_exposure", canonicalQuery: "Public health risk in Milan this winter", edgeQuery: "Air quality exposure in Milan this week" },
-  { domainId: "A.29.sports_performance_and_outcomes", canonicalQuery: "Inter vs Juventus", edgeQuery: "Juventus contro Inter" },
+  { domainId: "A.29.sports_performance_and_outcomes", canonicalQuery: "Inter Milan vs Roma 2026-04-05", edgeQuery: "Lazio vs Parma 2026-04-04" },
   { domainId: "A.30.culture_events_and_attention", canonicalQuery: "Culture and events attention pressure in Rome next month", edgeQuery: "Concert crowding and cultural buzz in Milan this weekend" },
   { domainId: "B.3.1.love_and_social_outcomes", canonicalQuery: "Will this new relationship stabilize over the next 6 months?", edgeQuery: "Social connection outlook for my circle this spring" },
   { domainId: "B.3.2.study_and_exams_outcomes", canonicalQuery: "Will I pass my exam this session?", edgeQuery: "Study pressure for exam prep over the next 30 days" },
   { domainId: "B.3.3.work_and_career_outcomes", canonicalQuery: "Should I accept a new job offer in Milan?", edgeQuery: "Will changing company improve my salary trajectory?" },
   { domainId: "B.3.4.personal_finance_outcomes", canonicalQuery: "Should I buy Bitcoin now with my savings?", edgeQuery: "Should I lock a mortgage rate now?" },
   { domainId: "B.3.5.business_idea_outcomes", canonicalQuery: "Will my startup survive the next 12 months?", edgeQuery: "Should I open a cafe in Rome this year?" },
-  { domainId: "B.3.6.sports_outcomes_probability_mode", canonicalQuery: "Will Inter beat Juventus in my next watched match?", edgeQuery: "Should I back Juventus or Inter this week?" },
+  { domainId: "B.3.6.sports_outcomes_probability_mode", canonicalQuery: "Will Inter Milan beat Roma on 2026-04-05?", edgeQuery: "Should I back Lazio or Parma on 2026-04-04?" },
   { domainId: "B.3.7.travel_personal_outcomes", canonicalQuery: "Should I visit Tokyo this spring or wait?", edgeQuery: "When is the best window to travel to Lisbon?" },
   { domainId: "B.3.8.personal_decisions_and_tradeoffs", canonicalQuery: "Should I move to Rome this year or wait?", edgeQuery: "Should I buy now or wait six months?" },
   { domainId: "C.1.attention_waves", canonicalQuery: "Attention wave around AI agents next 30 days", edgeQuery: "Search and media momentum for luxury travel this month" },
@@ -243,7 +243,7 @@ function getProviderExpansionHints(domainId = "") {
   const filterLiveImplemented = (sourceIds = []) =>
     sourceIds.filter((sourceId) => SHARED_IMPLEMENTED_SOURCE_IDS.includes(sourceId) && getProviderRuntimeStatus(sourceId).available === true);
   if (normalized === "A.29.sports_performance_and_outcomes" || normalized === "B.3.6.sports_outcomes_probability_mode") {
-    return filterLiveImplemented(["api_football_optional"]);
+    return filterLiveImplemented(["thesportsdb_public", "api_football_optional", "polymarket_public", "google_trends"]);
   }
   if (
     [
@@ -554,13 +554,19 @@ function buildSyntheticEvidenceBundle({ domainConfig, sourceUsage, variant = "ca
           parity_ready: sportsProvider?.configured === true,
           semantic_ready: sportsProvider?.configured === true && (a29SportsDomain || b36SportsDomain),
           overlay_confidence: sportsProvider?.configured === true && (a29SportsDomain || b36SportsDomain) ? 0.79 : null,
-          overlay_blocker_reason: a29SportsDomain ? "" : b36SportsDomain ? "sports_probability_mode_benchmark_only" : "sports_semantic_overlay_pending",
-          publish_gate_ready: sportsProvider?.configured === true && a29SportsDomain,
+          overlay_blocker_reason: a29SportsDomain || b36SportsDomain ? "" : "sports_semantic_overlay_pending",
+          publish_gate_ready: sportsProvider?.configured === true && (a29SportsDomain || b36SportsDomain),
+          sports_pick_state: sportsProvider?.configured === true ? "publishable_controlled" : "hold",
+          sports_grounded: sportsProvider?.configured === true,
+          fixture_window_state: sportsProvider?.configured === true ? "upcoming" : "unanchored",
+          fixture_window_open: sportsProvider?.configured === true,
+          sports_extraction_provenance: sportsProvider?.configured === true ? ["official", "allowlist_search", "broad_web", "polymarket_public", "google_trends"] : [],
+          sports_confidence_tier: sportsProvider?.configured === true ? "controlled" : "hold",
           market_consensus_strength: sportsProvider?.configured === true && (a29SportsDomain || b36SportsDomain) ? 0.67 : null,
           market_disagreement_score: sportsProvider?.configured === true && b36SportsDomain ? 0.24 : 0.18,
           price_move_pressure: sportsProvider?.configured === true && (a29SportsDomain || b36SportsDomain) ? 0.38 : null,
           narrative_hype_score: sportsProvider?.configured === true && (a29SportsDomain || b36SportsDomain) ? 0.58 : null,
-          sportsbook_readiness_state: a29SportsDomain ? "forecast_betting_aware" : b36SportsDomain ? "benchmark_only" : "forecast_only",
+          sportsbook_readiness_state: a29SportsDomain ? "forecast_betting_aware" : b36SportsDomain ? "probability_mode_live" : "forecast_only",
         }
       : undefined;
 
@@ -607,7 +613,7 @@ function buildSyntheticEvidenceBundle({ domainConfig, sourceUsage, variant = "ca
       safeText(domainConfig?.status_reason),
       week3FocusEdge ? "Week 3 focus row now uses a thicker live-first edge pack." : "",
     ]),
-    hard_stop: Boolean(flags.sportsLike && sportsGrounding?.publish_gate_ready !== true),
+    hard_stop: Boolean(flags.sportsLike && sportsGrounding?.sports_grounded !== true),
     sports_grounding: sportsGrounding,
     sports_semantic_overlay: flags.sportsLike
       ? {
@@ -1384,9 +1390,22 @@ export async function runDomainQualityMatrix() {
       ? "week3_edge_predictive_lift_ready"
       : "week3_needs_more_edge_depth";
 
-  return {
-    generated_at: new Date().toISOString(),
-    summary: {
+    const week4HardBlockers = uniqueStrings(
+      canonicalRows
+        .filter((row) => {
+          const blockerReason = safeText(row?.quality?.blocker_reason);
+          const hasExplicitBlocker = blockerReason && blockerReason !== "none";
+          const missingFredRequired = row.provider_requirement_map.provider_states.some(
+            (provider) => provider.source_id === "fred_api" && provider.required_for_query && provider.available !== true
+          );
+          return hasExplicitBlocker || missingFredRequired;
+        })
+        .map((row) => safeText(row.quality.blocker_reason || row.domain_id))
+    );
+
+    return {
+      generated_at: new Date().toISOString(),
+      summary: {
       total_domains: domains.length,
       total_rows: rows.length,
       top1_hit_rate: Number((top1Hits / Math.max(1, rows.length)).toFixed(4)),
@@ -1429,23 +1448,13 @@ export async function runDomainQualityMatrix() {
         silentGeneralFallbackCount === 0 && domains.length === CATALOG_DOMAINS.length
           ? "sprint_matrix_ready"
           : "needs_routing_work",
-    },
-    week4_status: {
-      rollout_bucket: "0/0",
-      canary_posture: "defer_until_after_prediction_quality_sprint",
-      hard_blockers: uniqueStrings(
-        canonicalRows
-          .filter(
-            (row) =>
-              row.domain_id === "A.29.sports_performance_and_outcomes" ||
-              row.provider_requirement_map.provider_states.some(
-                (provider) => provider.source_id === "fred_api" && provider.required_for_query && provider.available !== true
-              )
-          )
-          .map((row) => safeText(row.quality.blocker_reason || row.domain_id))
-      ),
-    },
-    domains,
+      },
+      week4_status: {
+        rollout_bucket: "0/0",
+        canary_posture: week4HardBlockers.length === 0 ? "sports_feature_flag_candidate" : "defer_until_after_prediction_quality_sprint",
+        hard_blockers: week4HardBlockers,
+      },
+      domains,
     rows,
     cluster_summary: {
       canonical_rows: canonicalRows.length,

@@ -1,60 +1,60 @@
 # Crystal domain quality matrix
 
-Generated at: 2026-03-31T13:05:44.326Z
+Generated at: 2026-03-31T16:57:40.927Z
 Domains covered: 43
 Rows scanned: 86
-Top-1 hit rate: 93%
+Top-1 hit rate: 97%
 Top-3 miss count: 0
 Silent A.0 fallback count: 0
-Canonical publishable domains: 42
-Domains with blocker reason: 1
-Domains ready for preservation: 42
+Canonical publishable domains: 43
+Domains with blocker reason: 0
+Domains ready for preservation: 43
 Domains needing provider work: 0
-Domains in quality follow-up: 1
+Domains in quality follow-up: 0
 Thin evidence blockers: 0
-Edge publishable rows: 41
-Edge quality follow-up rows: 1
-Edge top-1 hit rate: 91%
+Edge publishable rows: 42
+Edge quality follow-up rows: 0
+Edge top-1 hit rate: 93%
 Verdict: sprint_matrix_ready
 
 ## Week 1 Targets
 Baseline date: 2026-03-28
-Top-1 hit rate: 93% (target 65%, delta vs baseline 34 pts)
-Canonical publishable domains: 42 (target 8, delta 38)
+Top-1 hit rate: 97% (target 65%, delta vs baseline 38 pts)
+Canonical publishable domains: 43 (target 8, delta 39)
 Provider gap domains: 0 (target <= 24, delta -30)
 Thin evidence blockers: 0 (target materially below 18)
 Batch 2 gate verdict: week1_batch2_on_track
 
 ## Batch 3 Targets
 Baseline date: 2026-03-28
-Top-1 hit rate: 93% (target 74%, delta vs baseline 22 pts)
-Canonical publishable domains: 42 (target 36, delta 10)
+Top-1 hit rate: 97% (target 74%, delta vs baseline 26 pts)
+Canonical publishable domains: 43 (target 36, delta 11)
 Thin evidence blockers: 0 (target <= 4, delta -10)
 Provider gap domains: 0 (target 0, delta 0)
 Batch 3 gate verdict: week1_batch3_on_track
 
 ## Week 2 Edge Targets
 Baseline date: 2026-03-28
-Edge publishable rows: 41 (target >= 6, delta 39)
-Edge quality follow-up rows: 1 (target <= 35, delta -40)
-Edge top-1 hit rate: 91% (target 67%, delta vs baseline 28 pts)
+Edge publishable rows: 42 (target >= 6, delta 40)
+Edge quality follow-up rows: 0 (target <= 35, delta -41)
+Edge top-1 hit rate: 93% (target 67%, delta vs baseline 30 pts)
 Edge thin evidence blockers: 0 (target <= 10, delta -15)
 Edge thin signal convergence blockers: 0 (target <= 14, delta -19)
 Week 2 gate verdict: week2_provider_depth_on_track
 
 ## Week 3 Edge Lift Targets
 Baseline date: 2026-03-28
-Canonical publishable domains: 42 (target >= 43, delta 0)
-Edge publishable rows: 41 (target >= 22, delta 26)
-Edge quality follow-up rows: 1 (target <= 18, delta -26)
-Edge top-1 hit rate: 91% (target 78%, delta vs baseline 19 pts)
+Canonical publishable domains: 43 (target >= 43, delta 1)
+Edge publishable rows: 42 (target >= 22, delta 27)
+Edge quality follow-up rows: 0 (target <= 18, delta -27)
+Edge top-1 hit rate: 93% (target 78%, delta vs baseline 21 pts)
 Edge thin evidence blockers: 0 (target <= 3, delta -7)
 Edge thin signal convergence blockers: 0 (target <= 8, delta -13)
-Week 3 gate verdict: week3_needs_more_edge_depth
+Week 3 gate verdict: week3_edge_predictive_lift_ready
 
 ## Current Wave
-Week 4 canary posture: defer_until_after_prediction_quality_sprint
-Hard blockers: A.29.sports_performance_and_outcomes
+Week 4 canary posture: sports_feature_flag_candidate
+Hard blockers: none
 
 ## Cluster Summary
 - general_and_other: 4 domains | canonical publishable 4 | edge publishable 4 | ready 4 | provider gaps 0 | quality follow-up 0 | edge quality follow-up 0 | routing blockers 0
@@ -69,19 +69,16 @@ Hard blockers: A.29.sports_performance_and_outcomes
   - blocker none: 4
 - health_safety_sports_culture: 4 domains | canonical publishable 4 | edge publishable 4 | ready 4 | provider gaps 0 | quality follow-up 0 | edge quality follow-up 0 | routing blockers 0
   - blocker none: 4
-- derived_personal_and_meta: 12 domains | canonical publishable 11 | edge publishable 11 | ready 11 | provider gaps 0 | quality follow-up 1 | edge quality follow-up 1 | routing blockers 0
-  - blocker none: 11
-  - blocker provider_required_no_pick: 1
+- derived_personal_and_meta: 12 domains | canonical publishable 12 | edge publishable 12 | ready 12 | provider gaps 0 | quality follow-up 0 | edge quality follow-up 0 | routing blockers 0
+  - blocker none: 12
 
 ## Top Blockers
 
-- none: 42
-- provider_required_no_pick: 1
+- none: 43
 
 ## Edge Blockers
 
-- none: 42
-- provider_required_no_pick: 1
+- none: 43
 
 ## Week 2 Focus Rows
 
@@ -97,10 +94,10 @@ Hard blockers: A.29.sports_performance_and_outcomes
 - A.22.industry_and_business_cycles: edge publishable/published | blocker  | top-1 A.22.industry_and_business_cycles | pack strong | targeted provider yes
 - A.25.geopolitics_and_conflict_dynamics: edge publishable/published | blocker  | top-1 A.25.geopolitics_and_conflict_dynamics | pack strong | targeted provider yes
 - A.28.public_health_and_environmental_exposure: edge publishable/published | blocker  | top-1 A.4.environment_and_exposure | pack strong | targeted provider yes
-- A.29.sports_performance_and_outcomes: edge publishable/published | blocker  | top-1 B.3.6.sports_outcomes_probability_mode | pack  | targeted provider no
+- A.29.sports_performance_and_outcomes: edge publishable/published | blocker  | top-1 A.29.sports_performance_and_outcomes | pack  | targeted provider no
 - A.30.culture_events_and_attention: edge publishable/published | blocker  | top-1 A.30.culture_events_and_attention | pack aligned | targeted provider yes
 - B.3.4.personal_finance_outcomes: edge publishable/published | blocker  | top-1 B.3.8.personal_decisions_and_tradeoffs | pack aligned | targeted provider yes
-- B.3.6.sports_outcomes_probability_mode: edge blocked_no_pick/blocked | blocker provider_required_no_pick | top-1 B.3.6.sports_outcomes_probability_mode | pack  | targeted provider no
+- B.3.6.sports_outcomes_probability_mode: edge publishable/published | blocker  | top-1 B.3.6.sports_outcomes_probability_mode | pack  | targeted provider no
 - B.3.7.travel_personal_outcomes: edge publishable/published | blocker  | top-1 B.3.7.travel_personal_outcomes | pack  | targeted provider yes
 - B.3.8.personal_decisions_and_tradeoffs: edge publishable/published | blocker  | top-1 B.3.8.personal_decisions_and_tradeoffs | pack aligned | targeted provider yes
 - C.2.event_pressure_forecast: edge publishable/published | blocker  | top-1 C.2.event_pressure_forecast | pack aligned | targeted provider yes
@@ -132,7 +129,7 @@ Hard blockers: A.29.sports_performance_and_outcomes
 - B.3.1.love_and_social_outcomes: canonical publishable/published | edge publishable/published | blocker  | decision ready | decision blocker  | thin reason 
 - B.3.2.study_and_exams_outcomes: canonical publishable/published | edge publishable/published | blocker  | decision guided | decision blocker study_decision_needs_clearer_prep_depth_consistency | thin reason 
 - B.3.5.business_idea_outcomes: canonical publishable/published | edge publishable/published | blocker  | decision guided | decision blocker business_decision_needs_clearer_competition_local_conditions | thin reason 
-- B.3.6.sports_outcomes_probability_mode: canonical blocked_no_pick/blocked | edge blocked_no_pick/blocked | blocker provider_required_no_pick | decision  | decision blocker  | thin reason 
+- B.3.6.sports_outcomes_probability_mode: canonical publishable/published | edge publishable/published | blocker  | decision  | decision blocker  | thin reason 
 - B.3.8.personal_decisions_and_tradeoffs: canonical publishable/published | edge publishable/published | blocker  | decision ready | decision blocker  | thin reason 
 - C.1.attention_waves: canonical publishable/published | edge publishable/published | blocker  | decision  | decision blocker  | thin reason 
 - C.3.hype_curve_tracker: canonical publishable/published | edge publishable/published | blocker  | decision  | decision blocker  | thin reason 
@@ -171,14 +168,14 @@ Hard blockers: A.29.sports_performance_and_outcomes
 | A.26.human_history_and_long_run_analogs | markets_policy_geopolitics | A.26.human_history_and_long_run_analogs | A.26.human_history_and_long_run_analogs | publishable/published | publishable/published | ready | preserve_baseline |  | aligned |  |  |
 | A.27.safety_and_incident_risk | health_safety_sports_culture | A.27.safety_and_incident_risk | A.27.safety_and_incident_risk | publishable/published | publishable/published | ready | preserve_baseline |  | aligned |  |  |
 | A.28.public_health_and_environmental_exposure | health_safety_sports_culture | A.28.public_health_and_environmental_exposure | A.4.environment_and_exposure | publishable/published | publishable/published | ready | preserve_baseline |  | strong |  |  |
-| A.29.sports_performance_and_outcomes | health_safety_sports_culture | B.3.6.sports_outcomes_probability_mode | B.3.6.sports_outcomes_probability_mode | publishable/published | publishable/published | ready | preserve_baseline |  |  |  |  |
+| A.29.sports_performance_and_outcomes | health_safety_sports_culture | A.29.sports_performance_and_outcomes | A.29.sports_performance_and_outcomes | publishable/published | publishable/published | ready | preserve_baseline |  |  |  |  |
 | A.30.culture_events_and_attention | health_safety_sports_culture | A.30.culture_events_and_attention | A.30.culture_events_and_attention | publishable/published | publishable/published | ready | preserve_baseline |  | focused |  |  |
 | B.3.1.love_and_social_outcomes | derived_personal_and_meta | B.3.1.love_and_social_outcomes | B.3.1.love_and_social_outcomes | publishable/published | publishable/published | ready | preserve_baseline |  | strong | ready |  |
 | B.3.2.study_and_exams_outcomes | derived_personal_and_meta | B.3.2.study_and_exams_outcomes | B.3.2.study_and_exams_outcomes | publishable/published | publishable/published | ready | preserve_baseline |  | strong | guided |  |
 | B.3.3.work_and_career_outcomes | derived_personal_and_meta | B.3.3.work_and_career_outcomes | B.3.3.work_and_career_outcomes | publishable/published | publishable/published | ready | preserve_baseline |  | aligned | guided |  |
 | B.3.4.personal_finance_outcomes | derived_personal_and_meta | B.3.4.personal_finance_outcomes | B.3.8.personal_decisions_and_tradeoffs | publishable/published | publishable/published | ready | preserve_baseline |  | aligned | ready |  |
 | B.3.5.business_idea_outcomes | derived_personal_and_meta | B.3.5.business_idea_outcomes | B.3.5.business_idea_outcomes | publishable/published | publishable/published | ready | preserve_baseline |  | aligned | guided |  |
-| B.3.6.sports_outcomes_probability_mode | derived_personal_and_meta | A.29.sports_performance_and_outcomes | B.3.6.sports_outcomes_probability_mode | blocked_no_pick/blocked | blocked_no_pick/blocked | quality_follow_up | tighten_shared_quality_or_domain_pack | provider_required_no_pick |  |  |  |
+| B.3.6.sports_outcomes_probability_mode | derived_personal_and_meta | B.3.6.sports_outcomes_probability_mode | B.3.6.sports_outcomes_probability_mode | publishable/published | publishable/published | ready | preserve_baseline |  |  |  |  |
 | B.3.7.travel_personal_outcomes | derived_personal_and_meta | B.3.7.travel_personal_outcomes | B.3.7.travel_personal_outcomes | publishable/published | publishable/published | ready | preserve_baseline |  |  |  |  |
 | B.3.8.personal_decisions_and_tradeoffs | derived_personal_and_meta | B.3.8.personal_decisions_and_tradeoffs | B.3.8.personal_decisions_and_tradeoffs | publishable/published | publishable/published | ready | preserve_baseline |  | strong | ready |  |
 | C.1.attention_waves | derived_personal_and_meta | C.1.attention_waves | C.1.attention_waves | publishable/published | publishable/published | ready | preserve_baseline |  | strong |  |  |
@@ -187,5 +184,3 @@ Hard blockers: A.29.sports_performance_and_outcomes
 | C.4.global_quote_stream | derived_personal_and_meta | C.4.global_quote_stream | C.4.global_quote_stream | publishable/published | publishable/published | ready | preserve_baseline |  | strong |  |  |
 
 ## Domains Requiring Follow-Up
-
-- B.3.6.sports_outcomes_probability_mode: provider_required_no_pick | provider hints: api_football_optional | action: tighten_shared_quality_or_domain_pack

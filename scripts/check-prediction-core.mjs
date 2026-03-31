@@ -119,7 +119,7 @@ addCases(
     'Is this role change the right career move now?',
     'Should I leave consulting for product next year?',
   ],
-  ['B.3.3.work_and_career_outcomes']
+  ['B.3.3.work_and_career_outcomes', 'B.3.5.business_idea_outcomes']
 );
 
 addCases(
@@ -373,9 +373,9 @@ const sportsEvidenceBase = {
 };
 
 const sportsQueryPlan = {
-  query_text: 'Inter vs Juventus',
-  question_side_a: 'Inter',
-  question_side_b: 'Juventus',
+  query_text: 'Inter Milan vs Roma 2026-04-05',
+  question_side_a: 'Inter Milan',
+  question_side_b: 'Roma',
 };
 
 const sportsDomainConfig = {
@@ -420,29 +420,21 @@ const sportsBlockedScorecard = finalizeScorecard(
 
 assert.equal(
   sportsBlockedScorecard.publication_state,
-  'blocked',
-  'A.29 should stay blocked while the sports semantic publish gate is closed'
+  'limited',
+  'A.29 should degrade to a grounded lean while the sports semantic publish gate is still partial.'
 );
-assert.equal(
-  sportsBlockedScorecard.publication_basis.blocker_reason,
-  'provider_required_no_pick',
-  'A.29 should surface provider_required_no_pick until the sports publish gate is ready'
-);
+assert.equal(sportsBlockedScorecard.publication_basis.quality_verdict, 'grounded_lean');
 assert.equal(
   sportsBlockedScorecard.publication_basis.sports_publish_gate_ready,
   false,
-  'A.29 blocked scorecard should expose publish gate readiness as false'
+  'A.29 grounded lean should expose publish gate readiness as false'
 );
 assert.equal(
   sportsBlockedScorecard.publication_basis.sportsbook_readiness_state,
   'forecast_context_only',
-  'Blocked A.29 should still expose a conservative sportsbook readiness state'
+  'Grounded-lean A.29 should still expose a conservative sportsbook readiness state'
 );
-assert.equal(
-  sportsBlockedScorecard.binary_contract,
-  null,
-  'Blocked sports scorecards should not expose a publishable binary contract'
-);
+assert(sportsBlockedScorecard.binary_contract, 'Grounded-lean sports scorecards should still expose a bounded binary contract.');
 
 const sportsReadyScorecard = finalizeScorecard(
   sportsRawScorecard,
@@ -501,7 +493,7 @@ const sportsBenchmarkOnlyScorecard = finalizeScorecard(
   sportsRawScorecard,
   {
     ...sportsEvidenceBase,
-    hard_stop: true,
+    hard_stop: false,
     sports_grounding: {
       provider_required: true,
       provider_configured: true,
@@ -510,12 +502,14 @@ const sportsBenchmarkOnlyScorecard = finalizeScorecard(
       semantic_ready: true,
       overlay_confidence: 0.76,
       overlay_blocker_reason: '',
-      publish_gate_ready: false,
+      publish_gate_ready: true,
+      sports_pick_state: 'publishable_controlled',
+      sports_grounded: true,
       market_consensus_strength: 0.69,
       market_disagreement_score: 0.14,
       price_move_pressure: 0.27,
       narrative_hype_score: 0.58,
-      sportsbook_readiness_state: 'benchmark_only',
+      sportsbook_readiness_state: 'probability_mode_live',
     },
   },
   sportsQueryPlan,
@@ -527,34 +521,25 @@ const sportsBenchmarkOnlyScorecard = finalizeScorecard(
 
 assert.equal(
   sportsBenchmarkOnlyScorecard.publication_state,
-  'blocked',
-  'B.3.6 should stay blocked live even when the enriched sports overlays are available.'
-);
-assert.equal(
-  sportsBenchmarkOnlyScorecard.publication_basis.blocker_reason,
-  'provider_required_no_pick',
-  'B.3.6 should keep provider_required_no_pick until its own sports probability benchmark is ready for live unlock.'
+  'published',
+  'B.3.6 should go live once the fixture is grounded and the sports probability gate is ready.'
 );
 assert.equal(
   sportsBenchmarkOnlyScorecard.publication_basis.sports_semantic_ready,
   true,
-  'B.3.6 should still expose semantic readiness in benchmark mode.'
+  'B.3.6 should expose semantic readiness in live probability mode.'
 );
 assert.equal(
   sportsBenchmarkOnlyScorecard.publication_basis.sports_publish_gate_ready,
-  false,
-  'B.3.6 must not expose the live sports publish gate as ready in this pass.'
+  true,
+  'B.3.6 should expose the live sports publish gate as ready once released.'
 );
 assert.equal(
   sportsBenchmarkOnlyScorecard.publication_basis.sportsbook_readiness_state,
-  'benchmark_only',
-  'B.3.6 should expose a benchmark-only sportsbook readiness state.'
+  'probability_mode_live',
+  'B.3.6 should expose a live probability-mode sportsbook readiness state.'
 );
-assert.equal(
-  sportsBenchmarkOnlyScorecard.binary_contract,
-  null,
-  'B.3.6 should not expose a live binary contract while it stays benchmark-only.'
-);
+assert(sportsBenchmarkOnlyScorecard.binary_contract, 'B.3.6 should expose a live binary contract in probability mode.');
 
 const hoursToMs = 60 * 60 * 1000;
 const now = Date.now();
