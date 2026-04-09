@@ -1,5 +1,6 @@
 import { GoogleAuthProvider, auth, signInWithPopup, signOut } from 'firebase/auth';
 import { db } from 'firebase/firestore';
+import { loginWithEmailPassword, registerWithEmailPassword } from './platform/appwriteClient';
 
 export { auth, db };
 export const googleProvider = new GoogleAuthProvider();
@@ -66,6 +67,37 @@ export const loginWithGoogle = async () => {
       alert(getGoogleLoginErrorMessage(error));
     }
     return null;
+  }
+};
+
+function getEmailAuthErrorMessage(error: any) {
+  switch (error?.code) {
+    case 401:
+      return 'Email o password non validi.';
+    case 409:
+      return 'Esiste gia un account con questa email. Prova ad accedere invece di crearne uno nuovo.';
+    case 429:
+      return 'Troppi tentativi. Aspetta un momento e riprova.';
+    default:
+      return error?.message || 'Autenticazione non riuscita.';
+  }
+}
+
+export const loginWithEmail = async (email: string, password: string) => {
+  try {
+    return await loginWithEmailPassword(email, password);
+  } catch (error: any) {
+    console.error('Error logging in with email', error);
+    throw new Error(getEmailAuthErrorMessage(error));
+  }
+};
+
+export const registerWithEmail = async (name: string, email: string, password: string) => {
+  try {
+    return await registerWithEmailPassword(name, email, password);
+  } catch (error: any) {
+    console.error('Error registering with email', error);
+    throw new Error(getEmailAuthErrorMessage(error));
   }
 };
 

@@ -1,4 +1,4 @@
-import { Account, Client, OAuthProvider } from 'appwrite';
+import { Account, Client, ID, OAuthProvider } from 'appwrite';
 
 export type AppwriteSessionUser = {
   uid: string;
@@ -114,6 +114,19 @@ export async function loginWithGoogleRedirect() {
   failure.searchParams.set('authError', 'google');
   account.createOAuth2Session(OAuthProvider.Google, success.toString(), failure.toString());
   return null;
+}
+
+export async function loginWithEmailPassword(email: string, password: string) {
+  await account.createEmailPasswordSession(email.trim(), password);
+  return refreshSessionUser();
+}
+
+export async function registerWithEmailPassword(name: string, email: string, password: string) {
+  const trimmedEmail = email.trim();
+  const trimmedName = name.trim();
+  await account.create(ID.unique(), trimmedEmail, password, trimmedName || undefined);
+  await account.createEmailPasswordSession(trimmedEmail, password);
+  return refreshSessionUser();
 }
 
 export async function logoutCurrentSession() {

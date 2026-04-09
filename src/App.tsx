@@ -6,7 +6,7 @@
 import React, { Suspense, lazy, useEffect, useState } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
-import { auth, db, loginWithGoogle, logout } from './firebase';
+import { auth, db, loginWithEmail, loginWithGoogle, logout, registerWithEmail } from './firebase';
 import { onAuthStateChanged, type User } from 'firebase/auth';
 import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { CrystalPlanProvider } from './context/CrystalPlanContext';
@@ -147,20 +147,146 @@ function UtilitySurface({
   );
 }
 
-function SigninPrompt({ onLogin }: { onLogin: () => void }) {
+function SigninPrompt({
+  onGoogleLogin,
+  onEmailLogin,
+  onEmailRegister,
+  authError,
+}: {
+  onGoogleLogin: () => void;
+  onEmailLogin: (email: string, password: string) => Promise<void>;
+  onEmailRegister: (name: string, email: string, password: string) => Promise<void>;
+  authError?: string | null;
+}) {
+  const [mode, setMode] = useState<'signin' | 'signup'>('signin');
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [message, setMessage] = useState<string | null>(authError || null);
+
+  useEffect(() => {
+    setMessage(authError || null);
+  }, [authError]);
+
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (submitting) return;
+    setSubmitting(true);
+    setMessage(null);
+
+    try {
+      if (mode === 'signup') {
+        await onEmailRegister(name, email, password);
+      } else {
+        await onEmailLogin(email, password);
+      }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Autenticazione non riuscita.');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   return (
     <UtilitySurface
       kicker="Sign in"
       title="Keep going without losing the thread."
       body="Crystal v1 supports a real guest forecast lane, but saving, following, and internal beta surfaces stay behind sign-in so the product never offers buttons that dead-end."
     >
-      <button
-        type="button"
-        onClick={onLogin}
-        className="rounded-full bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800"
-      >
-        Sign in with Google
-      </button>
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+        <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-5">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Google</div>
+          <p className="mt-3 text-sm leading-7 text-slate-600">
+            Usa Google se preferisci un accesso rapido. Se Google continua a mostrare un errore, entra con email qui a
+            destra e continuiamo a lavorare senza blocchi.
+          </p>
+          <button
+            type="button"
+            onClick={onGoogleLogin}
+            className="mt-5 rounded-full bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800"
+          >
+            Sign in with Google
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="rounded-[28px] border border-slate-200 bg-white p-5">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setMode('signin')}
+              className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+                mode === 'signin' ? 'bg-slate-950 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+              }`}
+            >
+              Sign in with email
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode('signup')}
+              className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+                mode === 'signup' ? 'bg-slate-950 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+              }`}
+            >
+              Create account
+            </button>
+          </div>
+
+          <div className="mt-5 space-y-4">
+            {mode === 'signup' ? (
+              <label className="block">
+                <span className="mb-2 block text-sm font-medium text-slate-700">Name</span>
+                <input
+                  type="text"
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                  placeholder="Your name"
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-slate-400 focus:bg-white"
+                />
+              </label>
+            ) : null}
+
+            <label className="block">
+              <span className="mb-2 block text-sm font-medium text-slate-700">Email</span>
+              <input
+                type="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                placeholder="you@example.com"
+                autoComplete="email"
+                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-slate-400 focus:bg-white"
+                required
+              />
+            </label>
+
+            <label className="block">
+              <span className="mb-2 block text-sm font-medium text-slate-700">Password</span>
+              <input
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                placeholder="At least 8 characters"
+                autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
+                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-slate-400 focus:bg-white"
+                minLength={8}
+                required
+              />
+            </label>
+          </div>
+
+          {message ? (
+            <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">{message}</div>
+          ) : null}
+
+          <button
+            type="submit"
+            disabled={submitting}
+            className="mt-5 rounded-full bg-[#1453e8] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#0f44bf] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {submitting ? 'Working...' : mode === 'signup' ? 'Create account' : 'Sign in with email'}
+          </button>
+        </form>
+      </div>
     </UtilitySurface>
   );
 }
@@ -238,6 +364,11 @@ function AppRouter() {
     getDefaultWorldSimPreviewDataset()
   );
   const [worldSimJobRef, setWorldSimJobRef] = useState<WorldSimJobRef | null>(null);
+  const authErrorCode = new URLSearchParams(location.search).get('authError');
+  const authErrorMessage =
+    authErrorCode === 'google'
+      ? 'Google sign-in is temporarily unavailable right now. Use email/password below while the Google provider is being reconfigured.'
+      : null;
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -301,6 +432,26 @@ function AppRouter() {
     }
   };
 
+  const handleEmailLogin = async (email: string, password: string, targetPath?: string) => {
+    const next = sanitizeRoutePath(targetPath || `${location.pathname}${location.search}${location.hash}`);
+    writePendingRoute(next);
+    const signedInUser = await loginWithEmail(email, password);
+    if (signedInUser) {
+      clearPendingRoute();
+      await navigate(next, { replace: true });
+    }
+  };
+
+  const handleEmailRegister = async (name: string, email: string, password: string, targetPath?: string) => {
+    const next = sanitizeRoutePath(targetPath || `${location.pathname}${location.search}${location.hash}`);
+    writePendingRoute(next);
+    const signedInUser = await registerWithEmail(name, email, password);
+    if (signedInUser) {
+      clearPendingRoute();
+      await navigate(next, { replace: true });
+    }
+  };
+
   const handleLogout = async () => {
     await logout();
     clearPendingRoute();
@@ -330,7 +481,18 @@ function AppRouter() {
   );
 
   const protectedRoute = (children: React.ReactNode) =>
-    user ? children : <SigninPrompt onLogin={() => void handleLogin(`${location.pathname}${location.search}${location.hash}`)} />;
+    user ? (
+      children
+    ) : (
+      <SigninPrompt
+        onGoogleLogin={() => void handleLogin(`${location.pathname}${location.search}${location.hash}`)}
+        onEmailLogin={(email, password) => handleEmailLogin(email, password, `${location.pathname}${location.search}${location.hash}`)}
+        onEmailRegister={(name, email, password) =>
+          handleEmailRegister(name, email, password, `${location.pathname}${location.search}${location.hash}`)
+        }
+        authError={authErrorMessage}
+      />
+    );
 
   const betaNextletterEnabled = isFeatureEnabled('beta_nextletter');
   const betaWatchlistEnabled = isFeatureEnabled('beta_watchlist');
@@ -369,7 +531,19 @@ function AppRouter() {
         />
         <Route path="/gallery" element={shell(<GalleryPage user={user} onLogin={() => void handleLogin('/gallery')} />)} />
         <Route path="/sim" element={<Navigate to="/beta/world-sim" replace />} />
-        <Route path="/signin" element={shell(<SigninPrompt onLogin={() => void handleLogin(readPendingRoute() || '/forecast')} />)} />
+        <Route
+          path="/signin"
+          element={shell(
+            <SigninPrompt
+              onGoogleLogin={() => void handleLogin(readPendingRoute() || '/forecast')}
+              onEmailLogin={(email, password) => handleEmailLogin(email, password, readPendingRoute() || '/forecast')}
+              onEmailRegister={(name, email, password) =>
+                handleEmailRegister(name, email, password, readPendingRoute() || '/forecast')
+              }
+              authError={authErrorMessage}
+            />
+          )}
+        />
         <Route path="/pricing" element={shell(<PricingPage onLogin={() => void handleLogin('/pricing')} />)} />
         <Route path="/about" element={shell(<AboutPage />)} />
         <Route
