@@ -19,6 +19,7 @@ const OAUTH_SECRET_PARAM = 'secret';
 
 const endpoint = (import.meta.env.VITE_APPWRITE_ENDPOINT || DEFAULT_ENDPOINT).replace(/\/$/, '');
 const projectId = import.meta.env.VITE_APPWRITE_PROJECT_ID || DEFAULT_PROJECT_ID;
+const autoAnonymousSessionEnabled = (import.meta.env.VITE_APPWRITE_AUTO_ANONYMOUS || 'true').toLowerCase() !== 'false';
 
 const client = new Client().setEndpoint(endpoint).setProject(projectId);
 const account = new Account(client);
@@ -32,6 +33,13 @@ function sanitizeString(value: unknown) {
   return typeof value === 'string' && value.trim() ? value : null;
 }
 
+function isAnonymousAccount(model: Record<string, any>) {
+  const email = sanitizeString(model.email);
+  const phone = sanitizeString(model.phone);
+  const targets = Array.isArray(model.targets) ? model.targets : [];
+  return !email && !phone && targets.length === 0;
+}
+
 function buildUser(model: Record<string, any> | null): AppwriteSessionUser | null {
   if (!model || !sanitizeString(model.$id)) return null;
 
@@ -41,7 +49,7 @@ function buildUser(model: Record<string, any> | null): AppwriteSessionUser | nul
     displayName: sanitizeString(model.name),
     photoURL: sanitizeString(model.prefs?.photoURL ?? model.prefs?.photoUrl ?? model.prefs?.avatarUrl),
     emailVerified: Boolean(model.emailVerification),
-    isAnonymous: Boolean(model.status === false && !model.email),
+    isAnonymous: isAnonymousAccount(model),
     async getIdToken() {
       const jwt = await account.createJWT();
       return jwt.jwt;
@@ -76,12 +84,23 @@ async function exchangeOauthSessionIfNeeded() {
   stripOauthParams();
 }
 
+async function createAnonymousSessionIfEnabled() {
+  if (!autoAnonymousSessionEnabled) return null;
+
+  try {
+    await account.createAnonymousSession();
+    return buildUser(await account.get());
+  } catch (_error) {
+    return null;
+  }
+}
+
 export async function refreshSessionUser() {
   try {
     await exchangeOauthSessionIfNeeded();
     currentUser = buildUser(await account.get());
   } catch (_error) {
-    currentUser = null;
+    currentUser = await createAnonymousSessionIfEnabled();
   }
   notifyAuthListeners();
   return currentUser;
@@ -133,8 +152,8 @@ export async function logoutCurrentSession() {
   try {
     await account.deleteSession('current');
   } finally {
-    currentUser = null;
-    notifyAuthListeners();
+    bootstrapPromise = null;
+    await refreshSessionUser();
   }
 }
 
