@@ -38,7 +38,8 @@ function isSportsCard(card: CardData) {
   return (
     card.card_type === 'sports_fixture_board' ||
     card.domain === 'A.29.sports_performance_and_outcomes' ||
-    card.domain === 'A.13.sports.match_outcomes'
+    card.domain === 'A.13.sports.match_outcomes' ||
+    card.domain === 'B.3.6.sports_outcomes_probability_mode'
   );
 }
 
@@ -48,6 +49,122 @@ function formatEvidenceTime(asOfUtc: string) {
   const hours = Math.floor(diff / (1000 * 60 * 60));
   if (hours < 1) return 'Fresh data';
   return `${hours}h old`;
+}
+
+function getSportsDecisionLabel(state?: string | null) {
+  switch (state) {
+    case 'edge':
+      return 'Edge';
+    case 'lean':
+      return 'Lean';
+    case 'no_bet':
+      return 'No bet';
+    case 'grounded_lean':
+      return 'Grounded lean';
+    case 'hold':
+      return 'Hold';
+    default:
+      return 'Sports read';
+  }
+}
+
+function getSportsDecisionTone(state?: string | null) {
+  switch (state) {
+    case 'edge':
+      return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+    case 'lean':
+      return 'border-sky-200 bg-sky-50 text-sky-700';
+    case 'no_bet':
+      return 'border-amber-200 bg-amber-50 text-amber-800';
+    case 'grounded_lean':
+      return 'border-slate-200 bg-slate-50 text-slate-700';
+    default:
+      return 'border-rose-200 bg-rose-50 text-rose-700';
+  }
+}
+
+function getDecisionStateLabel(state?: string | null) {
+  switch (state) {
+    case 'edge':
+      return 'Edge';
+    case 'lean':
+      return 'Lean';
+    case 'no_action':
+      return 'No action';
+    case 'grounded_lean':
+      return 'Grounded lean';
+    case 'hold':
+      return 'Hold';
+    default:
+      return 'Decision';
+  }
+}
+
+function getDecisionStateTone(state?: string | null) {
+  switch (state) {
+    case 'edge':
+      return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+    case 'lean':
+      return 'border-sky-200 bg-sky-50 text-sky-700';
+    case 'no_action':
+      return 'border-amber-200 bg-amber-50 text-amber-800';
+    case 'grounded_lean':
+      return 'border-slate-200 bg-slate-50 text-slate-700';
+    default:
+      return 'border-rose-200 bg-rose-50 text-rose-700';
+  }
+}
+
+function formatSportsPercent(value?: number | null) {
+  const num = Number(value);
+  return Number.isFinite(num) ? `${Math.round(num * 100)}%` : '--';
+}
+
+function formatSportsPrice(value?: number | null) {
+  const num = Number(value);
+  return Number.isFinite(num) && num > 0 ? num.toFixed(2) : '--';
+}
+
+function inferSportsSideKey(
+  frame: {
+    home?: number | null;
+    draw?: number | null;
+    away?: number | null;
+    home_label?: string | null;
+    draw_label?: string | null;
+    away_label?: string | null;
+  } | null | undefined,
+  label?: string | null
+) {
+  if (!frame || !label) return '';
+  const normalizedLabel = label.trim().toLowerCase();
+  const candidates: Array<'home' | 'draw' | 'away'> = ['home', 'draw', 'away'];
+  for (const key of candidates) {
+    const candidateLabel = frame[`${key}_label` as const];
+    if (typeof candidateLabel === 'string' && candidateLabel.trim().toLowerCase() === normalizedLabel) {
+      return key;
+    }
+  }
+  if (normalizedLabel.includes('draw') || normalizedLabel.includes('pareggio') || normalizedLabel.includes('x')) {
+    return 'draw';
+  }
+  return '';
+}
+
+function getSportsFrameValue(
+  frame: {
+    home?: number | null;
+    draw?: number | null;
+    away?: number | null;
+  } | null | undefined,
+  sideKey: string
+) {
+  if (!frame || !sideKey) return null;
+  if (sideKey === 'home' || sideKey === 'draw' || sideKey === 'away') {
+    const value = frame[sideKey];
+    return Number.isFinite(Number(value)) ? Number(value) : null;
+  }
+  return null;
 }
 
 function SportsFixtureRow({ fixture, rank }: { fixture: FixtureRead; rank: number }) {
@@ -113,6 +230,50 @@ function SportsCrystalCard({
 }) {
   const rankedItems = (card.ranked_list || []).slice(0, 5);
   const fixtureReads = (card.fixture_reads || []).slice(0, 8);
+  const sportsDecision = card.world_sim?.sports_decision || null;
+  const decisionState =
+    card.sports_decision_state || sportsDecision?.decision_state || card.sports_pick_state || (card.sports_grounded ? 'grounded_lean' : 'hold');
+  const decisionReason = card.sports_decision_reason || sportsDecision?.decision_reason || card.summary;
+  const noBetReason = card.sports_no_bet_reason || sportsDecision?.no_bet_reason || null;
+  const modelProbabilities =
+    card.sports_model_probabilities || sportsDecision?.model_probabilities || card.sports_grounding?.model_probabilities || null;
+  const marketProbabilities =
+    card.sports_market_probabilities || sportsDecision?.market_probabilities || card.sports_grounding?.market_probabilities || null;
+  const fairPrices = card.sports_fair_prices || sportsDecision?.fair_prices || card.sports_grounding?.fair_prices || null;
+  const bestEdgeKey = card.sports_edge_delta?.best_key || sportsDecision?.edge_delta?.best_key || '';
+  const currentLean =
+    card.sports_model_favorite ||
+    sportsDecision?.model_favorite ||
+    card.sports_grounding?.model_favorite ||
+    card.sports_grounding?.winning_side ||
+    card.primary_call ||
+    'Grounded lean';
+  const marketLean =
+    card.sports_market_favorite || sportsDecision?.market_favorite || card.sports_grounding?.market_favorite || null;
+  const selectedSideKey =
+    bestEdgeKey ||
+    inferSportsSideKey(modelProbabilities, currentLean) ||
+    inferSportsSideKey(marketProbabilities, marketLean || currentLean);
+  const modelProbability = getSportsFrameValue(modelProbabilities, selectedSideKey);
+  const marketProbability = getSportsFrameValue(marketProbabilities, selectedSideKey);
+  const fairPrice = getSportsFrameValue(fairPrices, selectedSideKey);
+  const marketPrice = marketProbability && marketProbability > 0 ? 1 / marketProbability : null;
+  const edgePoints = Number(card.sports_edge_delta?.best_delta ?? sportsDecision?.edge_delta?.best_delta);
+  const fragilityScore = Number(card.sports_fragility_score ?? sportsDecision?.fragility_score);
+  const simulationConfidence = Number(card.sports_simulation_confidence ?? sportsDecision?.simulation_confidence);
+  const flipConditions =
+    (card.sports_flip_conditions && card.sports_flip_conditions.length > 0
+      ? card.sports_flip_conditions
+      : sportsDecision?.flip_conditions && sportsDecision.flip_conditions.length > 0
+        ? sportsDecision.flip_conditions
+        : card.invalidators || []
+    ).slice(0, 4);
+  const decisionNotes = [
+    card.fixture_window_state ? `Fixture window: ${card.fixture_window_state.replace(/_/g, ' ')}` : '',
+    marketLean ? `Market favorite: ${marketLean}` : '',
+    Number.isFinite(edgePoints) ? `Model vs market delta: ${Math.round(edgePoints * 100)} pts` : '',
+    Number.isFinite(simulationConfidence) ? `Simulation confidence: ${Math.round(simulationConfidence * 100)}%` : '',
+  ].filter(Boolean);
 
   return (
     <motion.div
@@ -171,6 +332,82 @@ function SportsCrystalCard({
             {card.verdict}
           </p>
           <p className="mt-4 text-[16px] leading-8 text-slate-700">{card.summary}</p>
+        </div>
+
+        <div className="mt-6 rounded-[28px] border border-slate-200 bg-white p-6">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-500">Decision layer</div>
+              <div className="mt-2 text-xl font-display font-bold text-slate-950">{currentLean}</div>
+            </div>
+            <span
+              className={cn(
+                'rounded-full border px-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em]',
+                getSportsDecisionTone(decisionState)
+              )}
+            >
+              {getSportsDecisionLabel(decisionState)}
+            </span>
+          </div>
+
+          <p className="mt-4 text-sm leading-7 text-slate-700">{decisionReason}</p>
+
+          <div className="mt-5 grid gap-3 md:grid-cols-4">
+            <div className="rounded-[22px] border border-slate-200 bg-slate-50 px-4 py-4">
+              <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">Model prob</div>
+              <div className="mt-2 text-xl font-semibold text-slate-950">{formatSportsPercent(modelProbability)}</div>
+            </div>
+            <div className="rounded-[22px] border border-slate-200 bg-slate-50 px-4 py-4">
+              <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">Fair price</div>
+              <div className="mt-2 text-xl font-semibold text-slate-950">{formatSportsPrice(fairPrice)}</div>
+            </div>
+            <div className="rounded-[22px] border border-slate-200 bg-slate-50 px-4 py-4">
+              <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">Market price</div>
+              <div className="mt-2 text-xl font-semibold text-slate-950">{formatSportsPrice(marketPrice)}</div>
+            </div>
+            <div className="rounded-[22px] border border-slate-200 bg-slate-50 px-4 py-4">
+              <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">Fragility</div>
+              <div className="mt-2 text-xl font-semibold text-slate-950">
+                {Number.isFinite(fragilityScore) ? `${Math.round(fragilityScore * 100)}%` : '--'}
+              </div>
+            </div>
+          </div>
+
+          {decisionNotes.length > 0 && (
+            <div className="mt-4 flex flex-wrap gap-2">
+              {decisionNotes.map((note) => (
+                <span
+                  key={note}
+                  className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700"
+                >
+                  {note}
+                </span>
+              ))}
+            </div>
+          )}
+
+          {noBetReason && (
+            <div className="mt-4 rounded-[22px] border border-amber-200 bg-amber-50 px-4 py-4 text-sm leading-7 text-amber-900">
+              <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-amber-700">Why this is no bet</div>
+              <p className="mt-2">{noBetReason}</p>
+            </div>
+          )}
+
+          {flipConditions.length > 0 && (
+            <div className="mt-4 rounded-[22px] border border-slate-200 bg-[#fcfbf8] px-4 py-4">
+              <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">What could flip it</div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {flipConditions.map((item) => (
+                  <span
+                    key={item}
+                    className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700"
+                  >
+                    {item}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {card.trust_layer.data_sufficiency_flag !== 'sufficient' && (
@@ -383,6 +620,37 @@ function BlueprintCrystalCard({
   const stateLabel = getCardStateLabel(card.card_state);
   const evidence = card.evidence_drawer;
   const confidencePercent = Math.round(card.trust_layer.confidence_score * 100);
+  const whaleMode = card.world_sim?.whale_mode || null;
+  const decisionState = card.decision_state || whaleMode?.decision_state || card.publication_basis?.decision_state || null;
+  const decisionReason = card.decision_reason || whaleMode?.decision_reason || card.summary;
+  const noActionReason = card.no_action_reason || whaleMode?.no_action_reason || card.publication_basis?.no_action_reason || null;
+  const referenceSourceClass =
+    card.reference_source_class || whaleMode?.reference_source_class || card.publication_basis?.reference_source_class || null;
+  const referenceProbability =
+    card.reference_probability ??
+    whaleMode?.reference_probability ??
+    card.publication_basis?.reference_probability ??
+    marketProbability ??
+    null;
+  const modelProbabilityForDecision = card.world_sim?.whale_mode?.model_probability ?? crystalProbability ?? null;
+  const edgeDelta = card.edge_delta ?? whaleMode?.edge_delta ?? card.publication_basis?.edge_delta ?? null;
+  const fragilityScore = card.fragility_score ?? whaleMode?.fragility_score ?? card.publication_basis?.fragility_score ?? null;
+  const simulationConfidence =
+    card.simulation_confidence ?? whaleMode?.simulation_confidence ?? card.publication_basis?.simulation_confidence ?? null;
+  const decisionNotes = [
+    referenceSourceClass ? `Reference frame: ${referenceSourceClass.replace(/_/g, ' ')}` : '',
+    whaleMode?.reference_source ? `Reference source: ${whaleMode.reference_source}` : '',
+    Number.isFinite(Number(simulationConfidence)) ? `Simulation confidence: ${Math.round(Number(simulationConfidence) * 100)}%` : '',
+  ].filter(Boolean);
+  const genericFlipConditions =
+    (Array.isArray(card.flip_conditions) && card.flip_conditions.length > 0
+      ? card.flip_conditions
+      : Array.isArray(whaleMode?.flip_conditions) && whaleMode.flip_conditions.length > 0
+        ? whaleMode.flip_conditions
+        : Array.isArray(card.invalidators)
+          ? card.invalidators
+          : []
+    ).slice(0, 4);
 
   return (
     <motion.div
@@ -481,6 +749,84 @@ function BlueprintCrystalCard({
           </p>
           <p className="mt-4 text-[16px] leading-8 text-slate-700">{card.summary}</p>
         </div>
+
+        {decisionState && (
+          <div className="mt-5 rounded-[24px] border border-slate-200 bg-white p-5 shadow-[0_14px_30px_rgba(15,23,42,0.04)]">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-500">Decision layer</div>
+                <div className="mt-2 text-xl font-display font-bold text-slate-950">{getDecisionStateLabel(decisionState)}</div>
+              </div>
+              <span
+                className={cn(
+                  'rounded-full border px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em]',
+                  getDecisionStateTone(decisionState)
+                )}
+              >
+                {getDecisionStateLabel(decisionState)}
+              </span>
+            </div>
+
+            <p className="mt-4 text-sm leading-7 text-slate-700">{decisionReason}</p>
+
+            <div className="mt-4 grid gap-3 md:grid-cols-4">
+              <div className="rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-3">
+                <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Crystal</div>
+                <div className="mt-2 text-lg font-semibold text-slate-950">{formatProbabilityLabel(modelProbabilityForDecision)}</div>
+              </div>
+              <div className="rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-3">
+                <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Reference</div>
+                <div className="mt-2 text-lg font-semibold text-slate-950">{formatProbabilityLabel(referenceProbability)}</div>
+              </div>
+              <div className="rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-3">
+                <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Edge delta</div>
+                <div className="mt-2 text-lg font-semibold text-slate-950">{formatSignedDelta(edgeDelta)}</div>
+              </div>
+              <div className="rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-3">
+                <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Fragility</div>
+                <div className="mt-2 text-lg font-semibold text-slate-950">
+                  {Number.isFinite(Number(fragilityScore)) ? `${Math.round(Number(fragilityScore) * 100)}%` : '--'}
+                </div>
+              </div>
+            </div>
+
+            {decisionNotes.length > 0 && (
+              <div className="mt-4 flex flex-wrap gap-2">
+                {decisionNotes.map((note) => (
+                  <span
+                    key={note}
+                    className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700"
+                  >
+                    {note}
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {noActionReason && (
+              <div className="mt-4 rounded-[20px] border border-amber-200 bg-amber-50 px-4 py-4 text-sm leading-7 text-amber-900">
+                <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-amber-700">Why Crystal waits</div>
+                <p className="mt-2">{noActionReason}</p>
+              </div>
+            )}
+
+            {genericFlipConditions.length > 0 && (
+              <div className="mt-4 rounded-[20px] border border-slate-200 bg-[#fcfbf8] px-4 py-4">
+                <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">What could flip it</div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {genericFlipConditions.map((item) => (
+                    <span
+                      key={item}
+                      className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700"
+                    >
+                      {item}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {hasMarketSignal && (
           <div className="mt-5 rounded-[24px] border border-slate-200 bg-white p-5 shadow-[0_14px_30px_rgba(15,23,42,0.04)]">

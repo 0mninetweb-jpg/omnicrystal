@@ -1,14 +1,19 @@
 const crypto = require("node:crypto");
 const { Type } = require("@google/genai");
 const { attachPolymarketToWorldSimDigest } = require("./polymarket");
+const { buildSportsDecisionFrame } = require("./crystalCore/sportsDecision");
 
 const WORLD_SIM_CACHE_VERSION = "oracle-world-sim-v1";
 const WORLD_SIM_CACHE_TTL_HOURS = 24;
 const CATALOG_NATIVE_WORLD_SIM_FAMILIES = {
+  "A.23.markets_and_asset_regimes": "market_regime",
   "A.24.governance_policy_and_public_timeline": "governance_timeline",
   "A.25.geopolitics_and_conflict_dynamics": "geopolitics_conflict",
   "A.26.human_history_and_long_run_analogs": "long_run_analog",
   "A.30.culture_events_and_attention": "culture_event_pressure",
+  "A.29.sports_performance_and_outcomes": "sports_match_decision",
+  "B.3.5.business_idea_outcomes": "business_tradeoff",
+  "B.3.6.sports_outcomes_probability_mode": "sports_match_decision",
   "B.3.8.personal_decisions_and_tradeoffs": "personal_tradeoff",
   "C.1.attention_waves": "attention_narrative",
   "C.3.hype_curve_tracker": "attention_narrative",
@@ -87,8 +92,18 @@ function resolveWorldSimFamily(queryPlan = {}, queryText = "", simulationContext
   if (/(war|geopolit|sanction|tariff|border|force posture|taiwan|ukraine|ceasefire|conflitto|sanzion|dazi)/i.test(corpus)) {
     return "geopolitics_conflict";
   }
+  if (/(bitcoin|ethereum|nasdaq|s&p|sp500|equities|market regime|risk appetite|oil price|gold|fx|eurusd|asset regime|crypto|mercat)/i.test(corpus)) {
+    return "market_regime";
+  }
   if (/(historical analog|historical analogue|long-run analog|long run analog|regime similarity|recurrence)/i.test(corpus)) {
     return "long_run_analog";
+  }
+  if (
+    /(housing|real estate|rent|rents|affordability|gentrification|mortgage|listing|listings|tourism pressure|mobility pressure|urban|city|neighborhood|housing pressure|affitti|casa|immobiliare|quartiere|mobilit)/i.test(
+      corpus
+    )
+  ) {
+    return "city_local_pressure";
   }
   if (/(culture|festival|concert|event pressure|crowding|venue|tourism pressure|cultura|evento)/i.test(corpus)) {
     return "culture_event_pressure";
@@ -96,8 +111,14 @@ function resolveWorldSimFamily(queryPlan = {}, queryText = "", simulationContext
   if (/(attention|narrative|quote stream|hype|momentum|audience|viral|media breadth|attenzione|quote)/i.test(corpus)) {
     return "attention_narrative";
   }
+  if (/(vs\b|contro|moneyline|draw no bet|double chance|fixture|kickoff|lineup|injury|serie a|premier league|champions league|calcio|football match)/i.test(corpus)) {
+    return "sports_match_decision";
+  }
   if (/(should i move|buy now or wait|tradeoff|opportunity cost|reversibility|wait six months)/i.test(corpus)) {
     return "personal_tradeoff";
+  }
+  if (/(startup|runway|product-market fit|business idea|small business|launch this startup|launch this marketplace|open a cafe|open a caf[eè]|company survive)/i.test(corpus)) {
+    return "business_tradeoff";
   }
   return "";
 }
@@ -147,6 +168,110 @@ function createEmptyDigest(defaults = {}) {
     },
     defaults
   );
+}
+
+function buildDeterministicFallbackWorldSimDigest({
+  queryText = "",
+  queryPlan = {},
+  plan = "free",
+  engine = "standard",
+  simulationContext = null,
+  reason = "",
+} = {}) {
+  const template = resolveWorldSimTemplate(queryPlan, queryText, simulationContext);
+  const domainFamily = resolveWorldSimFamily(queryPlan, queryText, simulationContext) || template;
+  const horizon =
+    safeText(simulationContext?.horizon) ||
+    safeText(queryPlan?.horizons?.[0]?.horizon_id) ||
+    safeText(queryPlan?.event_date) ||
+    "30d";
+  const primaryEntity =
+    safeText(simulationContext?.entity_event_location?.entity) ||
+    safeText(queryPlan?.entities?.[0]?.label) ||
+    safeText(queryPlan?.jurisdiction) ||
+    "the system";
+  const location =
+    safeText(simulationContext?.entity_event_location?.location) ||
+    safeText(queryPlan?.filters?.location) ||
+    safeText(queryPlan?.jurisdiction) ||
+    "the primary operating geography";
+  const domainSummary = {
+    geopolitics_conflict: "Actor alignment, escalation risk, and second-order spillovers remain the dominant moving pieces.",
+    governance_timeline: "Institutional sequencing and coalition incentives are still more important than any single headline.",
+    market_regime: "Cross-asset sensitivity, liquidity conditions, and narrative pressure are the main transmission channels.",
+    city_local_pressure: "Local affordability, neighborhood pressure, and mobility constraints shape the visible system response.",
+    sports_match_decision: "Lineup stability, match state volatility, and market disagreement shape the reachable outcomes.",
+    business_tradeoff: "Execution quality, runway, and adoption friction still dominate the local decision surface.",
+    personal_tradeoff: "Reversibility, timing, and downside containment matter more than forcing a single sharp move.",
+    attention_narrative: "Narrative breadth and attention durability define whether the signal compounds or fades.",
+    culture_event_pressure: "Crowding, logistics, and attention concentration remain tightly linked in the current setup.",
+    long_run_analog: "Historical similarity is informative, but only when current drivers keep matching the old regime.",
+  };
+  const summary =
+    domainSummary[domainFamily] ||
+    "Crystal is keeping the world model active with an internal fallback digest while the full graph pass is unavailable.";
+
+  return createEmptyDigest({
+    enabled: true,
+    simulation_mode: "deterministic_fallback",
+    quality_score: 0.38,
+    graph_coverage: 0.36,
+    agent_convergence: 0.34,
+    graph_age_hours: 0,
+    narrative_arc: `Fallback MiroFish view for ${primaryEntity} over ${horizon}. ${summary}`,
+    pivotal_actors: [primaryEntity, location, `${template || "public_discourse"} feedback loops`],
+    intervention_points: [
+      `Watch for fast narrative or policy changes around ${primaryEntity}.`,
+      `Track whether conditions in ${location} reinforce or weaken the current path.`,
+    ],
+    counterfactuals: [
+      {
+        label: "Stabilization path",
+        outcome: `If the current stressors cool, ${primaryEntity} can drift back toward the baseline over ${horizon}.`,
+      },
+      {
+        label: "Acceleration path",
+        outcome: `If the dominant trigger intensifies, second-order effects around ${location} become materially more important.`,
+      },
+    ],
+    source_set: ["worldsim-fallback", "appwrite-runtime"],
+    scenario_frequencies: [
+      { label: "base_case", probability: 0.58 },
+      { label: "stress_case", probability: 0.42 },
+    ],
+    probability_delta: 0,
+    confidence_delta: -0.02,
+    graph_summary: `Crystal kept the simulation lifecycle alive for "${queryText}" using a deterministic fallback on ${engine}/${plan}.`,
+    community_summaries: [
+      `Primary attention remains centered on ${primaryEntity}.`,
+      `Local effects are most visible in ${location}.`,
+    ],
+    tensions: [
+      `${primaryEntity} vs baseline stability over ${horizon}.`,
+      `Signal accumulation vs mean reversion in ${location}.`,
+    ],
+    regime_shift_risk: domainFamily === "market_regime" || domainFamily === "geopolitics_conflict" ? 0.5 : 0.42,
+    actor_dependency: 0.46,
+    cascade_pressure: 0.41,
+    trigger_map: [
+      `A fresh shock tied to ${primaryEntity}.`,
+      `A rapid change in participation, liquidity, or institutional stance around ${location}.`,
+    ],
+    invalidation_map: [
+      "Broader live evidence no longer supports the current system framing.",
+      `Conditions in ${location} normalize faster than expected.`,
+    ],
+    scenario_split_cause: [
+      "Fallback digest uses deterministic heuristics instead of a live Gemini graph build.",
+    ],
+    cache_status: "miss",
+    notes: [
+      reason || "Gemini runtime unavailable; using deterministic internal WorldSim fallback.",
+      "Lifecycle, checkpointing, and downstream publication remain active on Appwrite.",
+    ],
+    queryPlan,
+    simulationContext,
+  });
 }
 
 function normalizeCounterfactuals(counterfactuals) {
@@ -207,6 +332,26 @@ function normalizePredictionMarketFrame(frame, queryPlan = {}) {
 }
 
 function normalizeWorldSimDigest(raw = {}, defaults = {}) {
+  const sportsDecision =
+    raw?.sports_decision && typeof raw.sports_decision === "object"
+      ? raw.sports_decision
+      : safeText(defaults?.simulationContext?.domain_family) === "sports_match_decision"
+        ? buildSportsDecisionFrame({
+            sportsGrounding: defaults?.simulationContext?.sports_grounding || {},
+            sportsMarketOverlay: defaults?.simulationContext?.sports_market_overlay || {},
+            sportsSemanticOverlay: defaults?.simulationContext?.sports_semantic_overlay || {},
+            sportsContractState: defaults?.simulationContext?.sports_contract_state || {},
+            domainId: safeText(defaults?.queryPlan?.domain || defaults?.queryPlan?.domain_id),
+            simulationTuning: {
+              probability_delta: raw?.probability_delta,
+              confidence_delta: raw?.confidence_delta,
+              quality_score: raw?.quality_score,
+              graph_coverage: raw?.graph_coverage,
+              agent_convergence: raw?.agent_convergence,
+              notes: raw?.notes,
+            },
+          })
+        : null;
   const digest = {
     enabled: raw?.enabled !== false,
     simulation_mode: safeText(raw?.simulation_mode, defaults.simulation_mode || "delta_simulation"),
@@ -240,6 +385,7 @@ function normalizeWorldSimDigest(raw = {}, defaults = {}) {
     cache_status: safeText(raw?.cache_status, defaults.cache_status || "miss"),
     notes: sanitizeList(raw?.notes).slice(0, 5),
     generated_at: safeText(raw?.generated_at, defaults.generated_at || new Date().toISOString()),
+    sports_decision: sportsDecision || null,
   };
 
   if (digest.quality_score < 0.55) {
@@ -377,6 +523,15 @@ Restituisci JSON con:
 }
 
 async function simulateWithGemini({ ai, queryText, queryPlan, seedPack, withRetry, simulationMode, template, simulationContext = null }) {
+  const sportsTemplate = safeText(template) === "sports_match_decision";
+  const sportsPromptBlock = sportsTemplate
+    ? `SPORTS DECISION RULES:
+- Use the sports decision lenses baseline-outcome, lineup-injury-shock, tempo-draw-volatility, market-disagreement, upset-tail.
+- Never invent fixture resolution or market truth beyond the simulation context and seed pack.
+- Return sports_decision with decision_state, decision_reason, no_bet_reason, model_probabilities, market_probabilities, fair_prices, edge_delta, upset_rate, draw_volatility, fragility_score, flip_conditions, simulation_confidence.
+- If the favorite is still correctly priced by the market, say no_bet.
+- Do not return bankroll advice or staking advice.`
+    : "";
   const response = await withRetry(async () =>
     ai.models.generateContent({
       model: "gemini-3.1-pro-preview",
@@ -389,6 +544,7 @@ TEMPLATE: ${template || "public-discourse"}
 SIMULATION MODE: ${simulationMode}
 SIMULATION CONTEXT: ${JSON.stringify(simulationContext || {})}
 WORLD SEED PACK: ${JSON.stringify(seedPack)}
+${sportsPromptBlock}
 
 REGOLE:
 1. Simula interazioni tra attori, coalizioni, incentivi e shock solo se coerenti con il seed pack.
@@ -481,6 +637,66 @@ OUTPUT JSON con:
             invalidation_map: { type: Type.ARRAY, items: { type: Type.STRING } },
             scenario_split_cause: { type: Type.ARRAY, items: { type: Type.STRING } },
             notes: { type: Type.ARRAY, items: { type: Type.STRING } },
+            sports_decision: {
+              type: Type.OBJECT,
+              properties: {
+                decision_state: { type: Type.STRING },
+                decision_reason: { type: Type.STRING },
+                no_bet_reason: { type: Type.STRING },
+                upset_rate: { type: Type.NUMBER },
+                draw_volatility: { type: Type.NUMBER },
+                fragility_score: { type: Type.NUMBER },
+                simulation_confidence: { type: Type.NUMBER },
+                model_favorite: { type: Type.STRING },
+                market_favorite: { type: Type.STRING },
+                favorite_but_no_bet: { type: Type.BOOLEAN },
+                flip_conditions: { type: Type.ARRAY, items: { type: Type.STRING } },
+                model_probabilities: {
+                  type: Type.OBJECT,
+                  properties: {
+                    home: { type: Type.NUMBER },
+                    draw: { type: Type.NUMBER },
+                    away: { type: Type.NUMBER },
+                    home_label: { type: Type.STRING },
+                    draw_label: { type: Type.STRING },
+                    away_label: { type: Type.STRING },
+                  },
+                },
+                market_probabilities: {
+                  type: Type.OBJECT,
+                  properties: {
+                    home: { type: Type.NUMBER },
+                    draw: { type: Type.NUMBER },
+                    away: { type: Type.NUMBER },
+                    home_label: { type: Type.STRING },
+                    draw_label: { type: Type.STRING },
+                    away_label: { type: Type.STRING },
+                  },
+                },
+                fair_prices: {
+                  type: Type.OBJECT,
+                  properties: {
+                    home: { type: Type.NUMBER },
+                    draw: { type: Type.NUMBER },
+                    away: { type: Type.NUMBER },
+                    home_label: { type: Type.STRING },
+                    draw_label: { type: Type.STRING },
+                    away_label: { type: Type.STRING },
+                  },
+                },
+                edge_delta: {
+                  type: Type.OBJECT,
+                  properties: {
+                    home: { type: Type.NUMBER },
+                    draw: { type: Type.NUMBER },
+                    away: { type: Type.NUMBER },
+                    best_key: { type: Type.STRING },
+                    best_label: { type: Type.STRING },
+                    best_delta: { type: Type.NUMBER },
+                  },
+                },
+              },
+            },
           },
         },
       },
@@ -534,6 +750,7 @@ async function getWorldSimDigest({
       simulation_mode: "cache_hit",
       cache_status: "fresh",
       queryPlan,
+      simulationContext,
       generated_at: snapshot?.generatedAt?.toISOString?.() || new Date().toISOString(),
     });
     return attachPolymarketToWorldSimDigest({
@@ -563,7 +780,7 @@ async function getWorldSimDigest({
         template,
       },
     });
-  } else {
+  } else if (ai) {
     const seedPack = await buildGraphSeedPack({
       ai,
       queryText,
@@ -583,12 +800,22 @@ async function getWorldSimDigest({
       template,
       simulationContext,
     });
+  } else {
+    rawDigest = buildDeterministicFallbackWorldSimDigest({
+      queryText,
+      queryPlan,
+      plan,
+      engine,
+      simulationContext,
+      reason: "Gemini runtime unavailable; deterministic fallback engaged.",
+    });
   }
 
   const normalized = normalizeWorldSimDigest(rawDigest, {
     simulation_mode: simulationMode,
     cache_status: snapshot?.exists ? "stale-recomputed" : "miss",
     queryPlan,
+    simulationContext,
   });
 
   const enrichedDigest = await attachPolymarketToWorldSimDigest({

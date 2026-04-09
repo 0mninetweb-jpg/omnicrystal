@@ -7,9 +7,19 @@ const {
   buildCompatibleProbabilitySplit,
   isBinaryContractReady,
 } = require("../predictionCore");
+const {
+  generateSportsCalibrationReport,
+  runSportsCalibrationSweep,
+} = require("./sportsCalibration");
+const {
+  buildGenericDecisionKernel,
+  isHighImpactPredictiveDomain,
+  resolveHighImpactFamily,
+} = require("./decisionKernel");
 
 const ACTIVE_CALIBRATION_SAMPLE_SIZE = 30;
 const ACTIVE_CALIBRATION_MAX_AGE_DAYS = 7;
+const PHASE1_DECISION_LEDGER_COLLECTION = "phase1_decision_ledger";
 const RUNTIME_CALIBRATION_TARGET_DOMAINS = [
   "A.24.governance_policy_and_public_timeline",
   "A.23.markets_and_asset_regimes",
@@ -45,6 +55,11 @@ function uniqueStrings(values = []) {
   return [...new Set((Array.isArray(values) ? values : []).filter((item) => typeof item === "string" && item.trim()))];
 }
 
+function safeNumber(value, fallback = null) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
 function toSerializable(value) {
   if (value === undefined) return undefined;
   if (value === null) return null;
@@ -66,6 +81,11 @@ function toSerializable(value) {
       .map(([key, nestedValue]) => [key, toSerializable(nestedValue)])
       .filter(([, nestedValue]) => nestedValue !== undefined)
   );
+}
+
+function roundMetric(value, digits = 4) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Number(parsed.toFixed(digits)) : null;
 }
 
 function horizonToDays(horizonId = "30d") {
@@ -522,6 +542,253 @@ function shouldResolveRun(runDoc = {}, now = new Date()) {
   return due && !Number.isNaN(due.getTime()) ? due <= now : false;
 }
 
+function extractSportsDecisionFromCard(card = {}) {
+  const decisionState = safeText(card?.sports_decision_state, safeText(card?.publication_basis?.sports_decision_state));
+  if (!decisionState) return null;
+  return {
+    decision_state: decisionState,
+    decision_reason: safeText(card?.sports_decision_reason, safeText(card?.publication_basis?.sports_decision_reason)),
+    no_bet_reason: safeText(card?.sports_no_bet_reason, safeText(card?.publication_basis?.sports_no_bet_reason)),
+    model_probabilities: card?.sports_model_probabilities || card?.publication_basis?.sports_model_probabilities || null,
+    market_probabilities: card?.sports_market_probabilities || card?.publication_basis?.sports_market_probabilities || null,
+    fair_prices: card?.sports_fair_prices || card?.publication_basis?.sports_fair_prices || null,
+    edge_delta: card?.sports_edge_delta || card?.publication_basis?.sports_edge_delta || null,
+    fragility_score: safeNumber(card?.sports_fragility_score, safeNumber(card?.publication_basis?.sports_fragility_score)),
+    flip_conditions:
+      (Array.isArray(card?.sports_flip_conditions) && card.sports_flip_conditions.length > 0
+        ? card.sports_flip_conditions
+        : Array.isArray(card?.publication_basis?.sports_flip_conditions) && card.publication_basis.sports_flip_conditions.length > 0
+          ? card.publication_basis.sports_flip_conditions
+          : null) || null,
+    simulation_confidence: safeNumber(card?.sports_simulation_confidence, safeNumber(card?.publication_basis?.sports_simulation_confidence)),
+    market_source_class: safeText(
+      card?.sports_market_source_class,
+      safeText(card?.publication_basis?.sports_market_source_class, safeText(card?.sports_grounding?.sports_market_source_class, "none"))
+    ),
+  };
+}
+
+function extractWhaleModeSnapshot(runDoc = {}) {
+  const card = runDoc?.result_card || {};
+  const existingWhaleMode =
+    card?.world_sim?.whale_mode && typeof card.world_sim.whale_mode === "object" ? card.world_sim.whale_mode : null;
+  if (existingWhaleMode) return existingWhaleMode;
+
+  return buildGenericDecisionKernel({
+    domainId: safeText(runDoc?.query_plan?.primary_domain_id || card?.domain),
+    normalizedQuery: runDoc?.query_plan || {},
+    scorecard: {
+      binary_contract: card?.binary_contract || null,
+      probability_split: card?.probability_split || null,
+      model_probability: safeNumber(
+        card?.model_probability,
+        safeNumber(card?.probability_split?.primary_probability, safeNumber(card?.binary_contract?.winning_probability))
+      ),
+      decision_state: safeText(card?.decision_state, safeText(card?.publication_basis?.decision_state)),
+      decision_reason: safeText(card?.decision_reason, safeText(card?.publication_basis?.decision_reason)),
+      reference_source_class: safeText(card?.reference_source_class, safeText(card?.publication_basis?.reference_source_class)),
+      reference_probability: safeNumber(card?.reference_probability, safeNumber(card?.publication_basis?.reference_probability)),
+      edge_delta: safeNumber(card?.edge_delta, safeNumber(card?.publication_basis?.edge_delta)),
+      fragility_score: safeNumber(card?.fragility_score, safeNumber(card?.publication_basis?.fragility_score)),
+      no_action_reason: safeText(card?.no_action_reason, safeText(card?.publication_basis?.no_action_reason)),
+      flip_conditions:
+        (Array.isArray(card?.flip_conditions) && card.flip_conditions.length > 0
+          ? card.flip_conditions
+          : Array.isArray(card?.publication_basis?.flip_conditions) && card.publication_basis.flip_conditions.length > 0
+            ? card.publication_basis.flip_conditions
+            : null) || null,
+      simulation_confidence: safeNumber(card?.simulation_confidence, safeNumber(card?.publication_basis?.simulation_confidence)),
+    },
+    evidenceBundle: {
+      prediction_market_frame: card?.prediction_market_frame || runDoc?.prediction_market_frame || null,
+      reference_frame: safeText(card?.reference_source_class, safeText(card?.publication_basis?.reference_source_class))
+        ? {
+            source_class: safeText(card?.reference_source_class, safeText(card?.publication_basis?.reference_source_class)),
+            reference_probability: safeNumber(card?.reference_probability, safeNumber(card?.publication_basis?.reference_probability)),
+            source: safeText(existingWhaleMode?.reference_source, "card_reference"),
+            note: safeText(existingWhaleMode?.reference_note),
+          }
+        : null,
+      sports_grounding: card?.sports_grounding || runDoc?.sports_grounding || null,
+      sports_market_overlay: card?.sports_market_overlay || runDoc?.sports_market_overlay || null,
+      entity_resolution: runDoc?.entity_resolution || {},
+      event_resolution: runDoc?.event_resolution || {},
+      live_signals: Array.isArray(runDoc?.live_signals) ? runDoc.live_signals : [],
+      market_structure: runDoc?.market_structure || {},
+      evidence_quality: runDoc?.evidence_quality || card?.publication_basis || {},
+    },
+    simulationDigest: card?.world_sim && typeof card.world_sim === "object" ? card.world_sim : null,
+    sportsDecision: extractSportsDecisionFromCard(card),
+  });
+}
+
+function buildPhase1DecisionLedgerEntry({ runId = "", runDoc = {}, resolutionPayload = {} } = {}) {
+  const card = runDoc?.result_card || {};
+  const domainId = safeText(resolutionPayload?.domain_id, safeText(runDoc?.query_plan?.primary_domain_id || card?.domain));
+  if (!isHighImpactPredictiveDomain(domainId)) return null;
+
+  const whaleMode = extractWhaleModeSnapshot(runDoc) || {};
+  const family = resolveHighImpactFamily(domainId);
+  const actualOutcomeNumeric = safeNumber(resolutionPayload?.actual_outcome);
+  const modelProbability = safeNumber(
+    card?.model_probability,
+    safeNumber(
+      whaleMode?.model_probability,
+      safeNumber(card?.binary_contract?.winning_probability, safeNumber(card?.probability_split?.primary_probability))
+    )
+  );
+  const referenceProbability = safeNumber(
+    card?.reference_probability,
+    safeNumber(whaleMode?.reference_probability, safeNumber(card?.publication_basis?.reference_probability))
+  );
+  const decisionState = safeText(card?.decision_state, safeText(card?.publication_basis?.decision_state, safeText(whaleMode?.decision_state, "hold")));
+
+  return {
+    ledger_id: `phase1_${safeText(runId, safeText(runDoc?.id, safeText(resolutionPayload?.resolution_id)))}`,
+    run_id: safeText(runId, safeText(runDoc?.id)),
+    resolution_id: safeText(resolutionPayload?.resolution_id),
+    domain_id: domainId,
+    family,
+    query_text: safeText(runDoc?.query_text),
+    card_state: safeText(card?.card_state),
+    runtime_transport: safeText(runDoc?.runtime_transport, "local_core"),
+    rollout_bucket: safeText(runDoc?.rollout_bucket),
+    core_version: safeText(runDoc?.core_version || runDoc?.core_runtime),
+    completed_at: toSerializable(getRunCompletedDate(runDoc)),
+    resolved_at: nowIso(),
+    model_probability: modelProbability,
+    reference_probability: referenceProbability,
+    reference_source_class: safeText(
+      card?.reference_source_class,
+      safeText(card?.publication_basis?.reference_source_class, safeText(whaleMode?.reference_source_class, "none"))
+    ),
+    reference_source: safeText(whaleMode?.reference_source),
+    decision_state: decisionState,
+    surface_decision_state: family === "sports" ? safeText(card?.sports_decision_state) : decisionState,
+    decision_reason: safeText(card?.decision_reason, safeText(card?.publication_basis?.decision_reason, safeText(whaleMode?.decision_reason))),
+    no_action_reason: safeText(
+      card?.no_action_reason,
+      safeText(card?.publication_basis?.no_action_reason, safeText(whaleMode?.no_action_reason))
+    ),
+    edge_delta: safeNumber(card?.edge_delta, safeNumber(card?.publication_basis?.edge_delta, safeNumber(whaleMode?.edge_delta))),
+    fragility_score: safeNumber(
+      card?.fragility_score,
+      safeNumber(card?.publication_basis?.fragility_score, safeNumber(whaleMode?.fragility_score))
+    ),
+    simulation_confidence: safeNumber(card?.simulation_confidence, safeNumber(whaleMode?.simulation_confidence)),
+    flip_conditions: toSerializable(
+      Array.isArray(card?.flip_conditions) && card.flip_conditions.length > 0
+        ? card.flip_conditions
+        : Array.isArray(card?.publication_basis?.flip_conditions) && card.publication_basis.flip_conditions.length > 0
+          ? card.publication_basis.flip_conditions
+          : Array.isArray(whaleMode?.flip_conditions)
+            ? whaleMode.flip_conditions
+            : []
+    ),
+    reference_note: safeText(whaleMode?.reference_note),
+    actual_outcome: safeText(resolutionPayload?.observed_outcome),
+    actual_outcome_numeric: actualOutcomeNumeric,
+    predicted_positive: Number.isFinite(modelProbability) ? modelProbability >= 0.5 : null,
+    correct:
+      Number.isFinite(modelProbability) && Number.isFinite(actualOutcomeNumeric)
+        ? (modelProbability >= 0.5 ? 1 : 0) === actualOutcomeNumeric
+        : null,
+    calibration_active: card?.calibration_snapshot?.active === true,
+  };
+}
+
+async function loadPhase1DecisionLedgerEntries(db, sinceDate, limit = 500) {
+  let snapshot = null;
+  try {
+    snapshot = await db.collection(PHASE1_DECISION_LEDGER_COLLECTION).orderBy("updated_at", "desc").limit(limit).get();
+  } catch (_error) {
+    snapshot = await db.collection(PHASE1_DECISION_LEDGER_COLLECTION).limit(limit).get();
+  }
+  return snapshot.docs
+    .map((doc) => ({ id: doc.id, ...(doc.data() || {}) }))
+    .filter((entry) => {
+      const updatedAt = entry?.updated_at?.toDate?.() || (entry?.updated_at ? new Date(entry.updated_at) : null);
+      const resolvedAt = entry?.resolved_at ? new Date(entry.resolved_at) : null;
+      const referenceDate = updatedAt || resolvedAt;
+      return referenceDate && !Number.isNaN(referenceDate.getTime()) && referenceDate >= sinceDate;
+    });
+}
+
+function buildPhase1DecisionQualitySummary(entries = []) {
+  const byFamily = {};
+  const decisionBreakdown = {};
+  const referenceBreakdown = {};
+
+  entries.forEach((entry) => {
+    const family = safeText(entry?.family, "unknown");
+    const decisionState = safeText(entry?.decision_state, "hold");
+    const referenceClass = safeText(entry?.reference_source_class, "none");
+    if (!byFamily[family]) {
+      byFamily[family] = {
+        total_rows: 0,
+        no_action_rate: null,
+        edge_rate: null,
+        average_edge_delta: null,
+        average_fragility: null,
+      };
+    }
+    byFamily[family].total_rows += 1;
+    decisionBreakdown[decisionState] = (decisionBreakdown[decisionState] || 0) + 1;
+    referenceBreakdown[referenceClass] = (referenceBreakdown[referenceClass] || 0) + 1;
+  });
+
+  Object.keys(byFamily).forEach((family) => {
+    const familyEntries = entries.filter((entry) => safeText(entry?.family, "unknown") === family);
+    const total = Math.max(1, familyEntries.length);
+    byFamily[family].no_action_rate = roundMetric(
+      familyEntries.filter((entry) => safeText(entry?.decision_state) === "no_action").length / total
+    );
+    byFamily[family].edge_rate = roundMetric(
+      familyEntries.filter((entry) => safeText(entry?.decision_state) === "edge").length / total
+    );
+    byFamily[family].average_edge_delta = roundMetric(
+      familyEntries.reduce((sum, entry) => sum + Number(entry?.edge_delta || 0), 0) / total
+    );
+    byFamily[family].average_fragility = roundMetric(
+      familyEntries.reduce((sum, entry) => sum + Number(entry?.fragility_score || 0), 0) / total
+    );
+  });
+
+  const totalRows = entries.length;
+  const proxyEdgeCount = entries.filter(
+    (entry) => safeText(entry?.decision_state) === "edge" && safeText(entry?.reference_source_class) === "proxy"
+  ).length;
+  const retailEdgeCount = entries.filter(
+    (entry) => safeText(entry?.decision_state) === "edge" && safeText(entry?.reference_source_class) === "retail"
+  ).length;
+  const weakEdgeCount = entries.filter(
+    (entry) => safeText(entry?.decision_state) === "edge" && Math.abs(Number(entry?.edge_delta || 0)) < 0.05
+  ).length;
+
+  return {
+    total_rows: totalRows,
+    decision_state_breakdown: decisionBreakdown,
+    reference_source_breakdown: referenceBreakdown,
+    no_action_rate:
+      totalRows > 0 ? roundMetric(entries.filter((entry) => safeText(entry?.decision_state) === "no_action").length / totalRows) : null,
+    edge_rate: totalRows > 0 ? roundMetric(entries.filter((entry) => safeText(entry?.decision_state) === "edge").length / totalRows) : null,
+    proxy_edge_rate: totalRows > 0 ? roundMetric(proxyEdgeCount / totalRows) : null,
+    retail_edge_rate: totalRows > 0 ? roundMetric(retailEdgeCount / totalRows) : null,
+    weak_edge_rate: totalRows > 0 ? roundMetric(weakEdgeCount / totalRows) : null,
+    by_family: byFamily,
+    recent: entries.slice(0, 10).map((entry) => ({
+      run_id: safeText(entry?.run_id),
+      family: safeText(entry?.family),
+      domain_id: safeText(entry?.domain_id),
+      decision_state: safeText(entry?.decision_state),
+      reference_source_class: safeText(entry?.reference_source_class),
+      edge_delta: safeNumber(entry?.edge_delta),
+      no_action_reason: safeText(entry?.no_action_reason),
+      resolved_at: toSerializable(entry?.resolved_at),
+    })),
+  };
+}
+
 async function runResolutionSweep(context, options = {}) {
   const { db, admin, fetchJson } = context;
   const limit = Math.max(1, Number(options.limit) || 100);
@@ -531,6 +798,7 @@ async function runResolutionSweep(context, options = {}) {
     scanned: 0,
     due: 0,
     resolved: 0,
+    phase1_ledger_written: 0,
     skipped: 0,
   };
 
@@ -606,8 +874,23 @@ async function runResolutionSweep(context, options = {}) {
       created_at: admin.firestore.FieldValue.serverTimestamp(),
       updated_at: admin.firestore.FieldValue.serverTimestamp(),
     };
+    const phase1LedgerEntry = buildPhase1DecisionLedgerEntry({
+      runId: doc.id,
+      runDoc,
+      resolutionPayload,
+    });
 
     await db.collection("forecast_resolutions").doc(resolutionId).set(resolutionPayload, { merge: true });
+    if (phase1LedgerEntry) {
+      await db.collection(PHASE1_DECISION_LEDGER_COLLECTION).doc(phase1LedgerEntry.ledger_id).set(
+        {
+          ...toSerializable(phase1LedgerEntry),
+          updated_at: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+      stats.phase1_ledger_written += 1;
+    }
     await db.collection("forecast_runs").doc(doc.id).set(
       {
         resolution_status: "resolved",
@@ -792,16 +1075,23 @@ function buildCalibrationDriftWatch(domainSummaries = []) {
 }
 
 async function buildProductSystemSummary({ db, sinceDate, recentRuns = [], domainSummaries = [] }) {
-  const [rollout, productEventResult, privateCardResult, versionResult, publicLedgerResult, resolutionResult] = await Promise.all([
+  const [rollout, productEventResult, privateCardResult, versionResult, publicLedgerResult, resolutionResult, phase1DecisionResult] = await Promise.all([
     loadRuntimeRolloutState(db),
     safeCollectionQuery(() => db.collectionGroup("product_events").where("createdAt", ">=", sinceDate).limit(800).get()),
     safeCollectionQuery(() => db.collectionGroup("cards").where("updatedAt", ">=", sinceDate).limit(800).get()),
     safeCollectionQuery(() => db.collectionGroup("versions").where("version_saved_at", ">=", sinceDate).limit(1200).get()),
     safeCollectionQuery(() => db.collection("forecast_ledger").where("updatedAt", ">=", sinceDate).limit(800).get()),
     safeCollectionQuery(() => db.collection("forecast_resolutions").where("resolved_at", ">=", sinceDate).limit(800).get()),
+    safeCollectionQuery(() => db.collection(PHASE1_DECISION_LEDGER_COLLECTION).limit(800).get()),
   ]);
 
   const remoteRuns = recentRuns.filter((runDoc) => safeText(runDoc?.runtime_transport).startsWith("remote"));
+  const phase1DecisionEntries = phase1DecisionResult.docs.filter((entry) => {
+    const updatedAt = entry?.updated_at?.toDate?.() || (entry?.updated_at ? new Date(entry.updated_at) : null);
+    const resolvedAt = entry?.resolved_at ? new Date(entry.resolved_at) : null;
+    const referenceDate = updatedAt || resolvedAt;
+    return referenceDate && !Number.isNaN(referenceDate.getTime()) && referenceDate >= sinceDate;
+  });
 
   return {
     rollout,
@@ -822,8 +1112,17 @@ async function buildProductSystemSummary({ db, sinceDate, recentRuns = [], domai
       recentRuns,
       resolutionDocs: resolutionResult.docs,
     }),
+    phase1_decision_quality: buildPhase1DecisionQualitySummary(phase1DecisionEntries),
     calibration_drift_watch: buildCalibrationDriftWatch(domainSummaries),
-    fetch_errors: [rollout.fetch_error, productEventResult.error, privateCardResult.error, versionResult.error, publicLedgerResult.error, resolutionResult.error].filter(Boolean),
+    fetch_errors: [
+      rollout.fetch_error,
+      productEventResult.error,
+      privateCardResult.error,
+      versionResult.error,
+      publicLedgerResult.error,
+      resolutionResult.error,
+      phase1DecisionResult.error,
+    ].filter(Boolean),
   };
 }
 
@@ -1245,6 +1544,28 @@ async function generateEvaluationReport(context, options = {}) {
         ? productSystem.calibration_drift_watch.flagged_domains.map((item) => `${item.domain_id} (${item.brier_score})`).join(", ")
         : "none"
     }`,
+    `- Phase-1 decision ledger: rows=${productSystem.phase1_decision_quality.total_rows} | no_action_rate=${
+      productSystem.phase1_decision_quality.no_action_rate == null
+        ? "n/a"
+        : `${Math.round(productSystem.phase1_decision_quality.no_action_rate * 100)}%`
+    } | edge_rate=${
+      productSystem.phase1_decision_quality.edge_rate == null
+        ? "n/a"
+        : `${Math.round(productSystem.phase1_decision_quality.edge_rate * 100)}%`
+    }`,
+    `- Edge discipline: proxy_edge_rate=${
+      productSystem.phase1_decision_quality.proxy_edge_rate == null
+        ? "n/a"
+        : `${Math.round(productSystem.phase1_decision_quality.proxy_edge_rate * 100)}%`
+    } | retail_edge_rate=${
+      productSystem.phase1_decision_quality.retail_edge_rate == null
+        ? "n/a"
+        : `${Math.round(productSystem.phase1_decision_quality.retail_edge_rate * 100)}%`
+    } | weak_edge_rate=${
+      productSystem.phase1_decision_quality.weak_edge_rate == null
+        ? "n/a"
+        : `${Math.round(productSystem.phase1_decision_quality.weak_edge_rate * 100)}%`
+    }`,
     ...(productSystem.fetch_errors.length > 0
       ? ["- Product system fetch errors: " + productSystem.fetch_errors.join(" | ")]
       : []),
@@ -1286,6 +1607,7 @@ async function generateEvaluationReport(context, options = {}) {
       binary_parity: binaryParitySummary,
     },
     product_system: productSystem,
+    phase1_decision_quality: productSystem.phase1_decision_quality,
     vertical_calibration: calibrationReadiness,
     vertical_sections: {
       policy: calibrationReadiness.targets.find((item) => item.domain_id === "A.24.governance_policy_and_public_timeline") || null,
@@ -1333,6 +1655,13 @@ async function runOfflineEvaluationMode(context, options = {}) {
   if (mode === "report") {
     return generateEvaluationReport(context, options);
   }
+  if (mode === "sports_calibration") {
+    return generateSportsCalibrationReport(context, {
+      ...options,
+      runSweep: options.runSweep !== false,
+      persistArtifact: true,
+    });
+  }
   throw new Error(`Unsupported evaluation mode: ${mode}`);
 }
 
@@ -1347,5 +1676,7 @@ module.exports = {
   runResolutionSweep,
   runEvaluationSweep,
   generateEvaluationReport,
+  runSportsCalibrationSweep,
+  generateSportsCalibrationReport,
   runOfflineEvaluationMode,
 };

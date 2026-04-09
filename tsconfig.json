@@ -17,6 +17,12 @@
     "jsx": "react-jsx",
     "types": ["vite/client", "node"],
     "paths": {
+      "firebase/auth": [
+        "./src/platform/firebase-shim/auth.ts"
+      ],
+      "firebase/firestore": [
+        "./src/platform/firebase-shim/firestore.ts"
+      ],
       "@/*": [
         "./*"
       ]

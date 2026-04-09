@@ -2,11 +2,25 @@ param(
   [string]$LocalApiBase = "https://api-paaqyfwena-ew.a.run.app",
   [string]$RemoteServiceUrl = "https://crystal-core-paaqyfwena-ew.a.run.app",
   [string]$OutputMarkdownPath = "docs/parity-report-2026-03-24.md",
-  [string]$OutputJsonPath = "docs/parity-report-2026-03-24.json"
+  [string]$OutputJsonPath = "docs/parity-report-2026-03-24.json",
+  [string]$ProbeFixturePath = "scripts/fixtures/parity-benchmark-cases.json",
+  [string]$SportsProbeOutputPath = ""
 )
 
 $ErrorActionPreference = "Stop"
 $PSNativeCommandUseErrorActionPreference = $false
+$repoRoot = Split-Path -Parent $PSScriptRoot
+
+function Resolve-RepoPath {
+  param([string]$Path)
+  if ([string]::IsNullOrWhiteSpace($Path)) {
+    return ""
+  }
+  if ([System.IO.Path]::IsPathRooted($Path)) {
+    return $Path
+  }
+  return Join-Path $repoRoot $Path
+}
 
 function Get-GcloudExecutable {
   $cmd = Get-Command gcloud.cmd -ErrorAction SilentlyContinue
@@ -195,6 +209,45 @@ function Get-SportsGrounding($card) {
   return $null
 }
 
+function Get-PublicationBasis($card) {
+  if ($null -eq $card) { return $null }
+  if ($card.PSObject.Properties.Name -contains "publication_basis" -and $null -ne $card.publication_basis) {
+    return $card.publication_basis
+  }
+  return $null
+}
+
+function Get-SportsSemanticOverlay($card) {
+  if ($null -eq $card) { return $null }
+  if ($card.PSObject.Properties.Name -contains "sports_semantic_overlay" -and $null -ne $card.sports_semantic_overlay) {
+    return $card.sports_semantic_overlay
+  }
+  return $null
+}
+
+function Get-SportsGrounded($card) {
+  if ($null -eq $card) { return $false }
+  $grounding = Get-SportsGrounding $card
+  $publicationBasis = Get-PublicationBasis $card
+  if ($card.PSObject.Properties.Name -contains "sports_grounded" -and [bool]$card.sports_grounded) {
+    return $true
+  }
+  if ($null -ne $grounding -and $grounding.PSObject.Properties.Name -contains "sports_grounded" -and [bool]$grounding.sports_grounded) {
+    return $true
+  }
+  if ($null -ne $publicationBasis -and $publicationBasis.PSObject.Properties.Name -contains "sports_grounded" -and [bool]$publicationBasis.sports_grounded) {
+    return $true
+  }
+  if ($null -ne $grounding) {
+    $providerConfigured = $grounding.PSObject.Properties.Name -contains "provider_configured" -and [bool]$grounding.provider_configured
+    $fixtureResolved = $grounding.PSObject.Properties.Name -contains "fixture_resolved" -and [bool]$grounding.fixture_resolved
+    if ($providerConfigured -and $fixtureResolved) {
+      return $true
+    }
+  }
+  return $false
+}
+
 function Get-SportsParityReady($card) {
   $grounding = Get-SportsGrounding $card
   if ($null -eq $grounding) { return $false }
@@ -230,9 +283,17 @@ function Get-SportsOverlayBlockerReason($card) {
   if ($card.PSObject.Properties.Name -contains "sports_overlay_blocker_reason") {
     return [string]$card.sports_overlay_blocker_reason
   }
+  $publicationBasis = Get-PublicationBasis $card
+  if ($null -ne $publicationBasis -and $publicationBasis.PSObject.Properties.Name -contains "sports_overlay_blocker_reason") {
+    return [string]$publicationBasis.sports_overlay_blocker_reason
+  }
   $grounding = Get-SportsGrounding $card
   if ($null -ne $grounding -and $grounding.PSObject.Properties.Name -contains "overlay_blocker_reason") {
     return [string]$grounding.overlay_blocker_reason
+  }
+  $semanticOverlay = Get-SportsSemanticOverlay $card
+  if ($null -ne $semanticOverlay -and $semanticOverlay.PSObject.Properties.Name -contains "blocker_reason") {
+    return [string]$semanticOverlay.blocker_reason
   }
   return ""
 }
@@ -268,6 +329,10 @@ function Get-SportsbookReadinessState($card) {
   if ($card.PSObject.Properties.Name -contains "sportsbook_readiness_state") {
     return [string]$card.sportsbook_readiness_state
   }
+  $publicationBasis = Get-PublicationBasis $card
+  if ($null -ne $publicationBasis -and $publicationBasis.PSObject.Properties.Name -contains "sportsbook_readiness_state") {
+    return [string]$publicationBasis.sportsbook_readiness_state
+  }
   $grounding = Get-SportsGrounding $card
   if ($null -ne $grounding -and $grounding.PSObject.Properties.Name -contains "sportsbook_readiness_state") {
     return [string]$grounding.sportsbook_readiness_state
@@ -281,11 +346,13 @@ function Get-SportsbookReadinessState($card) {
 
 function Get-SportsMarketOverlayAvailable($card) {
   $overlay = Get-SportsMarketOverlay $card
-  if ($null -eq $overlay) { return $false }
+  if ($null -eq $overlay) {
+    return -not [string]::IsNullOrWhiteSpace((Get-SportsMarketSourceClass $card))
+  }
   if ($overlay.PSObject.Properties.Name -contains "available") {
     return [bool]$overlay.available
   }
-  return $false
+  return -not [string]::IsNullOrWhiteSpace((Get-SportsMarketSourceClass $card))
 }
 
 function Get-CardState($card) {
@@ -299,37 +366,149 @@ function Get-CardState($card) {
 function Get-SportsPickState($card) {
   if ($null -eq $card) { return "" }
   if ($card.PSObject.Properties.Name -contains "sports_pick_state") {
-    return [string]$card.sports_pick_state
+    $value = [string]$card.sports_pick_state
+    if (-not [string]::IsNullOrWhiteSpace($value)) { return $value }
   }
   $grounding = Get-SportsGrounding $card
   if ($null -ne $grounding -and $grounding.PSObject.Properties.Name -contains "sports_pick_state") {
-    return [string]$grounding.sports_pick_state
+    $value = [string]$grounding.sports_pick_state
+    if (-not [string]::IsNullOrWhiteSpace($value)) { return $value }
   }
-  return ""
+  $publicationBasis = Get-PublicationBasis $card
+  if ($null -ne $publicationBasis -and $publicationBasis.PSObject.Properties.Name -contains "sports_pick_state") {
+    $value = [string]$publicationBasis.sports_pick_state
+    if (-not [string]::IsNullOrWhiteSpace($value)) { return $value }
+  }
+  if (Get-SportsGrounded $card) {
+    return "grounded_lean"
+  }
+  return "hold"
 }
 
 function Get-FixtureWindowState($card) {
   if ($null -eq $card) { return "" }
   if ($card.PSObject.Properties.Name -contains "fixture_window_state") {
-    return [string]$card.fixture_window_state
+    $value = [string]$card.fixture_window_state
+    if (-not [string]::IsNullOrWhiteSpace($value)) { return $value }
   }
   $grounding = Get-SportsGrounding $card
   if ($null -ne $grounding -and $grounding.PSObject.Properties.Name -contains "fixture_window_state") {
-    return [string]$grounding.fixture_window_state
+    $value = [string]$grounding.fixture_window_state
+    if (-not [string]::IsNullOrWhiteSpace($value)) { return $value }
   }
-  return ""
+  $publicationBasis = Get-PublicationBasis $card
+  if ($null -ne $publicationBasis -and $publicationBasis.PSObject.Properties.Name -contains "fixture_window_state") {
+    $value = [string]$publicationBasis.fixture_window_state
+    if (-not [string]::IsNullOrWhiteSpace($value)) { return $value }
+  }
+  $semanticOverlay = Get-SportsSemanticOverlay $card
+  if ($null -ne $semanticOverlay -and $semanticOverlay.PSObject.Properties.Name -contains "fixture_window_state") {
+    $value = [string]$semanticOverlay.fixture_window_state
+    if (-not [string]::IsNullOrWhiteSpace($value)) { return $value }
+  }
+  if (Get-SportsGrounded $card) { return "resolved" }
+  return "unresolved"
 }
 
 function Get-FixtureWindowOpen($card) {
   if ($null -eq $card) { return $false }
   if ($card.PSObject.Properties.Name -contains "fixture_window_open") {
-    return [bool]$card.fixture_window_open
+    if ([bool]$card.fixture_window_open) { return $true }
   }
   $grounding = Get-SportsGrounding $card
   if ($null -ne $grounding -and $grounding.PSObject.Properties.Name -contains "fixture_window_open") {
-    return [bool]$grounding.fixture_window_open
+    if ([bool]$grounding.fixture_window_open) { return $true }
+  }
+  $publicationBasis = Get-PublicationBasis $card
+  if ($null -ne $publicationBasis -and $publicationBasis.PSObject.Properties.Name -contains "fixture_window_open") {
+    if ([bool]$publicationBasis.fixture_window_open) { return $true }
+  }
+  $semanticOverlay = Get-SportsSemanticOverlay $card
+  if ($null -ne $semanticOverlay -and $semanticOverlay.PSObject.Properties.Name -contains "fixture_window_open") {
+    if ([bool]$semanticOverlay.fixture_window_open) { return $true }
   }
   return $false
+}
+
+function Get-SportsFixtureKind($card) {
+  if ($null -eq $card) { return "" }
+  if ($card.PSObject.Properties.Name -contains "sports_fixture_kind") {
+    return [string]$card.sports_fixture_kind
+  }
+  $grounding = Get-SportsGrounding $card
+  if ($null -ne $grounding -and $grounding.PSObject.Properties.Name -contains "sports_fixture_kind") {
+    return [string]$grounding.sports_fixture_kind
+  }
+  return ""
+}
+
+function Get-SportsFixtureCandidateScore($card) {
+  if ($null -eq $card) { return $null }
+  if ($card.PSObject.Properties.Name -contains "sports_fixture_candidate_score") {
+    return [double]$card.sports_fixture_candidate_score
+  }
+  $grounding = Get-SportsGrounding $card
+  if ($null -ne $grounding -and $grounding.PSObject.Properties.Name -contains "sports_fixture_candidate_score") {
+    return [double]$grounding.sports_fixture_candidate_score
+  }
+  return $null
+}
+
+function Get-SportsMarketSource($card) {
+  if ($null -eq $card) { return "" }
+  if ($card.PSObject.Properties.Name -contains "sports_market_source") {
+    $value = [string]$card.sports_market_source
+    if (-not [string]::IsNullOrWhiteSpace($value)) { return $value }
+  }
+  $grounding = Get-SportsGrounding $card
+  if ($null -ne $grounding -and $grounding.PSObject.Properties.Name -contains "sports_market_source") {
+    $value = [string]$grounding.sports_market_source
+    if (-not [string]::IsNullOrWhiteSpace($value)) { return $value }
+  }
+  $overlay = Get-SportsMarketOverlay $card
+  if ($null -ne $overlay -and $overlay.PSObject.Properties.Name -contains "sports_market_source") {
+    $value = [string]$overlay.sports_market_source
+    if (-not [string]::IsNullOrWhiteSpace($value)) { return $value }
+  }
+  return ""
+}
+
+function Get-SportsMarketSourceClass($card) {
+  if ($null -eq $card) { return "" }
+  if ($card.PSObject.Properties.Name -contains "sports_market_source_class") {
+    $value = [string]$card.sports_market_source_class
+    if (-not [string]::IsNullOrWhiteSpace($value) -and $value -ne "none") { return $value }
+  }
+  $grounding = Get-SportsGrounding $card
+  if ($null -ne $grounding -and $grounding.PSObject.Properties.Name -contains "sports_market_source_class") {
+    $value = [string]$grounding.sports_market_source_class
+    if (-not [string]::IsNullOrWhiteSpace($value) -and $value -ne "none") { return $value }
+  }
+  $overlay = Get-SportsMarketOverlay $card
+  if ($null -ne $overlay -and $overlay.PSObject.Properties.Name -contains "sports_market_source_class") {
+    $value = [string]$overlay.sports_market_source_class
+    if (-not [string]::IsNullOrWhiteSpace($value) -and $value -ne "none") { return $value }
+  }
+  return "none"
+}
+
+function Get-SportsMarketQualityTier($card) {
+  if ($null -eq $card) { return "" }
+  if ($card.PSObject.Properties.Name -contains "sports_market_quality_tier") {
+    $value = [string]$card.sports_market_quality_tier
+    if (-not [string]::IsNullOrWhiteSpace($value) -and $value -ne "none") { return $value }
+  }
+  $grounding = Get-SportsGrounding $card
+  if ($null -ne $grounding -and $grounding.PSObject.Properties.Name -contains "sports_market_quality_tier") {
+    $value = [string]$grounding.sports_market_quality_tier
+    if (-not [string]::IsNullOrWhiteSpace($value) -and $value -ne "none") { return $value }
+  }
+  $overlay = Get-SportsMarketOverlay $card
+  if ($null -ne $overlay -and $overlay.PSObject.Properties.Name -contains "sports_market_quality_tier") {
+    $value = [string]$overlay.sports_market_quality_tier
+    if (-not [string]::IsNullOrWhiteSpace($value) -and $value -ne "none") { return $value }
+  }
+  return "none"
 }
 
 function Test-BinaryContractPresent($card) {
@@ -405,7 +584,7 @@ function Convert-ResultRowToMarkdown {
   return "| $($Row.query) | $($Row.local_status) | $($Row.remote_status) | $($Row.local_domain) | $($Row.remote_domain) | $($Row.local_winner) | $($Row.remote_winner) | $($Row.local_band) | $($Row.remote_band) | $($Row.probability_delta) |"
 }
 
-$queries = @(
+$legacyParityQueries = @(
   @{
     query = "Cosa passerà al referendum costituzionale di marzo in Italia? sì o no"
     expects_binary = $true
@@ -436,7 +615,7 @@ $queries = @(
   }
 )
 
-$queries = @(
+$legacyParityQueriesNormalized = @(
   @{
     query = "Cosa passera al referendum costituzionale di marzo in Italia? si o no"
     expects_binary = $true
@@ -467,6 +646,28 @@ $queries = @(
   }
 )
 
+$probeFixtureFullPath = Resolve-RepoPath $ProbeFixturePath
+if (-not (Test-Path $probeFixtureFullPath)) {
+  throw "Benchmark fixture file non trovato: $probeFixtureFullPath"
+}
+
+$fixtureConfig = Get-Content -Path $probeFixtureFullPath -Raw | ConvertFrom-Json
+$queries = @($fixtureConfig.queries)
+if ($queries.Count -eq 0) {
+  throw "Il benchmark parity non contiene query."
+}
+
+$probeDate = Get-Date -Format "yyyy-MM-dd"
+if ([string]::IsNullOrWhiteSpace($SportsProbeOutputPath)) {
+  $SportsProbeOutputPath = "docs/sports-probe-$probeDate.json"
+}
+$sportsProbeOutputFullPath = Resolve-RepoPath $SportsProbeOutputPath
+
+$sportsProbeIds = $fixtureConfig.sports_probes
+$a29ProbeId = [string]$sportsProbeIds.a29
+$b36ProbeId = [string]$sportsProbeIds.b36
+$sportsHoldRegressionId = [string]$sportsProbeIds.hold_regression
+
 $RemoteServiceUrl = Resolve-CanonicalRemoteServiceUrl -FallbackUrl $RemoteServiceUrl
 $remoteToken = Get-RemoteToken -Audience $RemoteServiceUrl.TrimEnd("/")
 $remoteHeaders = @{
@@ -485,11 +686,9 @@ $binaryMissingContracts = 0
 $sportsProbeReady = $false
 $sportsProbabilityProbeReady = $false
 $blockers = @()
-$a29ProbeQuery = "Inter Milan vs Roma 2026-04-05"
-$b36ProbeQuery = "Will Inter Milan beat Roma on 2026-04-05?"
-$sportsHoldRegressionQuery = "Inter vs Juventus"
 
 foreach ($item in $queries) {
+  $queryId = [string]$item.id
   $query = $item.query
 
   $localCompileResult = Invoke-LocalJsonWithRetry -Uri "$LocalApiBase/public/compile-query" -Body @{ query = $query }
@@ -497,6 +696,7 @@ foreach ($item in $queries) {
     $localFailuresText = ($localCompileResult.failures -join "; ")
     if ($localFailuresText -match "502") { $local502Count += 1 }
     $reportRows += [pscustomobject]@{
+      query_id = $queryId
       query = $query
       local_status = "failed"
       remote_status = "not_run"
@@ -566,11 +766,13 @@ foreach ($item in $queries) {
   $localProbability = Get-BinaryProbability $localCard
   $remoteProbability = Get-BinaryProbability $remoteCard
   $probabilityDelta = if ($null -ne $localProbability -and $null -ne $remoteProbability) { [math]::Round([math]::Abs($localProbability - $remoteProbability), 4) } else { $null }
-  $sportsProbe = @($a29ProbeQuery, $b36ProbeQuery, $sportsHoldRegressionQuery) -contains $query
-  $a29Probe = ($query -eq $a29ProbeQuery)
-  $b36Probe = ($query -eq $b36ProbeQuery)
+  $sportsProbe = @($a29ProbeId, $b36ProbeId, $sportsHoldRegressionId) -contains $queryId
+  $a29Probe = ($queryId -eq $a29ProbeId)
+  $b36Probe = ($queryId -eq $b36ProbeId)
   $localSportsReady = if ($sportsProbe) { Get-SportsParityReady $localCard } else { $false }
   $remoteSportsReady = if ($sportsProbe) { Get-SportsParityReady $remoteCard } else { $false }
+  $localSportsGrounded = if ($sportsProbe) { Get-SportsGrounded $localCard } else { $false }
+  $remoteSportsGrounded = if ($sportsProbe) { Get-SportsGrounded $remoteCard } else { $false }
   $localSportsSemanticReady = if ($sportsProbe) { Get-SportsSemanticReady $localCard } else { $false }
   $remoteSportsSemanticReady = if ($sportsProbe) { Get-SportsSemanticReady $remoteCard } else { $false }
   $localSportsPublishGateReady = if ($sportsProbe) { Get-SportsPublishGateReady $localCard } else { $false }
@@ -597,6 +799,16 @@ foreach ($item in $queries) {
   $remoteFixtureWindowState = if ($sportsProbe) { Get-FixtureWindowState $remoteCard } else { "" }
   $localFixtureWindowOpen = if ($sportsProbe) { Get-FixtureWindowOpen $localCard } else { $false }
   $remoteFixtureWindowOpen = if ($sportsProbe) { Get-FixtureWindowOpen $remoteCard } else { $false }
+  $localSportsFixtureKind = if ($sportsProbe) { Get-SportsFixtureKind $localCard } else { "" }
+  $remoteSportsFixtureKind = if ($sportsProbe) { Get-SportsFixtureKind $remoteCard } else { "" }
+  $localSportsFixtureCandidateScore = if ($sportsProbe) { Get-SportsFixtureCandidateScore $localCard } else { $null }
+  $remoteSportsFixtureCandidateScore = if ($sportsProbe) { Get-SportsFixtureCandidateScore $remoteCard } else { $null }
+  $localSportsMarketSource = if ($sportsProbe) { Get-SportsMarketSource $localCard } else { "" }
+  $remoteSportsMarketSource = if ($sportsProbe) { Get-SportsMarketSource $remoteCard } else { "" }
+  $localSportsMarketSourceClass = if ($sportsProbe) { Get-SportsMarketSourceClass $localCard } else { "" }
+  $remoteSportsMarketSourceClass = if ($sportsProbe) { Get-SportsMarketSourceClass $remoteCard } else { "" }
+  $localSportsMarketQualityTier = if ($sportsProbe) { Get-SportsMarketQualityTier $localCard } else { "" }
+  $remoteSportsMarketQualityTier = if ($sportsProbe) { Get-SportsMarketQualityTier $remoteCard } else { "" }
   $localSportsOperational = if ($a29Probe) { Test-SportsOperationalCard -Card $localCard -Mode "forecast" } elseif ($b36Probe) { Test-SportsOperationalCard -Card $localCard -Mode "probability" } else { $false }
   $remoteSportsOperational = if ($a29Probe) { Test-SportsOperationalCard -Card $remoteCard -Mode "forecast" } elseif ($b36Probe) { Test-SportsOperationalCard -Card $remoteCard -Mode "probability" } else { $false }
 
@@ -613,6 +825,7 @@ foreach ($item in $queries) {
   }
 
   $reportRows += [pscustomobject]@{
+    query_id = $queryId
     query = $query
     local_status = if ($localCard) { "completed" } else { "failed" }
     remote_status = $remoteStateStatus
@@ -631,6 +844,8 @@ foreach ($item in $queries) {
     remote_failures = ($remoteWait.history | Where-Object { $_.error } | ForEach-Object { $_.error }) -join "; "
     local_card_state = if ($localCard) { [string]$localCard.card_state } else { "" }
     remote_card_state = if ($remoteCard) { [string]$remoteCard.card_state } else { "" }
+    local_sports_grounded = $localSportsGrounded
+    remote_sports_grounded = $remoteSportsGrounded
     local_sports_ready = $localSportsReady
     remote_sports_ready = $remoteSportsReady
     local_sports_semantic_ready = $localSportsSemanticReady
@@ -659,6 +874,16 @@ foreach ($item in $queries) {
     remote_fixture_window_state = $remoteFixtureWindowState
     local_fixture_window_open = $localFixtureWindowOpen
     remote_fixture_window_open = $remoteFixtureWindowOpen
+    local_sports_fixture_kind = $localSportsFixtureKind
+    remote_sports_fixture_kind = $remoteSportsFixtureKind
+    local_sports_fixture_candidate_score = $localSportsFixtureCandidateScore
+    remote_sports_fixture_candidate_score = $remoteSportsFixtureCandidateScore
+    local_sports_market_source = $localSportsMarketSource
+    remote_sports_market_source = $remoteSportsMarketSource
+    local_sports_market_source_class = $localSportsMarketSourceClass
+    remote_sports_market_source_class = $remoteSportsMarketSourceClass
+    local_sports_market_quality_tier = $localSportsMarketQualityTier
+    remote_sports_market_quality_tier = $remoteSportsMarketQualityTier
     expects_binary = $item.expects_binary
     timeout = [bool]$remoteWait.timed_out
   }
@@ -684,6 +909,9 @@ foreach ($item in $queries) {
     }
     if (($a29Probe -or $b36Probe) -and -not $remoteSportsReady) {
       $blockers += "sports provider grounding unavailable on remote: $query (configured=$remoteProviderConfigured, fixture_resolved=$remoteFixtureResolved, reason=$remoteSportsReason)"
+    }
+    if (($a29Probe -or $b36Probe) -and $localSportsGrounded -ne $remoteSportsGrounded) {
+      $blockers += "sports grounded mismatch: $query"
     }
     if (($a29Probe -or $b36Probe) -and $localSportsReady -and $remoteSportsReady) {
       if ($localSideA -ne $remoteSideA -or $localSideB -ne $remoteSideB) {
@@ -755,11 +983,24 @@ if (-not $sportsProbabilityProbeReady) { $blockers += "B.3.6 sports probability 
 
 $blockers = $blockers | Select-Object -Unique
 $verdict = if ($blockers.Count -eq 0) { "10% ready" } else { "hold at 0/0" }
-$sportsProbeRow = $reportRows | Where-Object { $_.query -eq $a29ProbeQuery } | Select-Object -First 1
-$sportsProbabilityProbeRow = $reportRows | Where-Object { $_.query -eq $b36ProbeQuery } | Select-Object -First 1
+$sportsProbeRow = $reportRows | Where-Object { $_.query_id -eq $a29ProbeId } | Select-Object -First 1
+$sportsProbabilityProbeRow = $reportRows | Where-Object { $_.query_id -eq $b36ProbeId } | Select-Object -First 1
+$sportsHoldRegressionRow = $reportRows | Where-Object { $_.query_id -eq $sportsHoldRegressionId } | Select-Object -First 1
 $sportsProbeSemanticReady = if ($sportsProbeRow) { [bool]($sportsProbeRow.local_sports_semantic_ready -and $sportsProbeRow.remote_sports_semantic_ready) } else { $false }
 $sportsProbePublishGateReady = if ($sportsProbeRow) { [bool]($sportsProbeRow.local_sports_publish_gate_ready -and $sportsProbeRow.remote_sports_publish_gate_ready) } else { $false }
 $sportsProbeMarketOverlayAvailable = if ($sportsProbeRow) { [bool]($sportsProbeRow.local_sports_market_overlay_available -and $sportsProbeRow.remote_sports_market_overlay_available) } else { $false }
+$sportsProbeMarketSourceClass =
+  if ($sportsProbeRow -and [string]$sportsProbeRow.local_sports_market_source_class -eq [string]$sportsProbeRow.remote_sports_market_source_class) {
+    [string]$sportsProbeRow.local_sports_market_source_class
+  } else {
+    ""
+  }
+$sportsProbeFixtureKind =
+  if ($sportsProbeRow -and [string]$sportsProbeRow.local_sports_fixture_kind -eq [string]$sportsProbeRow.remote_sports_fixture_kind) {
+    [string]$sportsProbeRow.local_sports_fixture_kind
+  } else {
+    ""
+  }
 $sportsProbePickState = if ($sportsProbeRow -and [string]$sportsProbeRow.local_sports_pick_state -eq [string]$sportsProbeRow.remote_sports_pick_state) {
   [string]$sportsProbeRow.local_sports_pick_state
 } else {
@@ -776,6 +1017,85 @@ $sportsProbabilityProbePickState = if ($sportsProbabilityProbeRow -and [string]$
 } else {
   ""
 }
+$sportsBinaryRows = @($reportRows | Where-Object {
+  (@($a29ProbeId, $b36ProbeId) -contains [string]$_.query_id) -and [bool]$_.expects_binary
+})
+$sportsBinaryComparableRows = @($sportsBinaryRows | Where-Object {
+  $_.local_status -eq "completed" -and
+  $_.remote_status -eq "completed" -and
+  [string]::IsNullOrWhiteSpace([string]$_.local_winner) -eq $false -and
+  [string]::IsNullOrWhiteSpace([string]$_.remote_winner) -eq $false
+})
+$sportsBinaryComparableCount = $sportsBinaryComparableRows.Count
+$sportsBinaryWinnerMismatches = @($sportsBinaryComparableRows | Where-Object { [string]$_.local_winner -ne [string]$_.remote_winner }).Count
+$sportsWinnerMismatchRate = if ($sportsBinaryComparableCount -gt 0) {
+  [math]::Round(($sportsBinaryWinnerMismatches / $sportsBinaryComparableCount), 4)
+} else {
+  $null
+}
+$sportsBinaryMissingContracts = @($sportsBinaryRows | Where-Object {
+  [string]::IsNullOrWhiteSpace([string]$_.local_winner) -or [string]::IsNullOrWhiteSpace([string]$_.remote_winner)
+}).Count
+$sportsMissingBinaryContractRate = if ($sportsBinaryRows.Count -gt 0) {
+  [math]::Round(($sportsBinaryMissingContracts / $sportsBinaryRows.Count), 4)
+} else {
+  $null
+}
+$sportsHoldRegressionGreen =
+  if ($sportsHoldRegressionRow) {
+    $localHoldSafe = (@("limited", "blocked") -contains [string]$sportsHoldRegressionRow.local_card_state) -and -not [bool]$sportsHoldRegressionRow.local_fixture_window_open
+    $remoteHoldSafe = (@("limited", "blocked") -contains [string]$sportsHoldRegressionRow.remote_card_state) -and -not [bool]$sportsHoldRegressionRow.remote_fixture_window_open
+    ($sportsHoldRegressionRow.local_status -eq "completed") -and
+    ($sportsHoldRegressionRow.remote_status -eq "completed") -and
+    $localHoldSafe -and
+    $remoteHoldSafe
+  } else {
+    $true
+  }
+$fixtureResolutionFailures = @($reportRows | Where-Object {
+  (@($a29ProbeId, $b36ProbeId) -contains [string]$_.query_id) -and
+  (-not [bool]$_.local_fixture_resolved -or -not [bool]$_.remote_fixture_resolved)
+}).Count
+$entityAlignmentFailures = @($reportRows | Where-Object {
+  (@($a29ProbeId, $b36ProbeId, $sportsHoldRegressionId) -contains [string]$_.query_id) -and
+  (
+    [string]$_.local_sports_overlay_blocker_reason -match 'entity_alignment' -or
+    [string]$_.remote_sports_overlay_blocker_reason -match 'entity_alignment'
+  )
+}).Count
+$staleEvidenceFailures = @($reportRows | Where-Object {
+  $queryId = [string]$_.query_id
+  if (@($a29ProbeId, $b36ProbeId, $sportsHoldRegressionId) -notcontains $queryId) { return $false }
+
+  $staleSignal =
+    ([string]$_.local_sports_overlay_blocker_reason -match 'stale|fixture_window_not_live') -or
+    ([string]$_.remote_sports_overlay_blocker_reason -match 'stale|fixture_window_not_live') -or
+    ([string]$_.local_fixture_window_state -match 'past|scheduled_far|date_mismatch') -or
+    ([string]$_.remote_fixture_window_state -match 'past|scheduled_far|date_mismatch')
+
+  if (-not $staleSignal) { return $false }
+
+  if ($queryId -eq $sportsHoldRegressionId) {
+    return -not $sportsHoldRegressionGreen
+  }
+
+  $rowReady =
+    [bool]$_.local_sports_ready -and
+    [bool]$_.remote_sports_ready -and
+    (@("grounded_lean", "publishable_controlled", "publishable_full") -contains [string]$_.local_sports_pick_state) -and
+    (@("grounded_lean", "publishable_controlled", "publishable_full") -contains [string]$_.remote_sports_pick_state)
+
+  return -not $rowReady
+}).Count
+$sportsLocalRemoteGreen =
+  ($sportsProbeReady -and
+   $sportsProbabilityProbeReady -and
+   $sportsHoldRegressionGreen -and
+   $sportsBinaryComparableCount -gt 0 -and
+   $sportsWinnerMismatchRate -eq 0 -and
+   ($null -ne $sportsMissingBinaryContractRate) -and
+   $sportsMissingBinaryContractRate -eq 0)
+$localRemoteGreen = ($sportsProbeReady -and $sportsProbabilityProbeReady -and $zeroMismatch -and $missingOk)
 
 $report = [ordered]@{
   generated_at = (Get-Date).ToString("o")
@@ -786,6 +1106,7 @@ $report = [ordered]@{
     remote_max_completed_streak = $maxRemoteCompletedStreak
     binary_comparable_count = $binaryComparableCount
     binary_winner_mismatch_rate = $winnerMismatchRate
+    winner_mismatch_rate = $winnerMismatchRate
     median_probability_delta = $medianProbabilityDelta
     missing_binary_contract_rate = $missingBinaryContractRate
     direct_api_502_count = $local502Count
@@ -793,6 +1114,8 @@ $report = [ordered]@{
     sports_probe_semantic_ready = $sportsProbeSemanticReady
     sports_probe_publish_gate_ready = $sportsProbePublishGateReady
     sports_probe_market_overlay_available = $sportsProbeMarketOverlayAvailable
+    sports_probe_market_source_class = $sportsProbeMarketSourceClass
+    sports_probe_fixture_kind = $sportsProbeFixtureKind
     sports_probe_pick_state = $sportsProbePickState
     sports_probe_sportsbook_readiness_state = $sportsProbeSportsbookReadinessState
     sports_probability_probe_ready = $sportsProbabilityProbeReady
@@ -803,8 +1126,39 @@ $report = [ordered]@{
       } else {
         ""
       }
+    sports_binary_comparable_count = $sportsBinaryComparableCount
+    sports_winner_mismatch_rate = $sportsWinnerMismatchRate
+    sports_missing_binary_contract_rate = $sportsMissingBinaryContractRate
+    sports_hold_regression_green = $sportsHoldRegressionGreen
+    sports_local_remote_green = $sportsLocalRemoteGreen
+    local_remote_green = $localRemoteGreen
+    fixture_resolution_failures = $fixtureResolutionFailures
+    entity_alignment_failures = $entityAlignmentFailures
+    stale_evidence_failures = $staleEvidenceFailures
+    sharp_market_probe_count = @($reportRows | Where-Object { [string]$_.local_sports_market_source_class -eq "sharp" -and [string]$_.remote_sports_market_source_class -eq "sharp" }).Count
     verdict = $verdict
     blockers = @($blockers)
+  }
+}
+
+$sportsProbeReport = [ordered]@{
+  generated_at = (Get-Date).ToString("o")
+  source_parity_report = (Resolve-RepoPath $OutputJsonPath)
+  a29_probe = $sportsProbeRow
+  b36_probe = $sportsProbabilityProbeRow
+  hold_regression_probe = $sportsHoldRegressionRow
+  summary = [ordered]@{
+    a29_ready = $sportsProbeReady
+    b36_ready = $sportsProbabilityProbeReady
+    winner_mismatch_rate = $sportsWinnerMismatchRate
+    missing_binary_contract_rate = $sportsMissingBinaryContractRate
+    local_remote_green = $sportsLocalRemoteGreen
+    fixture_resolution_failures = $fixtureResolutionFailures
+    entity_alignment_failures = $entityAlignmentFailures
+    stale_evidence_failures = $staleEvidenceFailures
+    hold_regression_green = $sportsHoldRegressionGreen
+    market_source_class = $sportsProbeMarketSourceClass
+    fixture_kind = $sportsProbeFixtureKind
   }
 }
 
@@ -828,6 +1182,8 @@ $markdown = @(
   ('- Sports semantic ready: `{0}`' -f $report.summary.sports_probe_semantic_ready),
   ('- Sports publish gate ready: `{0}`' -f $report.summary.sports_probe_publish_gate_ready),
   ('- Sports market overlay available: `{0}`' -f $report.summary.sports_probe_market_overlay_available),
+  ('- Sports market source class: `{0}`' -f $report.summary.sports_probe_market_source_class),
+  ('- Sports fixture kind: `{0}`' -f $report.summary.sports_probe_fixture_kind),
   ('- Sports pick state: `{0}`' -f $report.summary.sports_probe_pick_state),
   ('- Sportsbook readiness state: `{0}`' -f $report.summary.sports_probe_sportsbook_readiness_state),
   ('- Sports probability probe ready: `{0}`' -f $report.summary.sports_probability_probe_ready),
@@ -862,10 +1218,16 @@ $markdownDir = Split-Path -Parent $OutputMarkdownPath
 if ($markdownDir -and -not (Test-Path $markdownDir)) {
   New-Item -ItemType Directory -Path $markdownDir | Out-Null
 }
+$sportsProbeDir = Split-Path -Parent $sportsProbeOutputFullPath
+if ($sportsProbeDir -and -not (Test-Path $sportsProbeDir)) {
+  New-Item -ItemType Directory -Path $sportsProbeDir | Out-Null
+}
 
 $report | ConvertTo-Json -Depth 12 | Set-Content -Path $OutputJsonPath -Encoding utf8
 $markdown -join "`r`n" | Set-Content -Path $OutputMarkdownPath -Encoding utf8
+$sportsProbeReport | ConvertTo-Json -Depth 12 | Set-Content -Path $sportsProbeOutputFullPath -Encoding utf8
 
 Write-Host "Parity report written to $OutputMarkdownPath"
 Write-Host "Parity JSON written to $OutputJsonPath"
+Write-Host "Sports probe JSON written to $sportsProbeOutputFullPath"
 Write-Host "Verdict: $verdict"

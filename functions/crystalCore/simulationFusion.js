@@ -1,4 +1,5 @@
 const { clamp01, safeText } = require("../predictionCore");
+const { shouldTriggerSportsDecisionSimulation, normalizeSportsDecisionState } = require("./sportsDecision");
 
 function uniqueStrings(values = []) {
   return [...new Set((Array.isArray(values) ? values : []).filter((item) => typeof item === "string" && item.trim()))];
@@ -31,6 +32,21 @@ function shouldRunSimulationDecisionGate({ normalizedQuery = {}, variableSelecti
   const liveSignalCount = Array.isArray(verifiedEvidencePack.live_signals) ? verifiedEvidencePack.live_signals.length : 0;
 
   const reasons = [];
+  const sportsGateReady = shouldTriggerSportsDecisionSimulation({
+    sportsGrounding: verifiedEvidencePack?.sports_grounding,
+    sportsMarketOverlay: verifiedEvidencePack?.sports_market_overlay,
+    sportsSemanticOverlay: verifiedEvidencePack?.sports_semantic_overlay,
+    sportsContractState: {
+      sportsGrounded: verifiedEvidencePack?.sports_grounding?.sports_grounded === true,
+      fixtureWindowOpen: verifiedEvidencePack?.sports_grounding?.fixture_window_open === true,
+      sportsPickState: safeText(verifiedEvidencePack?.sports_grounding?.sports_pick_state),
+      sportsPublishGateReady: verifiedEvidencePack?.sports_grounding?.publish_gate_ready === true,
+    },
+    domainId: safeText(normalizedQuery?.primary_domain_id),
+  });
+  if (safeText(simulationContext.domain_family) === "sports_match_decision" && sportsGateReady) {
+    reasons.push("sports_grounded_market_ready");
+  }
   if (/governance_timeline|geopolitics_conflict|long_run_analog|attention_narrative|culture_event_pressure|personal_tradeoff/.test(domainCorpus)) {
     reasons.push("typed_scenario_family");
   }
@@ -136,6 +152,7 @@ function buildMiroFishOutputContract(digest = {}, gate = { enabled: false, reaso
         invalidation_map: [],
         scenario_split_cause: [],
       },
+      sports_decision: null,
       fusion_eligible: false,
     };
   }
@@ -227,6 +244,7 @@ function buildMiroFishOutputContract(digest = {}, gate = { enabled: false, reaso
         : 0,
     },
     typed_output: typedOutput,
+    sports_decision: digest?.sports_decision || null,
     fusion_eligible: fusionEligible,
   };
 }
@@ -270,6 +288,39 @@ function applySimulationFusion(rawPrediction = {}, simulationContract = null) {
         ? undefined
         : Number(clamp01(rawPrediction.confidence_score + confidencePressure, rawPrediction.confidence_score).toFixed(3)),
   };
+
+  const sportsDecision = simulationContract?.sports_decision;
+  if (sportsDecision && typeof sportsDecision === "object") {
+    next.sports_decision_state = normalizeSportsDecisionState(sportsDecision.decision_state, rawPrediction?.sports_decision_state || "grounded_lean");
+    next.sports_decision_reason = safeText(sportsDecision.decision_reason);
+    next.sports_no_bet_reason = safeText(sportsDecision.no_bet_reason) || null;
+    next.sports_model_probabilities = sportsDecision.model_probabilities || null;
+    next.sports_market_probabilities = sportsDecision.market_probabilities || null;
+    next.sports_edge_delta = sportsDecision.edge_delta || null;
+    next.sports_fair_prices = sportsDecision.fair_prices || null;
+    next.sports_fragility_score = Number.isFinite(Number(sportsDecision.fragility_score))
+      ? Number(sportsDecision.fragility_score)
+      : null;
+    next.sports_simulation_confidence = Number.isFinite(Number(sportsDecision.simulation_confidence))
+      ? Number(sportsDecision.simulation_confidence)
+      : null;
+    next.sports_upset_rate = Number.isFinite(Number(sportsDecision.upset_rate)) ? Number(sportsDecision.upset_rate) : null;
+    next.sports_draw_volatility = Number.isFinite(Number(sportsDecision.draw_volatility))
+      ? Number(sportsDecision.draw_volatility)
+      : null;
+    next.sports_flip_conditions = uniqueStrings(
+      []
+        .concat(Array.isArray(rawPrediction?.sports_flip_conditions) ? rawPrediction.sports_flip_conditions : [])
+        .concat(Array.isArray(sportsDecision.flip_conditions) ? sportsDecision.flip_conditions : [])
+    ).slice(0, 4);
+    next.invalidators = uniqueStrings([...(Array.isArray(next.invalidators) ? next.invalidators : []), ...(next.sports_flip_conditions || [])]).slice(0, 4);
+    next.sports_model_favorite = safeText(sportsDecision.model_favorite) || null;
+    next.sports_market_favorite = safeText(sportsDecision.market_favorite) || null;
+    next.sports_favorite_but_no_bet = sportsDecision.favorite_but_no_bet === true;
+    if (next.sports_decision_state === "no_bet" && next.sports_no_bet_reason) {
+      next.recommended_posture = next.sports_no_bet_reason;
+    }
+  }
 
   return next;
 }

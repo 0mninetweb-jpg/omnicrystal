@@ -1,0 +1,29 @@
+{
+  "artifact_type": "sports_calibration",
+  "artifact_status": "unavailable",
+  "operational": false,
+  "statistically_mature": false,
+  "generated_at": "2026-04-02T11:08:54.142Z",
+  "output_date": "2026-04-02",
+  "lookback_days": 30,
+  "backfill_lookback_days": 365,
+  "operation_name": null,
+  "fetched_at": "2026-04-02T11:08:54.143Z",
+  "source": "crystal-core-eval-job",
+  "summary": {
+    "sample_size": 0,
+    "brier_score": null,
+    "log_loss": null,
+    "favorite_vs_edge_confusion_rate": null,
+    "no_bet_rate": null,
+    "upset_recall": null,
+    "artifact_status": "unavailable",
+    "operational": false,
+    "statistically_mature": false,
+    "sample_floor": 30,
+    "status_reason": "Calibration job failed: {\"code\":7,\"message\":\"Google Cloud Run Service Agent service-294034419055@serverless-robot-prod.iam.gserviceaccount.com must have permission to read the image, europe-west1-docker.pkg.dev/omnicrystal/cloud-run-source-deploy/crystal-core. Ensure that the provided container image URL is correct and that the above account has permission to access the image. If you just enabled the Cloud Run API, the permissions might take a few minutes to propagate.\"}"
+  },
+  "error": {
+    "message": "Calibration job failed: {\"code\":7,\"message\":\"Google Cloud Run Service Agent service-294034419055@serverless-robot-prod.iam.gserviceaccount.com must have permission to read the image, europe-west1-docker.pkg.dev/omnicrystal/cloud-run-source-deploy/crystal-core. Ensure that the provided container image URL is correct and that the above account has permission to access the image. If you just enabled the Cloud Run API, the permissions might take a few minutes to propagate.\"}"
+  }
+}

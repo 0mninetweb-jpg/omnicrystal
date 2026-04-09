@@ -1,0 +1,44 @@
+{
+  "queries": [
+    {
+      "id": "governance_referendum",
+      "query": "Cosa passera al referendum costituzionale di marzo in Italia? si o no",
+      "expects_binary": true
+    },
+    {
+      "id": "sports_a29_probe",
+      "query": "Inter Milan vs Roma 2026-04-05",
+      "expects_binary": true
+    },
+    {
+      "id": "sports_b36_probe",
+      "query": "Will Inter Milan beat Roma on 2026-04-05?",
+      "expects_binary": true
+    },
+    {
+      "id": "sports_hold_regression",
+      "query": "Inter vs Juventus",
+      "expects_binary": false
+    },
+    {
+      "id": "bitcoin_regime",
+      "query": "Bitcoin next 30 days",
+      "expects_binary": false
+    },
+    {
+      "id": "startup_survival",
+      "query": "La mia startup sopravviverebbe 12 mesi?",
+      "expects_binary": true
+    },
+    {
+      "id": "housing_wait",
+      "query": "Dovrei aspettare prima di affittare a Roma?",
+      "expects_binary": true
+    }
+  ],
+  "sports_probes": {
+    "a29": "sports_a29_probe",
+    "b36": "sports_b36_probe",
+    "hold_regression": "sports_hold_regression"
+  }
+}

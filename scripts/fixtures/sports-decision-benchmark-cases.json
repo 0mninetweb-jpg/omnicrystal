@@ -1,0 +1,32 @@
+{
+  "cases": [
+    {
+      "id": "dated_sharp_no_bet",
+      "query": "Inter Milan vs Roma 2026-04-05",
+      "market_source_class": "sharp",
+      "expected_state": "no_bet",
+      "notes": "Favorite but fairly priced."
+    },
+    {
+      "id": "dated_sharp_edge",
+      "query": "Lazio vs Parma 2026-04-04",
+      "market_source_class": "sharp",
+      "expected_state": "edge",
+      "notes": "Sharp market with clear model gap."
+    },
+    {
+      "id": "proxy_only_no_edge",
+      "query": "Italy vs Bosnia 2026-04-03",
+      "market_source_class": "proxy",
+      "expected_state": "no_bet",
+      "notes": "Proxy market should never auto-create a full edge."
+    },
+    {
+      "id": "generic_hold_window",
+      "query": "Inter vs Juventus",
+      "market_source_class": "none",
+      "expected_state": "grounded_lean",
+      "notes": "Generic rivalry outside active window."
+    }
+  ]
+}

@@ -13,6 +13,8 @@ export default defineConfig(({mode}) => {
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
+        'firebase/auth': path.resolve(__dirname, 'src/platform/firebase-shim/auth.ts'),
+        'firebase/firestore': path.resolve(__dirname, 'src/platform/firebase-shim/firestore.ts'),
       },
     },
     build: {
@@ -20,7 +22,7 @@ export default defineConfig(({mode}) => {
         output: {
           manualChunks(id) {
             if (!id.includes('node_modules')) return;
-            if (id.includes('firebase')) return 'firebase';
+            if (id.includes('firebase') || id.includes('\\appwrite\\') || id.includes('/appwrite/')) return 'platform';
             if (id.includes('@google/genai')) return 'genai';
             if (id.includes('framer-motion') || id.includes('\\motion\\') || id.includes('/motion/')) return 'motion';
             if (id.includes('recharts') || id.includes('\\d3-') || id.includes('/d3-')) return 'charts';

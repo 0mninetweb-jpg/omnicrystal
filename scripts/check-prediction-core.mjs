@@ -4,6 +4,10 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { buildRoutingHints, finalizeScorecard } = require('../functions/predictionCore.js');
 const { buildSportsFixtureWindow } = require('../functions/sportsData.js');
+const { computeSportsContractState, getSportsReleaseMode } = require('../functions/crystalCore/sportsState.js');
+const { buildSportsDecisionFrame } = require('../functions/crystalCore/sportsDecision.js');
+const { __testables: runtimeTestables } = require('../functions/crystalCore/runtime.js');
+const { __testables: indexTestables } = require('../functions/index.js');
 
 function addCases(target, queries, expectedDomains, options = {}) {
   for (const query of queries) {
@@ -340,6 +344,64 @@ const sportsRawScorecard = {
   historical_anchors: ['Recent head-to-head form and season table remain broadly aligned.'],
   why_this_side: 'The structured matchup read still leans Inter, but the semantic layer can still hold the public gate closed.',
   recommended_posture: 'Keep the matchup on watch until the semantic overlay and parity gate are both ready.',
+  sports_model_probabilities: {
+    home: 0.58,
+    draw: 0.23,
+    away: 0.19,
+    home_label: 'Inter Milan',
+    draw_label: 'Draw',
+    away_label: 'Roma',
+  },
+  sports_market_probabilities: {
+    home: 0.55,
+    draw: 0.24,
+    away: 0.21,
+    home_label: 'Inter Milan',
+    draw_label: 'Draw',
+    away_label: 'Roma',
+  },
+  sports_fair_prices: {
+    home: 1.72,
+    draw: 4.35,
+    away: 5.26,
+    home_label: 'Inter Milan',
+    draw_label: 'Draw',
+    away_label: 'Roma',
+  },
+  sports_model_favorite: 'Inter Milan',
+  sports_market_favorite: 'Inter Milan',
+};
+
+const sportsFixtureMetadata = {
+  fixture_id: 987654,
+  sports_fixture_kind: 'dated',
+  sports_fixture_candidate_score: 0.94,
+  sports_fixture_resolution_reason: 'team order matched cleanly; explicit date matched; fixture window upcoming',
+  sports_fixture_date_match: true,
+  sports_fixture_competition_match: true,
+};
+
+const sharpMarketFrame = {
+  source: 'api_football_optional',
+  source_class: 'sharp',
+  market_type: '1x2',
+  selection_probabilities: sportsRawScorecard.sports_market_probabilities,
+  fair_probabilities: sportsRawScorecard.sports_market_probabilities,
+  overround: 0.048,
+  snapshot_time: '2026-04-01T10:00:00.000Z',
+  open_snapshot: {
+    bookmaker: 'Bet365',
+    home_decimal_odd: 1.9,
+    draw_decimal_odd: 3.9,
+    away_decimal_odd: 4.5,
+  },
+  latest_snapshot: {
+    bookmaker: 'Bet365',
+    home_decimal_odd: 1.85,
+    draw_decimal_odd: 3.8,
+    away_decimal_odd: 4.4,
+  },
+  market_quality_tier: 'sharp',
 };
 
 const sportsEvidenceBase = {
@@ -353,8 +415,17 @@ const sportsEvidenceBase = {
   sports_market_overlay: {
     enabled: true,
     available: true,
-    used_source_ids: ['polymarket_public', 'google_trends'],
-    source_count: 2,
+    used_source_ids: ['api_football_optional', 'polymarket_public', 'google_trends'],
+    source_count: 3,
+    market_frame: sharpMarketFrame,
+    sports_market_source: 'api_football_optional',
+    sports_market_source_class: 'sharp',
+    sports_market_quality_tier: 'sharp',
+    sports_market_snapshot: {
+      snapshot_time: '2026-04-01T10:00:00.000Z',
+      latest_snapshot: sharpMarketFrame.latest_snapshot,
+    },
+    sports_market_overround: 0.048,
     market_consensus_strength: 0.66,
     market_disagreement_score: 0.18,
     price_move_pressure: 0.34,
@@ -404,11 +475,32 @@ const sportsBlockedScorecard = finalizeScorecard(
       overlay_confidence: 0.59,
       overlay_blocker_reason: 'sports_semantic_overlay_pending',
       publish_gate_ready: false,
+      fixture_window_state: 'upcoming',
+      fixture_window_open: true,
+      ...sportsFixtureMetadata,
       market_consensus_strength: 0.61,
       market_disagreement_score: 0.22,
       price_move_pressure: 0.31,
       narrative_hype_score: 0.55,
       sportsbook_readiness_state: 'forecast_context_only',
+      question_side_a: 'Inter Milan',
+      question_side_b: 'Roma',
+      winning_side: 'Inter Milan',
+      winning_probability: 0.58,
+      model_probabilities: sportsRawScorecard.sports_model_probabilities,
+      market_probabilities: sportsRawScorecard.sports_market_probabilities,
+      fair_prices: sportsRawScorecard.sports_fair_prices,
+      model_favorite: 'Inter Milan',
+      market_favorite: 'Inter Milan',
+      sports_market_source: 'api_football_optional',
+      sports_market_source_class: 'sharp',
+      sports_market_quality_tier: 'sharp',
+      sports_market_snapshot: {
+        snapshot_time: '2026-04-01T10:00:00.000Z',
+        latest_snapshot: sharpMarketFrame.latest_snapshot,
+      },
+      sports_market_overround: 0.048,
+      market_frame: sharpMarketFrame,
     },
   },
   sportsQueryPlan,
@@ -434,6 +526,16 @@ assert.equal(
   'forecast_context_only',
   'Grounded-lean A.29 should still expose a conservative sportsbook readiness state'
 );
+assert.equal(
+  sportsBlockedScorecard.publication_basis.sports_fixture_kind,
+  'dated',
+  'Grounded-lean A.29 should keep deterministic fixture kind metadata on the scorecard.'
+);
+assert.equal(
+  sportsBlockedScorecard.publication_basis.sports_market_source_class,
+  'sharp',
+  'Grounded-lean A.29 should still surface normalized market source class when sharp odds exist.'
+);
 assert(sportsBlockedScorecard.binary_contract, 'Grounded-lean sports scorecards should still expose a bounded binary contract.');
 
 const sportsReadyScorecard = finalizeScorecard(
@@ -450,11 +552,32 @@ const sportsReadyScorecard = finalizeScorecard(
       overlay_confidence: 0.79,
       overlay_blocker_reason: '',
       publish_gate_ready: true,
+      fixture_window_state: 'active',
+      fixture_window_open: true,
+      ...sportsFixtureMetadata,
       market_consensus_strength: 0.68,
       market_disagreement_score: 0.16,
       price_move_pressure: 0.28,
       narrative_hype_score: 0.59,
       sportsbook_readiness_state: 'forecast_betting_aware',
+      question_side_a: 'Inter Milan',
+      question_side_b: 'Roma',
+      winning_side: 'Inter Milan',
+      winning_probability: 0.58,
+      model_probabilities: sportsRawScorecard.sports_model_probabilities,
+      market_probabilities: sportsRawScorecard.sports_market_probabilities,
+      fair_prices: sportsRawScorecard.sports_fair_prices,
+      model_favorite: 'Inter Milan',
+      market_favorite: 'Inter Milan',
+      sports_market_source: 'api_football_optional',
+      sports_market_source_class: 'sharp',
+      sports_market_quality_tier: 'sharp',
+      sports_market_snapshot: {
+        snapshot_time: '2026-04-01T10:00:00.000Z',
+        latest_snapshot: sharpMarketFrame.latest_snapshot,
+      },
+      sports_market_overround: 0.048,
+      market_frame: sharpMarketFrame,
     },
   },
   sportsQueryPlan,
@@ -484,6 +607,31 @@ assert.equal(
   'forecast_betting_aware',
   'A.29 ready scorecard should expose a betting-aware but forecast-first posture'
 );
+assert.equal(
+  sportsReadyScorecard.publication_basis.sports_fixture_kind,
+  'dated',
+  'A.29 ready scorecards should expose fixture kind metadata.'
+);
+assert.equal(
+  sportsReadyScorecard.publication_basis.sports_market_source,
+  'api_football_optional',
+  'A.29 ready scorecards should expose the structured market source.'
+);
+assert.equal(
+  sportsReadyScorecard.publication_basis.sports_market_source_class,
+  'sharp',
+  'A.29 ready scorecards should expose the normalized market source class.'
+);
+assert.equal(
+  sportsReadyScorecard.publication_basis.sports_market_quality_tier,
+  'sharp',
+  'A.29 ready scorecards should expose the market quality tier.'
+);
+assert.equal(
+  sportsReadyScorecard.publication_basis.sports_market_overround,
+  0.048,
+  'A.29 ready scorecards should expose normalized overround metadata.'
+);
 assert(
   sportsReadyScorecard.binary_contract,
   'A.29 should expose a binary contract again once the sports publish gate is ready'
@@ -505,11 +653,32 @@ const sportsBenchmarkOnlyScorecard = finalizeScorecard(
       publish_gate_ready: true,
       sports_pick_state: 'publishable_controlled',
       sports_grounded: true,
+      fixture_window_state: 'active',
+      fixture_window_open: true,
+      ...sportsFixtureMetadata,
       market_consensus_strength: 0.69,
       market_disagreement_score: 0.14,
       price_move_pressure: 0.27,
       narrative_hype_score: 0.58,
       sportsbook_readiness_state: 'probability_mode_live',
+      question_side_a: 'Inter Milan',
+      question_side_b: 'Roma',
+      winning_side: 'Inter Milan',
+      winning_probability: 0.58,
+      model_probabilities: sportsRawScorecard.sports_model_probabilities,
+      market_probabilities: sportsRawScorecard.sports_market_probabilities,
+      fair_prices: sportsRawScorecard.sports_fair_prices,
+      model_favorite: 'Inter Milan',
+      market_favorite: 'Inter Milan',
+      sports_market_source: 'api_football_optional',
+      sports_market_source_class: 'sharp',
+      sports_market_quality_tier: 'sharp',
+      sports_market_snapshot: {
+        snapshot_time: '2026-04-01T10:00:00.000Z',
+        latest_snapshot: sharpMarketFrame.latest_snapshot,
+      },
+      sports_market_overround: 0.048,
+      market_frame: sharpMarketFrame,
     },
   },
   sportsQueryPlan,
@@ -538,6 +707,11 @@ assert.equal(
   sportsBenchmarkOnlyScorecard.publication_basis.sportsbook_readiness_state,
   'probability_mode_live',
   'B.3.6 should expose a live probability-mode sportsbook readiness state.'
+);
+assert.equal(
+  sportsBenchmarkOnlyScorecard.publication_basis.sports_market_source_class,
+  'sharp',
+  'B.3.6 should preserve structured market truth in probability mode.'
 );
 assert(sportsBenchmarkOnlyScorecard.binary_contract, 'B.3.6 should expose a live binary contract in probability mode.');
 
@@ -591,6 +765,674 @@ assert.equal(
   'date_mismatch',
   'Date-mismatched sports fixtures should expose a date_mismatch fixture window state.'
 );
+
+assert.equal(
+  getSportsReleaseMode(undefined),
+  'observe',
+  'Missing SPORTS_RELEASE_MODE should fail closed to observe.'
+);
+assert.equal(
+  getSportsReleaseMode('totally-invalid'),
+  'observe',
+  'Invalid SPORTS_RELEASE_MODE should fail closed to observe.'
+);
+
+const sharedSportsState = computeSportsContractState({
+  sportsGrounding: {
+    provider_configured: true,
+    fixture_resolved: true,
+    publish_gate_ready: false,
+    fixture_window_state: 'upcoming',
+    fixture_window_open: true,
+  },
+});
+
+assert.equal(sharedSportsState.sportsGrounded, true, 'Shared sports state should ground a configured resolved fixture.');
+assert.equal(sharedSportsState.sportsPickState, 'grounded_lean', 'Resolved sports fixtures without full gate closure should default to grounded_lean.');
+assert.equal(sharedSportsState.fixtureWindowState, 'upcoming', 'Shared sports state should preserve fixture window state.');
+assert.equal(sharedSportsState.fixtureWindowOpen, true, 'Shared sports state should preserve fixture window openness.');
+
+const payloadFromSharedSportsState = indexTestables.applySportsPublishGateToCardPayload(
+  {
+    card_state: 'limited',
+    summary: 'Existing payload summary.',
+    verdict: 'Existing payload verdict.',
+  },
+  {
+    provider_configured: true,
+    semantic_ready: false,
+    overlay_confidence: 0.58,
+    overlay_blocker_reason: 'sports_semantic_overlay_pending',
+    sportsbook_readiness_state: 'forecast_context_only',
+    grounded_read: {
+      provider_required: true,
+      provider_configured: true,
+      fixture_resolved: true,
+      parity_ready: true,
+      publish_gate_ready: false,
+      fixture_window_state: 'upcoming',
+      fixture_window_open: true,
+      ...sportsFixtureMetadata,
+      question_side_a: 'Inter Milan',
+      question_side_b: 'Roma',
+      winning_side: 'Inter Milan',
+      winning_probability: 0.61,
+      sports_market_source: 'api_football_optional',
+      sports_market_source_class: 'sharp',
+      sports_market_quality_tier: 'sharp',
+      sports_market_snapshot: {
+        snapshot_time: '2026-04-01T10:00:00.000Z',
+        latest_snapshot: sharpMarketFrame.latest_snapshot,
+      },
+      sports_market_overround: 0.048,
+    },
+  },
+  {
+    original_query: 'Inter Milan vs Roma 2026-04-05',
+    question_side_a: 'Inter Milan',
+    question_side_b: 'Roma',
+  }
+);
+
+assert.equal(
+  payloadFromSharedSportsState.sports_grounded,
+  true,
+  'Public payload shaping should preserve the shared sports_grounded truth.'
+);
+assert.equal(
+  payloadFromSharedSportsState.sports_pick_state,
+  'grounded_lean',
+  'Public payload shaping should preserve the shared sports_pick_state truth.'
+);
+assert.equal(
+  payloadFromSharedSportsState.sports_publish_gate_ready,
+  false,
+  'Public payload shaping should preserve the shared sports publish gate readiness.'
+);
+assert.equal(
+  payloadFromSharedSportsState.fixture_window_state,
+  'upcoming',
+  'Public payload shaping should preserve the shared fixture window state.'
+);
+assert.equal(
+  payloadFromSharedSportsState.fixture_window_open,
+  true,
+  'Public payload shaping should preserve the shared fixture window openness.'
+);
+assert.equal(
+  payloadFromSharedSportsState.sports_fixture_kind,
+  'dated',
+  'Public payload shaping should preserve fixture-kind metadata.'
+);
+assert.equal(
+  payloadFromSharedSportsState.sports_market_source_class,
+  'sharp',
+  'Public payload shaping should preserve market source class metadata.'
+);
+assert.equal(
+  payloadFromSharedSportsState.sports_grounding?.sports_grounded,
+  payloadFromSharedSportsState.sports_grounded,
+  'Nested and top-level sports grounding should stay aligned.'
+);
+assert.equal(
+  payloadFromSharedSportsState.sports_grounding?.sports_pick_state,
+  payloadFromSharedSportsState.sports_pick_state,
+  'Nested and top-level sports pick state should stay aligned.'
+);
+
+const probabilityPayload = indexTestables.applySportsPublishGateToCardPayload(
+  {
+    card_state: 'published',
+    summary: 'Probability mode payload.',
+    verdict: 'Probability mode verdict.',
+  },
+  {
+    provider_configured: true,
+    semantic_ready: true,
+    overlay_confidence: 0.74,
+    overlay_blocker_reason: '',
+    sportsbook_readiness_state: 'probability_mode_live',
+    market_consensus_strength: 0.66,
+    market_disagreement_score: 0.14,
+    price_move_pressure: 0.21,
+    narrative_hype_score: 0.49,
+    grounded_read: {
+      provider_required: true,
+      provider_configured: true,
+      fixture_resolved: true,
+      parity_ready: true,
+      publish_gate_ready: true,
+      sports_pick_state: 'publishable_controlled',
+      sports_grounded: true,
+      fixture_window_state: 'active',
+      fixture_window_open: true,
+      ...sportsFixtureMetadata,
+      question_side_a: 'Inter Milan',
+      question_side_b: 'Roma',
+      winning_side: 'Inter Milan',
+      winning_probability: 0.63,
+      model_probabilities: sportsRawScorecard.sports_model_probabilities,
+      market_probabilities: sportsRawScorecard.sports_market_probabilities,
+      fair_prices: sportsRawScorecard.sports_fair_prices,
+      model_favorite: 'Inter Milan',
+      market_favorite: 'Inter Milan',
+      invalidators: ['Late lineup downgrade'],
+      sports_market_source: 'api_football_optional',
+      sports_market_source_class: 'sharp',
+      sports_market_quality_tier: 'sharp',
+      sports_market_snapshot: {
+        snapshot_time: '2026-04-01T10:00:00.000Z',
+        latest_snapshot: sharpMarketFrame.latest_snapshot,
+      },
+      sports_market_overround: 0.048,
+      market_frame: sharpMarketFrame,
+    },
+  },
+  {
+    original_query: 'Will Inter Milan beat Roma on 2026-04-05?',
+    question_side_a: 'Inter Milan',
+    question_side_b: 'Roma',
+  }
+);
+
+assert(probabilityPayload.binary_contract, 'Sports probability mode payloads should still emit a binary contract.');
+assert.equal(
+  probabilityPayload.binary_contract?.winning_side,
+  'Inter Milan',
+  'Sports probability mode payloads should preserve the grounded winning side.'
+);
+assert.equal(
+  probabilityPayload.sports_pick_state,
+  'publishable_controlled',
+  'Sports probability mode payloads should preserve publishable_controlled state when the gate is ready.'
+);
+assert.equal(
+  sportsBlockedScorecard.sports_decision_state,
+  'grounded_lean',
+  'Grounded sports reads without a live market frame should default to grounded_lean in the decision layer.'
+);
+assert.equal(
+  sportsReadyScorecard.sports_decision_state,
+  'no_bet',
+  'A market-coherent favorite without robust mispricing should resolve to no_bet instead of edge.'
+);
+assert.equal(
+  probabilityPayload.sports_decision_state,
+  'no_bet',
+  'Live probability mode should still say no_bet when the market is already close to Crystal fair value.'
+);
+assert(probabilityPayload.sports_model_probabilities, 'Sports payloads should expose model probabilities.');
+assert(probabilityPayload.sports_market_probabilities, 'Sports payloads should expose market probabilities.');
+assert(probabilityPayload.sports_fair_prices, 'Sports payloads should expose fair prices.');
+assert.equal(
+  probabilityPayload.sports_market_source_class,
+  'sharp',
+  'Sports probability mode payloads should expose normalized sharp market truth.'
+);
+assert.equal(
+  probabilityPayload.sports_fixture_kind,
+  'dated',
+  'Sports probability mode payloads should preserve deterministic fixture kind metadata.'
+);
+assert.equal(
+  probabilityPayload.sports_market_overround,
+  0.048,
+  'Sports probability mode payloads should expose normalized market overround.'
+);
+assert.equal(
+  probabilityPayload.sports_favorite_but_no_bet,
+  true,
+  'Sports payloads should explicitly mark favorite-but-no-bet situations.'
+);
+
+const runtimeProbabilityCard = runtimeTestables.buildFinalCard({
+  runId: 'test_whale_mode_foundations',
+  queryText: sportsQueryPlan.query_text,
+  normalizedQuery: {
+    primary_domain_id: 'B.3.6.sports_outcomes_probability_mode',
+    query_text: sportsQueryPlan.query_text,
+    question_side_a: sportsQueryPlan.question_side_a,
+    question_side_b: sportsQueryPlan.question_side_b,
+    event_date: '2026-04-05',
+    temporal_context: {
+      as_of_utc: '2026-04-01T10:00:00.000Z',
+      as_of_timezone: 'Europe/Rome',
+      as_of_local_date: '2026-04-01',
+      uses_relative_time: false,
+      resolved_time_window: null,
+    },
+  },
+  scorecard: sportsBenchmarkOnlyScorecard,
+  voicePayload: {
+    title: 'Inter Milan vs Roma',
+    summary: 'Inter remains the favorite, but the market is already close to Crystal fair value.',
+    verdict: 'Favorite, but no bet',
+    what_to_watch: ['Late lineup downgrade'],
+    how_to_raise_confidence: ['Re-check close to kickoff'],
+  },
+  verifiedEvidencePack: {
+    ...sportsEvidenceBase,
+    sports_grounding: {
+      ...sportsBenchmarkOnlyScorecard.publication_basis,
+      ...sportsFixtureMetadata,
+      fixture_id: sportsFixtureMetadata.fixture_id,
+      question_side_a: 'Inter Milan',
+      question_side_b: 'Roma',
+      winning_side: 'Inter Milan',
+      winning_probability: 0.58,
+      sports_grounded: true,
+      sports_pick_state: 'publishable_controlled',
+      model_probabilities: sportsRawScorecard.sports_model_probabilities,
+      market_probabilities: sportsRawScorecard.sports_market_probabilities,
+      fair_prices: sportsRawScorecard.sports_fair_prices,
+      market_frame: sharpMarketFrame,
+      sports_market_source: 'api_football_optional',
+      sports_market_source_class: 'sharp',
+      sports_market_quality_tier: 'sharp',
+      sports_market_snapshot: {
+        snapshot_time: '2026-04-01T10:00:00.000Z',
+        latest_snapshot: sharpMarketFrame.latest_snapshot,
+      },
+      sports_market_overround: 0.048,
+    },
+    sports_market_overlay: sportsEvidenceBase.sports_market_overlay,
+    sports_semantic_overlay: {
+      ready: true,
+      confidence: 0.81,
+      contradiction_score: 0.08,
+      entity_alignment_score: 0.92,
+    },
+  },
+  simulationDigest: {
+    enabled: true,
+    simulation_mode: 'cache_hit',
+    quality_score: 0.78,
+    graph_coverage: 0.76,
+    agent_convergence: 0.74,
+    graph_age_hours: 5,
+    narrative_arc: 'Inter is still the favorite, but not enough above price to force a bet.',
+    pivotal_actors: ['Inter Milan', 'Roma'],
+    intervention_points: ['Late lineup downgrade'],
+    counterfactuals: [],
+    source_set: ['sports_match_decision'],
+    sports_decision: {
+      decision_state: 'no_bet',
+      no_bet_reason: 'Inter is the favorite, but the market is already close to Crystal fair value.',
+    },
+  },
+  calibrationSnapshot: null,
+  resolutionTarget: {
+    resolution_id: 'sports_foundation_inter_roma',
+    target_type: 'binary_outcome',
+    source_type: 'sports_fixture',
+    resolution_due_at: '2026-04-05T18:45:00Z',
+    question_side_a: 'Inter Milan',
+    question_side_b: 'Roma',
+    event_date: '2026-04-05',
+    evaluation_eligible: true,
+  },
+  evaluationEligible: true,
+  runtimeTransport: 'local_core',
+  rolloutBucket: 'sports_canary',
+});
+
+assert.equal(runtimeProbabilityCard.sports_grounded, true, 'Runtime sports cards should preserve grounded truth.');
+assert.equal(runtimeProbabilityCard.decision_state, 'no_action', 'Runtime sports cards should expose the generic no_action whale-mode state for favorite-but-no-bet cases.');
+assert.equal(runtimeProbabilityCard.sports_decision_state, 'no_bet', 'Runtime sports cards should preserve no_bet pricing decisions.');
+assert.equal(
+  runtimeProbabilityCard.publication_basis?.decision_state,
+  'no_action',
+  'Runtime publication basis should preserve the generic whale-mode decision state.'
+);
+assert.equal(runtimeProbabilityCard.sports_fixture_kind, 'dated', 'Runtime sports cards should expose fixture-kind metadata.');
+assert.equal(runtimeProbabilityCard.sports_market_source_class, 'sharp', 'Runtime sports cards should expose sharp market truth.');
+assert.equal(runtimeProbabilityCard.sports_market_overround, 0.048, 'Runtime sports cards should expose normalized overround.');
+assert(runtimeProbabilityCard.binary_contract, 'Runtime sports cards should still expose a binary contract in probability mode.');
+assert(runtimeProbabilityCard.world_sim?.sports_decision, 'Runtime sports cards should keep the typed world_sim sports decision block.');
+assert(runtimeProbabilityCard.world_sim?.whale_mode, 'Runtime sports cards should expose the generic whale-mode digest inside world_sim.');
+
+const normalizedSportsCard = indexTestables.normalizeCard(
+  runtimeProbabilityCard,
+  runtimeProbabilityCard.query_plan || {
+    primary_domain_id: 'B.3.6.sports_outcomes_probability_mode',
+    query_text: sportsQueryPlan.query_text,
+    question_side_a: sportsQueryPlan.question_side_a,
+    question_side_b: sportsQueryPlan.question_side_b,
+    event_date: '2026-04-05',
+  },
+  {
+    scorecard: sportsBenchmarkOnlyScorecard,
+    evidenceBundle: {
+      ...sportsEvidenceBase,
+      sports_grounding: {
+        ...sportsBenchmarkOnlyScorecard.publication_basis,
+        ...sportsFixtureMetadata,
+        fixture_id: sportsFixtureMetadata.fixture_id,
+        question_side_a: 'Inter Milan',
+        question_side_b: 'Roma',
+        winning_side: 'Inter Milan',
+        winning_probability: 0.58,
+        sports_grounded: true,
+        sports_pick_state: 'publishable_controlled',
+        model_probabilities: sportsRawScorecard.sports_model_probabilities,
+        market_probabilities: sportsRawScorecard.sports_market_probabilities,
+        fair_prices: sportsRawScorecard.sports_fair_prices,
+        market_frame: sharpMarketFrame,
+        sports_market_source: 'api_football_optional',
+        sports_market_source_class: 'sharp',
+        sports_market_quality_tier: 'sharp',
+        sports_market_snapshot: {
+          snapshot_time: '2026-04-01T10:00:00.000Z',
+          latest_snapshot: sharpMarketFrame.latest_snapshot,
+        },
+        sports_market_overround: 0.048,
+      },
+      sports_market_overlay: sportsEvidenceBase.sports_market_overlay,
+      sports_semantic_overlay: {
+        ready: true,
+        confidence: 0.81,
+        contradiction_score: 0.08,
+        entity_alignment_score: 0.92,
+      },
+    },
+  }
+);
+
+assert.equal(normalizedSportsCard.decision_state, 'no_action', 'Index card normalization should preserve generic whale-mode state.');
+assert.equal(normalizedSportsCard.publication_basis?.decision_state, 'no_action', 'Index publication basis should preserve generic whale-mode state.');
+assert.equal(normalizedSportsCard.sports_decision_state, 'no_bet', 'Index normalization should preserve sports-specific no_bet state.');
+assert(normalizedSportsCard.world_sim?.whale_mode, 'Index normalization should preserve world_sim whale-mode data.');
+
+const governanceDraftCard = indexTestables.buildDraftCard({
+  queryText: 'Will the coalition government survive the budget vote?',
+  queryPlan: {
+    primary_domain_id: 'A.24.governance_policy_and_public_timeline',
+    binary_frame: {
+      question_side_a: 'Si',
+      question_side_b: 'No',
+    },
+  },
+  domainConfig: {
+    domain_id: 'A.24.governance_policy_and_public_timeline',
+    refresh_cadence: 'daily',
+  },
+  voicePayload: {
+    title: 'Italian budget vote survival',
+    summary: 'Crystal has a grounded policy read, but it still lacks a cleaner pricing baseline.',
+    verdict: 'Grounded lean',
+  },
+  scorecard,
+  evidenceBundle: {
+    historical_baseline_20y: 'A 20-year policy baseline exists.',
+    live_signals: [
+      { lean: 'down', freshness_score: 0.82 },
+      { lean: 'down', freshness_score: 0.74 },
+    ],
+    source_ledger: ['gdelt', 'rss_allowlist', 'polymarket_public'],
+    entity_resolution: { resolved: true, entities: ['Italy'] },
+    event_resolution: { resolved: true, jurisdiction: 'Italy' },
+    evidence_quality: {
+      coverage_score: 0.73,
+      freshness_score: 0.79,
+      agreement_score: 0.7,
+      conflict_score: 0.22,
+      source_count: 3,
+    },
+  },
+});
+
+assert.equal(governanceDraftCard.decision_state, 'grounded_lean', 'Draft cards should surface the generic grounded_lean state for grounded reads without a pricing baseline.');
+assert.equal(
+  governanceDraftCard.publication_basis?.decision_state,
+  'grounded_lean',
+  'Draft publication basis should keep the same generic whale-mode state.'
+);
+
+const clearEdgeDecision = buildSportsDecisionFrame({
+  sportsGrounding: {
+    fixture_resolved: true,
+    sports_grounded: true,
+    publish_gate_ready: true,
+    fixture_window_open: true,
+    question_side_a: 'Italy',
+    question_side_b: 'Bosnia',
+    winning_side: 'Bosnia',
+    winning_probability: 0.56,
+    model_probabilities: {
+      home: 0.22,
+      draw: 0.22,
+      away: 0.56,
+      home_label: 'Italy',
+      draw_label: 'Draw',
+      away_label: 'Bosnia',
+    },
+    market_probabilities: {
+      home: 0.43,
+      draw: 0.27,
+      away: 0.30,
+      home_label: 'Italy',
+      draw_label: 'Draw',
+      away_label: 'Bosnia',
+    },
+    fair_prices: {
+      home: 4.55,
+      draw: 4.55,
+      away: 1.79,
+      home_label: 'Italy',
+      draw_label: 'Draw',
+      away_label: 'Bosnia',
+    },
+    model_favorite: 'Bosnia',
+    market_favorite: 'Italy',
+    invalidators: ['Bosnia loses lineup depth late'],
+    market_disagreement_score: 0.18,
+    sports_market_source: 'api_football_optional',
+    sports_market_source_class: 'sharp',
+    sports_market_quality_tier: 'sharp',
+    market_frame: {
+      ...sharpMarketFrame,
+      selection_probabilities: {
+        home: 0.43,
+        draw: 0.27,
+        away: 0.3,
+        home_label: 'Italy',
+        draw_label: 'Draw',
+        away_label: 'Bosnia',
+      },
+      fair_probabilities: {
+        home: 0.43,
+        draw: 0.27,
+        away: 0.3,
+        home_label: 'Italy',
+        draw_label: 'Draw',
+        away_label: 'Bosnia',
+      },
+    },
+  },
+  sportsMarketOverlay: {
+    market_frame: {
+      ...sharpMarketFrame,
+      selection_probabilities: {
+        home: 0.43,
+        draw: 0.27,
+        away: 0.3,
+        home_label: 'Italy',
+        draw_label: 'Draw',
+        away_label: 'Bosnia',
+      },
+      fair_probabilities: {
+        home: 0.43,
+        draw: 0.27,
+        away: 0.3,
+        home_label: 'Italy',
+        draw_label: 'Draw',
+        away_label: 'Bosnia',
+      },
+    },
+    sports_market_source: 'api_football_optional',
+    sports_market_source_class: 'sharp',
+    sports_market_quality_tier: 'sharp',
+    market_consensus_strength: 0.74,
+    market_disagreement_score: 0.18,
+    price_move_pressure: 0.19,
+  },
+  sportsSemanticOverlay: {
+    ready: true,
+    confidence: 0.83,
+    contradiction_score: 0.08,
+    entity_alignment_score: 0.9,
+  },
+  sportsContractState: {
+    sportsGrounded: true,
+    sportsPublishGateReady: true,
+    fixtureWindowOpen: true,
+    sportsPickState: 'publishable_controlled',
+  },
+  domainId: 'B.3.6.sports_outcomes_probability_mode',
+  simulationTuning: {
+    quality_score: 0.78,
+    graph_coverage: 0.77,
+    agent_convergence: 0.74,
+  },
+});
+
+assert.equal(clearEdgeDecision.decision_state, 'edge', 'A robust model-vs-market mismatch should surface as an edge.');
+assert.equal(clearEdgeDecision.model_favorite, 'Bosnia', 'Edge detection should preserve the model favorite.');
+assert.equal(clearEdgeDecision.market_favorite, 'Italy', 'Edge detection should preserve the market favorite.');
+assert.equal(clearEdgeDecision.market_source_class, 'sharp', 'Clear edge detection should still be anchored to sharp market truth.');
+
+const retailOnlyNoBetDecision = buildSportsDecisionFrame({
+  sportsGrounding: {
+    fixture_resolved: true,
+    sports_grounded: true,
+    publish_gate_ready: true,
+    fixture_window_open: true,
+    question_side_a: 'Italy',
+    question_side_b: 'Bosnia',
+    winning_side: 'Italy',
+    winning_probability: 0.61,
+    model_probabilities: {
+      home: 0.61,
+      draw: 0.22,
+      away: 0.17,
+      home_label: 'Italy',
+      draw_label: 'Draw',
+      away_label: 'Bosnia',
+    },
+    model_favorite: 'Italy',
+  },
+  sportsMarketOverlay: {
+    sharp_market_available: false,
+    retail_sentiment_only: true,
+    retail_sentiment_pressure: 0.8,
+    retail_bias_risk: 0.72,
+    narrative_hype_score: 0.8,
+  },
+  sportsSemanticOverlay: {
+    ready: true,
+    confidence: 0.82,
+    contradiction_score: 0.1,
+    entity_alignment_score: 0.92,
+  },
+  sportsContractState: {
+    sportsGrounded: true,
+    sportsPublishGateReady: true,
+    fixtureWindowOpen: true,
+    sportsPickState: 'publishable_controlled',
+  },
+  domainId: 'B.3.6.sports_outcomes_probability_mode',
+});
+
+assert.equal(
+  retailOnlyNoBetDecision.decision_state,
+  'no_bet',
+  'Retail sentiment without hard market truth should still resolve to no_bet.'
+);
+assert.equal(
+  retailOnlyNoBetDecision.sharp_market_available,
+  false,
+  'Retail-only pressure should not be promoted into sharp market availability.'
+);
+
+const proxyOnlyNoEdgeDecision = buildSportsDecisionFrame({
+  sportsGrounding: {
+    fixture_resolved: true,
+    sports_grounded: true,
+    publish_gate_ready: true,
+    fixture_window_open: true,
+    question_side_a: 'Inter Milan',
+    question_side_b: 'Roma',
+    winning_side: 'Inter Milan',
+    winning_probability: 0.57,
+    model_probabilities: sportsRawScorecard.sports_model_probabilities,
+    market_probabilities: sportsRawScorecard.sports_market_probabilities,
+    fair_prices: sportsRawScorecard.sports_fair_prices,
+    model_favorite: 'Inter Milan',
+    market_favorite: 'Inter Milan',
+    sports_market_source: 'polymarket_public',
+    sports_market_source_class: 'proxy',
+    sports_market_quality_tier: 'proxy',
+    market_frame: {
+      source: 'polymarket_public',
+      source_class: 'proxy',
+      market_type: 'binary_side_proxy',
+      selection_probabilities: null,
+      fair_probabilities: null,
+      overround: null,
+      snapshot_time: '2026-04-01T10:00:00.000Z',
+      open_snapshot: null,
+      latest_snapshot: {
+        market_question: 'Inter Milan vs Roma',
+        implied_probability: 0.58,
+      },
+      market_quality_tier: 'proxy',
+    },
+  },
+  sportsMarketOverlay: {
+    sports_market_source: 'polymarket_public',
+    sports_market_source_class: 'proxy',
+    sports_market_quality_tier: 'proxy',
+    market_frame: {
+      source: 'polymarket_public',
+      source_class: 'proxy',
+      market_type: 'binary_side_proxy',
+      selection_probabilities: null,
+      fair_probabilities: null,
+      overround: null,
+      snapshot_time: '2026-04-01T10:00:00.000Z',
+      open_snapshot: null,
+      latest_snapshot: {
+        market_question: 'Inter Milan vs Roma',
+        implied_probability: 0.58,
+      },
+      market_quality_tier: 'proxy',
+    },
+    market_consensus_strength: 0.61,
+    market_disagreement_score: 0.14,
+    price_move_pressure: 0.22,
+    narrative_hype_score: 0.39,
+  },
+  sportsSemanticOverlay: {
+    ready: true,
+    confidence: 0.79,
+    contradiction_score: 0.08,
+    entity_alignment_score: 0.91,
+  },
+  sportsContractState: {
+    sportsGrounded: true,
+    sportsPublishGateReady: true,
+    fixtureWindowOpen: true,
+    sportsPickState: 'publishable_controlled',
+  },
+  domainId: 'B.3.6.sports_outcomes_probability_mode',
+});
+
+assert.notEqual(
+  proxyOnlyNoEdgeDecision.decision_state,
+  'edge',
+  'Proxy-only market inputs must never be promoted to edge.'
+);
+assert.equal(proxyOnlyNoEdgeDecision.market_source_class, 'proxy', 'Proxy-only decisions should preserve proxy market classification.');
 
 if (failures.length > 0) {
   console.error(`Prediction core benchmark failed with ${failures.length} issues.`);

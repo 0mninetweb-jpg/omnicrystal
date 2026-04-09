@@ -626,7 +626,10 @@ app.post("/v1/internal/evaluation/run", async (req, res) => {
       mode,
       reportType: safeText(req.body?.reportType, safeText(req.query?.reportType)),
       lookbackDays: Number(req.body?.lookbackDays || req.query?.lookbackDays) || undefined,
+      backfillLookbackDays:
+        Number(req.body?.backfillLookbackDays || req.query?.backfillLookbackDays || process.env.CRYSTAL_CORE_EVAL_BACKFILL_LOOKBACK_DAYS) || undefined,
       limit: Number(req.body?.limit || req.query?.limit) || undefined,
+      outputDate: safeText(req.body?.outputDate, safeText(req.query?.outputDate, safeText(process.env.CRYSTAL_CORE_EVAL_OUTPUT_DATE))),
     });
     res.json({
       ok: true,

@@ -1,14 +1,7 @@
-import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
-import firebaseConfig from '../firebase-applet-config.json';
+import { GoogleAuthProvider, auth, signInWithPopup, signOut } from 'firebase/auth';
+import { db } from 'firebase/firestore';
 
-// Initialize Firebase SDK
-const app = initializeApp(firebaseConfig);
-export const db = firebaseConfig.firestoreDatabaseId
-  ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
-  : getFirestore(app);
-export const auth = getAuth(app);
+export { auth, db };
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
 
@@ -45,20 +38,20 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     operationType,
     path
   };
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  console.error('Data layer error: ', JSON.stringify(errInfo));
   throw new Error(JSON.stringify(errInfo));
 }
 
 function getGoogleLoginErrorMessage(error: any) {
   switch (error?.code) {
     case 'auth/unauthorized-domain':
-      return 'Authentication error: the current domain is not authorized in Firebase. Add this URL under Firebase Authentication > Settings > Authorized domains.';
+      return 'Authentication error: the current domain is not authorized in Appwrite. Add this URL under Project settings > Platforms.';
     case 'auth/operation-not-allowed':
-      return 'Authentication error: Google sign-in is not enabled for this Firebase project. Enable it in Firebase Console > Authentication > Sign-in method.';
+      return 'Authentication error: Google sign-in is not enabled for this Appwrite project yet.';
     case 'auth/configuration-not-found':
-      return 'Authentication error: Firebase Authentication is not configured correctly for this project yet. Finish the setup in the Firebase console and try again.';
+      return 'Authentication error: Appwrite OAuth is not configured correctly for this project yet. Finish the Google provider setup and try again.';
     case 'auth/popup-blocked':
-      return 'The sign-in popup was blocked by the browser. Allow popups for this site and try again.';
+      return 'The sign-in popup was blocked by the browser. Allow redirects or popups for this site and try again.';
     default:
       return 'Login failed: ' + (error?.message || 'Unknown error');
   }
@@ -66,8 +59,7 @@ function getGoogleLoginErrorMessage(error: any) {
 
 export const loginWithGoogle = async () => {
   try {
-    const result = await signInWithPopup(auth, googleProvider);
-    return result.user;
+    return await signInWithPopup(auth, googleProvider);
   } catch (error: any) {
     console.error('Error logging in with Google', error);
     if (error?.code !== 'auth/popup-closed-by-user') {
@@ -90,7 +82,7 @@ export const loginAsDemo = async (setUser: (user: any) => void, setIsGuest: (isG
 
 export const logout = async () => {
   try {
-    await signOut(auth);
+    await signOut();
   } catch (error) {
     console.error('Error logging out', error);
   }

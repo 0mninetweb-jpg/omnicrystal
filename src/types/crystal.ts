@@ -98,6 +98,101 @@ export interface BinaryContract {
   flip_conditions?: string[];
 }
 
+export interface SportsOutcomeProbabilities {
+  home?: number | null;
+  draw?: number | null;
+  away?: number | null;
+  home_label?: string | null;
+  draw_label?: string | null;
+  away_label?: string | null;
+}
+
+export interface SportsEdgeDelta {
+  home?: number | null;
+  draw?: number | null;
+  away?: number | null;
+  best_key?: string | null;
+  best_label?: string | null;
+  best_delta?: number | null;
+}
+
+export interface SportsDecisionDigest {
+  market_ready?: boolean;
+  sharp_market_available?: boolean;
+  proxy_market_available?: boolean;
+  market_source?: string | null;
+  market_source_class?: 'sharp' | 'proxy' | 'retail' | 'none' | string | null;
+  market_quality_tier?: string | null;
+  market_truth_confidence?: number | null;
+  retail_sentiment_pressure?: number | null;
+  retail_bias_risk?: number | null;
+  decision_state?: 'hold' | 'grounded_lean' | 'no_bet' | 'lean' | 'edge' | string | null;
+  decision_reason?: string | null;
+  no_bet_reason?: string | null;
+  model_probabilities?: SportsOutcomeProbabilities | null;
+  market_probabilities?: SportsOutcomeProbabilities | null;
+  fair_prices?: SportsOutcomeProbabilities | null;
+  edge_delta?: SportsEdgeDelta | null;
+  upset_rate?: number | null;
+  draw_volatility?: number | null;
+  fragility_score?: number | null;
+  flip_conditions?: string[] | null;
+  simulation_confidence?: number | null;
+  model_favorite?: string | null;
+  market_favorite?: string | null;
+  favorite_but_no_bet?: boolean;
+  notes?: string[] | null;
+}
+
+export interface DecisionKernelDigest {
+  family?: string | null;
+  decision_state?: 'hold' | 'grounded_lean' | 'no_action' | 'lean' | 'edge' | string | null;
+  decision_reason?: string | null;
+  reference_source_class?: 'sharp' | 'proxy' | 'retail' | 'baseline' | 'none' | string | null;
+  reference_probability?: number | null;
+  edge_delta?: number | null;
+  fragility_score?: number | null;
+  no_action_reason?: string | null;
+  flip_conditions?: string[] | null;
+  simulation_confidence?: number | null;
+  model_probability?: number | null;
+  reference_source?: string | null;
+  reference_note?: string | null;
+}
+
+export interface CoordinationPass {
+  capability_id: string;
+  title?: string | null;
+  family?: string | null;
+  runtime_context?: string | null;
+  allowed?: boolean;
+  allowed_runtime_contexts?: string[] | null;
+  read_only?: boolean;
+  mutating?: boolean;
+  concurrency_safe?: boolean;
+  requires_grounding?: boolean;
+  allowed_reference_source_classes?: string[] | null;
+  preconditions?: string[] | null;
+  timeout_class?: string | null;
+  retry_policy?: string | null;
+  side_effect_class?: string | null;
+  external_side_effect?: boolean;
+  status?: string | null;
+  reason?: string | null;
+  handler_module?: string | null;
+}
+
+export interface CoordinationTrace {
+  coordinator_mode?: string | null;
+  family?: string | null;
+  runtime_context?: string | null;
+  truth_grounded?: boolean;
+  reference_source_class?: string | null;
+  semantic_ready?: boolean;
+  decision_state?: string | null;
+  passes?: CoordinationPass[] | null;
+}
+
 export interface PublicationBasis {
   coverage_score: number;
   freshness_score: number;
@@ -124,6 +219,41 @@ export interface PublicationBasis {
   price_move_pressure?: number | null;
   narrative_hype_score?: number | null;
   sportsbook_readiness_state?: string | null;
+  sports_decision_state?: string | null;
+  sports_decision_reason?: string | null;
+  sports_no_bet_reason?: string | null;
+  sports_model_probabilities?: SportsOutcomeProbabilities | null;
+  sports_market_probabilities?: SportsOutcomeProbabilities | null;
+  sports_edge_delta?: SportsEdgeDelta | null;
+  sports_fair_prices?: SportsOutcomeProbabilities | null;
+  sports_fragility_score?: number | null;
+  sports_simulation_confidence?: number | null;
+  sports_model_favorite?: string | null;
+  sports_market_favorite?: string | null;
+  sports_favorite_but_no_bet?: boolean;
+  sports_fixture_kind?: string | null;
+  sports_fixture_candidate_score?: number | null;
+  sports_fixture_resolution_reason?: string | null;
+  sports_fixture_date_match?: boolean;
+  sports_fixture_competition_match?: boolean | null;
+  sports_market_source?: string | null;
+  sports_market_source_class?: string | null;
+  sports_market_quality_tier?: string | null;
+  sports_market_snapshot?: {
+    snapshot_time?: string | null;
+    open_snapshot?: unknown;
+    latest_snapshot?: unknown;
+  } | null;
+  sports_market_overround?: number | null;
+  decision_state?: string | null;
+  decision_reason?: string | null;
+  reference_source_class?: string | null;
+  reference_probability?: number | null;
+  edge_delta?: number | null;
+  fragility_score?: number | null;
+  no_action_reason?: string | null;
+  flip_conditions?: string[] | null;
+  simulation_confidence?: number | null;
 }
 
 export interface SportsGrounding {
@@ -131,10 +261,16 @@ export interface SportsGrounding {
   provider_configured: boolean;
   fixture_resolved: boolean;
   parity_ready: boolean;
+  fixture_id?: number | null;
   sports_pick_state?: string | null;
   sports_grounded?: boolean;
   fixture_window_state?: string | null;
   fixture_window_open?: boolean;
+  sports_fixture_kind?: string | null;
+  sports_fixture_candidate_score?: number | null;
+  sports_fixture_resolution_reason?: string | null;
+  sports_fixture_date_match?: boolean;
+  sports_fixture_competition_match?: boolean | null;
   sports_extraction_provenance?: string[] | null;
   sports_confidence_tier?: string | null;
   semantic_ready?: boolean;
@@ -145,6 +281,32 @@ export interface SportsGrounding {
   question_side_b?: string | null;
   winning_side?: string | null;
   winning_probability?: number | null;
+  model_probabilities?: SportsOutcomeProbabilities | null;
+  market_probabilities?: SportsOutcomeProbabilities | null;
+  fair_prices?: SportsOutcomeProbabilities | null;
+  model_favorite?: string | null;
+  market_favorite?: string | null;
+  sports_market_source?: string | null;
+  sports_market_source_class?: string | null;
+  sports_market_quality_tier?: string | null;
+  sports_market_snapshot?: {
+    snapshot_time?: string | null;
+    open_snapshot?: unknown;
+    latest_snapshot?: unknown;
+  } | null;
+  sports_market_overround?: number | null;
+  market_frame?: {
+    source?: string | null;
+    source_class?: string | null;
+    market_type?: string | null;
+    selection_probabilities?: SportsOutcomeProbabilities | null;
+    fair_probabilities?: SportsOutcomeProbabilities | null;
+    overround?: number | null;
+    snapshot_time?: string | null;
+    open_snapshot?: unknown;
+    latest_snapshot?: unknown;
+    market_quality_tier?: string | null;
+  } | null;
   key_drivers?: string[];
   counter_signals?: string[];
   invalidators?: string[];
@@ -181,6 +343,18 @@ export interface SportsSemanticOverlay {
 export interface SportsMarketOverlay {
   enabled: boolean;
   available?: boolean;
+  sharp_market_available?: boolean;
+  market_frame?: SportsGrounding['market_frame'];
+  sports_market_source?: string | null;
+  sports_market_source_class?: string | null;
+  sports_market_quality_tier?: string | null;
+  sports_market_snapshot?: SportsGrounding['sports_market_snapshot'];
+  sports_market_overround?: number | null;
+  market_truth_confidence?: number | null;
+  retail_sentiment_only?: boolean;
+  retail_sentiment_pressure?: number | null;
+  retail_bias_risk?: number | null;
+  source_weight_profile?: string | null;
   used_source_ids?: string[];
   source_count?: number;
   confidence?: number | null;
@@ -296,6 +470,9 @@ export interface WorldSimDigest {
   notes?: string[];
   matrix_mode?: 'observe' | 'intervene';
   matrix_branch_id?: string | null;
+  sports_decision?: SportsDecisionDigest | null;
+  whale_mode?: DecisionKernelDigest | null;
+  coordination_trace?: CoordinationTrace | null;
 }
 
 export interface CardData {
@@ -373,6 +550,31 @@ export interface CardData {
   fixture_window_open?: boolean;
   sports_extraction_provenance?: string[] | null;
   sports_confidence_tier?: string | null;
+  decision_state?: string | null;
+  decision_reason?: string | null;
+  reference_source_class?: string | null;
+  reference_probability?: number | null;
+  edge_delta?: number | null;
+  fragility_score?: number | null;
+  no_action_reason?: string | null;
+  flip_conditions?: string[] | null;
+  simulation_confidence?: number | null;
+  sports_decision_state?: string | null;
+  sports_decision_reason?: string | null;
+  sports_no_bet_reason?: string | null;
+  sports_model_probabilities?: SportsOutcomeProbabilities | null;
+  sports_market_probabilities?: SportsOutcomeProbabilities | null;
+  sports_edge_delta?: SportsEdgeDelta | null;
+  sports_fair_prices?: SportsOutcomeProbabilities | null;
+  sports_fragility_score?: number | null;
+  sports_simulation_confidence?: number | null;
+  sports_upset_rate?: number | null;
+  sports_draw_volatility?: number | null;
+  sports_flip_conditions?: string[] | null;
+  sports_model_favorite?: string | null;
+  coordination_trace?: CoordinationTrace | null;
+  sports_market_favorite?: string | null;
+  sports_favorite_but_no_bet?: boolean;
   market_consensus_strength?: number | null;
   market_disagreement_score?: number | null;
   price_move_pressure?: number | null;

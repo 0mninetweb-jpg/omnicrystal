@@ -3,7 +3,6 @@ const DEFAULT_THESPORTSDB_BASE_URL = "https://www.thesportsdb.com/api/v1/json";
 const DEFAULT_API_FOOTBALL_BASE_URL = "https://v3.football.api-sports.io";
 const DEFAULT_THESPORTSDB_FREE_KEY = "123";
 const DEFAULT_SPORTS_SEMANTIC_OVERLAY_MODE = "observe";
-const DEFAULT_SPORTS_RELEASE_MODE = "a29_b36_live";
 const googleTrends = require("google-trends-api");
 
 const {
@@ -12,6 +11,19 @@ const {
   resolveDomainId,
 } = require("./catalogRegistry");
 const { getPolymarketPulse } = require("./polymarket");
+const {
+  computeSportsContractState,
+  getSportsReleaseMode,
+  sportsA29LiveEnabled,
+  sportsB36LiveEnabled,
+} = require("./crystalCore/sportsState");
+const { distributeModelProbabilities } = require("./crystalCore/sportsDecision");
+const {
+  choosePrimaryMarketFrame,
+  normalizeApiFootballMarket,
+  normalizePolymarketProxyFrame,
+  normalizeRetailSentimentFrame,
+} = require("./crystalCore/sportsMarket");
 const SPORTS_FIXTURE_CARD_TYPE = "sports_fixture_board";
 const SPORTS_PROBABILITY_MODE_DOMAIN = "B.3.6.sports_outcomes_probability_mode";
 
@@ -372,27 +384,218 @@ function getSportsSemanticOverlayMode() {
   return normalizeSportsSemanticOverlayMode(process.env.SPORTS_SEMANTIC_OVERLAY_MODE);
 }
 
-function normalizeSportsReleaseMode(value = "") {
-  const normalized = safeText(value, DEFAULT_SPORTS_RELEASE_MODE).toLowerCase();
-  if (["off", "observe", "a29_live", "a29_b36_live"].includes(normalized)) return normalized;
-  return DEFAULT_SPORTS_RELEASE_MODE;
-}
-
-function getSportsReleaseMode() {
-  return normalizeSportsReleaseMode(process.env.SPORTS_RELEASE_MODE);
-}
-
-function sportsA29LiveEnabled() {
-  return ["a29_live", "a29_b36_live"].includes(getSportsReleaseMode());
-}
-
-function sportsB36LiveEnabled() {
-  return getSportsReleaseMode() === "a29_b36_live";
-}
-
 function safeNumber(value, fallback = null) {
   const num = Number(value);
   return Number.isFinite(num) ? num : fallback;
+}
+
+function normalizeCompetitionName(value) {
+  return normalizeWhitespace(value)
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\b(fc|cf|cup|league|division|serie|liga)\b/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function getTokenOverlapScore(leftValue = "", rightValue = "") {
+  const left = normalizeWhitespace(leftValue)
+    .split(" ")
+    .filter(Boolean);
+  const right = normalizeWhitespace(rightValue)
+    .split(" ")
+    .filter(Boolean);
+  if (!left.length || !right.length) return 0;
+  const leftSet = new Set(left);
+  const rightSet = new Set(right);
+  const overlap = left.filter((token) => rightSet.has(token)).length;
+  const union = new Set([...leftSet, ...rightSet]).size;
+  return union > 0 ? overlap / union : 0;
+}
+
+function scoreNormalizedStringMatch(queryValue = "", candidateValue = "") {
+  const query = normalizeWhitespace(queryValue);
+  const candidate = normalizeWhitespace(candidateValue);
+  if (!query || !candidate) return 0;
+  if (query === candidate) return 1;
+  if (candidate.includes(query) || query.includes(candidate)) return 0.88;
+  const overlap = getTokenOverlapScore(query, candidate);
+  if (overlap >= 0.85) return 0.82;
+  if (overlap >= 0.6) return 0.72;
+  if (overlap >= 0.4) return 0.55;
+  return 0;
+}
+
+function inferCompetitionHint(queryText = "", queryPlan = {}) {
+  const candidates = uniqueStrings(
+    []
+      .concat(
+        safeText(queryPlan?.competition),
+        safeText(queryPlan?.competition_name),
+        safeText(queryPlan?.league),
+        safeText(queryPlan?.league_name)
+      )
+      .concat(
+        Array.isArray(queryPlan?.entities)
+          ? queryPlan.entities
+              .map((entity) => {
+                const type = safeText(entity?.entity_type).toLowerCase();
+                if (/(competition|league|tournament|sport_event)/.test(type)) {
+                  return safeText(entity?.label || entity?.name);
+                }
+                return "";
+              })
+              .filter(Boolean)
+          : []
+      )
+  );
+  if (candidates.length > 0) {
+    return candidates[0];
+  }
+  const normalizedQuery = normalizeCompetitionName(queryText);
+  const knownCompetitions = Object.keys(SPORTS_COMPETITION_OFFICIAL_DOMAINS);
+  return (
+    knownCompetitions.find((competition) => {
+      const normalizedCompetition = normalizeCompetitionName(competition);
+      return normalizedCompetition && normalizedQuery.includes(normalizedCompetition);
+    }) || ""
+  );
+}
+
+function determineFixtureKind({ explicitDate = "", fixtureWindowState = "", dateMatch = false, candidateScore = 0, orderScore = 0 } = {}) {
+  if (safeText(explicitDate) && !dateMatch) return "mismatch";
+  if (candidateScore < 0.42 || orderScore < 0.35) return "mismatch";
+  if (safeText(explicitDate) && dateMatch) return "dated";
+  if (["past", "scheduled_far", "unanchored"].includes(safeText(fixtureWindowState))) return "stale";
+  if (safeText(fixtureWindowState) === "date_mismatch") return "mismatch";
+  return "next";
+}
+
+function scoreFixtureCandidate({
+  fixture = null,
+  homeTeam = "",
+  awayTeam = "",
+  explicitDate = "",
+  competitionHint = "",
+} = {}) {
+  if (!fixture) return null;
+  const fixtureHome = safeText(fixture?.teams?.home?.name);
+  const fixtureAway = safeText(fixture?.teams?.away?.name);
+  const normalizedFixtureHome = normalizeTeamName(fixtureHome);
+  const normalizedFixtureAway = normalizeTeamName(fixtureAway);
+  const normalizedHome = normalizeTeamName(homeTeam);
+  const normalizedAway = normalizeTeamName(awayTeam);
+  const homeOrderScore = scoreNormalizedStringMatch(normalizedHome, normalizedFixtureHome);
+  const awayOrderScore = scoreNormalizedStringMatch(normalizedAway, normalizedFixtureAway);
+  const swappedOrderScore = (scoreNormalizedStringMatch(normalizedHome, normalizedFixtureAway) + scoreNormalizedStringMatch(normalizedAway, normalizedFixtureHome)) / 2;
+  const strictOrderScore = (homeOrderScore + awayOrderScore) / 2;
+  const orderScore = Math.max(strictOrderScore, swappedOrderScore * 0.76);
+  const competitionScore = safeText(competitionHint)
+    ? scoreNormalizedStringMatch(normalizeCompetitionName(competitionHint), normalizeCompetitionName(fixture?.league?.name))
+    : 0.68;
+  const kickoffUtc = safeText(fixture?.fixture?.date);
+  const kickoffDateKey = toUtcDateKey(kickoffUtc);
+  const explicitDateMatch = safeText(explicitDate) ? kickoffDateKey === safeText(explicitDate) : null;
+  const dateScore =
+    explicitDateMatch == null
+      ? 0.62
+      : explicitDateMatch
+        ? 1
+        : 0;
+  const fixtureWindow = buildSportsFixtureWindow({
+    kickoffUtc,
+    queryDate: explicitDate,
+  });
+  const windowScoreByState = {
+    live: 1,
+    upcoming: 0.9,
+    scheduled_far: 0.36,
+    past: 0.14,
+    date_mismatch: 0.05,
+    unanchored: 0.12,
+  };
+  const windowScore = windowScoreByState[safeText(fixtureWindow.state)] ?? 0.2;
+  const candidateScore = Number(
+    clamp01(strictOrderScore * 0.42 + competitionScore * 0.14 + dateScore * 0.22 + windowScore * 0.22, 0).toFixed(3)
+  );
+  const fixtureKind = determineFixtureKind({
+    explicitDate,
+    fixtureWindowState: fixtureWindow.state,
+    dateMatch: explicitDateMatch === true,
+    candidateScore,
+    orderScore: strictOrderScore,
+  });
+  const reasonParts = [];
+  reasonParts.push(
+    strictOrderScore >= 0.82
+      ? "team order matched cleanly"
+      : strictOrderScore >= 0.55
+        ? "team order matched partially"
+        : swappedOrderScore > strictOrderScore
+          ? "teams matched better in reversed order"
+          : "team match is weak"
+  );
+  if (safeText(competitionHint)) {
+    reasonParts.push(
+      competitionScore >= 0.78 ? "competition matched" : competitionScore >= 0.4 ? "competition match partial" : "competition unclear"
+    );
+  }
+  if (explicitDateMatch === true) {
+    reasonParts.push("explicit date matched");
+  } else if (explicitDateMatch === false) {
+    reasonParts.push("explicit date mismatch");
+  }
+  reasonParts.push(`fixture window ${safeText(fixtureWindow.state, "unknown").replace(/_/g, " ")}`);
+  return {
+    fixture,
+    candidate_score: candidateScore,
+    fixture_kind: fixtureKind,
+    fixture_window: fixtureWindow,
+    date_match: explicitDateMatch === true,
+    competition_match: safeText(competitionHint) ? competitionScore >= 0.6 : null,
+    order_score: Number(strictOrderScore.toFixed(3)),
+    competition_score: Number(competitionScore.toFixed(3)),
+    date_score: Number(dateScore.toFixed(3)),
+    resolution_reason: reasonParts.join("; "),
+  };
+}
+
+function dedupeFixtureCandidates(candidates = []) {
+  const seen = new Set();
+  const deduped = [];
+  for (const item of Array.isArray(candidates) ? candidates : []) {
+    const isScoredCandidate =
+      item &&
+      typeof item === "object" &&
+      (item.candidate_score != null || item.fixture_kind != null || item.fixture_window != null || item.resolution_reason != null);
+    const fixture = isScoredCandidate ? item?.fixture || item : item;
+    const fixtureMeta =
+      fixture?.fixture && typeof fixture.fixture === "object"
+        ? fixture.fixture
+        : fixture;
+    const key = [
+      safeText(fixtureMeta?.id),
+      safeText(fixtureMeta?.date),
+      normalizeTeamName(fixture?.teams?.home?.name),
+      normalizeTeamName(fixture?.teams?.away?.name),
+    ].join("|");
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(fixture);
+  }
+  return deduped;
+}
+
+function selectBestFixtureCandidate(candidates = [], options = {}) {
+  const scored = dedupeFixtureCandidates(candidates)
+    .map((fixture) => scoreFixtureCandidate({ fixture, ...options }))
+    .filter(Boolean)
+    .sort((left, right) => right.candidate_score - left.candidate_score);
+  if (!scored.length) return null;
+  return {
+    selected: scored[0],
+    candidates: scored,
+  };
 }
 
 function looksLikeFixtureLabel(label) {
@@ -1210,38 +1413,92 @@ async function buildSportsMarketOverlay({ db, admin, fetchJson, queryText = "", 
     buildSportsPolymarketOverlay({ db, admin, fetchJson, queryText, queryPlan }),
   ]);
 
-  const usedSourceIds = uniqueStrings([trendOverlay?.source_id, polymarketOverlay?.source_id]);
-  const marketConsensusStrength =
-    polymarketOverlay?.market_consensus_strength != null
-      ? polymarketOverlay.market_consensus_strength
-      : trendOverlay?.narrative_hype_score != null
-        ? Number(clamp01(Number(trendOverlay.narrative_hype_score) * 0.58, 0).toFixed(3))
+  const sharpMarketFrame = groundedRead?.market_frame || fixture?.market_frame || null;
+  const proxyMarketFrame = normalizePolymarketProxyFrame({
+    polymarket: polymarketOverlay,
+    modelFavorite: safeText(groundedRead?.model_favorite),
+  });
+  const retailMarketFrame = normalizeRetailSentimentFrame({
+    narrativeHypeScore: trendOverlay?.narrative_hype_score,
+  });
+  const primaryMarketFrame = choosePrimaryMarketFrame([sharpMarketFrame, proxyMarketFrame, retailMarketFrame]);
+  const usedSourceIds = uniqueStrings([
+    safeText(sharpMarketFrame?.source),
+    trendOverlay?.source_id,
+    polymarketOverlay?.source_id,
+  ]);
+  const marketSourceClass = safeText(primaryMarketFrame?.source_class, "none");
+  const marketQualityTier = safeText(primaryMarketFrame?.market_quality_tier, "none");
+  const marketTruthConfidence =
+    marketSourceClass === "sharp"
+      ? 0.78
+      : polymarketOverlay?.market_consensus_strength != null
+        ? Number(polymarketOverlay.market_consensus_strength)
         : null;
+  const sharpMarketAvailable = marketSourceClass === "sharp";
   const marketDisagreementScore = polymarketOverlay?.market_disagreement_score ?? null;
   const priceMovePressure = polymarketOverlay?.price_move_pressure ?? null;
   const narrativeHypeScore = trendOverlay?.narrative_hype_score ?? null;
+  const retailSentimentPressure =
+    narrativeHypeScore != null ? Number(clamp01(Number(narrativeHypeScore), 0).toFixed(3)) : null;
+  const retailBiasRisk =
+    retailSentimentPressure == null
+      ? null
+      : Number(
+          clamp01(
+            Number(retailSentimentPressure) * (sharpMarketAvailable ? 0.42 : 0.82) +
+              (marketDisagreementScore || 0) * 0.22,
+            0
+          ).toFixed(3)
+        );
   const overlayConfidence = Number(
     clamp01(
-      (marketConsensusStrength || 0) * 0.42 +
-        (narrativeHypeScore || 0) * 0.23 +
-        (Number(polymarketOverlay?.match_confidence) || 0) * 0.2 +
+      (marketTruthConfidence || 0) * 0.56 +
+        (Number(polymarketOverlay?.match_confidence) || 0) * 0.22 +
+        (retailSentimentPressure || 0) * 0.08 +
         (usedSourceIds.length > 0 ? 0.12 : 0),
       0.08
     ).toFixed(3)
   );
   const isProbabilityMode = resolveDomainId(domainId, GENERAL_FORECAST_DOMAIN) === SPORTS_PROBABILITY_MODE_DOMAIN;
   const sportsbookReadinessState = isProbabilityMode
-    ? usedSourceIds.length > 0
+    ? sharpMarketAvailable
       ? sportsB36LiveEnabled()
         ? "probability_mode_live"
         : "benchmark_only"
-      : "market_context_thin"
+      : marketSourceClass === "proxy"
+        ? "proxy_market_only"
+        : usedSourceIds.length > 0
+        ? "market_context_thin"
+        : "market_context_absent"
     : usedSourceIds.length === 0
       ? "forecast_only"
-      : marketConsensusStrength != null && marketConsensusStrength >= 0.42
+      : sharpMarketAvailable
         ? "forecast_betting_aware"
+        : marketSourceClass === "proxy"
+          ? "forecast_proxy_market"
         : "forecast_context_only";
-  const notes = uniqueStrings([trendOverlay?.note, polymarketOverlay?.note]).slice(0, 4);
+  const sourceWeightProfile = sharpMarketAvailable
+    ? retailSentimentPressure != null
+      ? "sharp_plus_retail"
+      : "sharp_only"
+    : marketSourceClass === "proxy"
+      ? retailSentimentPressure != null
+        ? "proxy_plus_retail"
+        : "proxy_only"
+    : retailSentimentPressure != null
+      ? "retail_only"
+      : "none";
+  const notes = uniqueStrings([
+    polymarketOverlay?.note,
+    trendOverlay?.note,
+    retailSentimentPressure != null && !sharpMarketAvailable
+      ? "Public attention is being tracked as retail sentiment only, not as pricing truth."
+      : "",
+    retailBiasRisk != null && retailBiasRisk >= 0.58
+      ? "Retail/public narrative looks crowded relative to hard market evidence."
+      : "",
+  ]).slice(0, 4);
   const signals = []
     .concat(trendOverlay?.signal ? [trendOverlay.signal] : [])
     .concat(polymarketOverlay?.signal ? [polymarketOverlay.signal] : []);
@@ -1252,6 +1509,26 @@ async function buildSportsMarketOverlay({ db, admin, fetchJson, queryText = "", 
     used_source_ids: usedSourceIds,
     source_count: usedSourceIds.length,
     confidence: overlayConfidence,
+    sharp_market_available: sharpMarketAvailable,
+    market_frame: primaryMarketFrame || null,
+    sports_market_source: safeText(primaryMarketFrame?.source) || null,
+    sports_market_source_class: marketSourceClass,
+    sports_market_quality_tier: marketQualityTier,
+    sports_market_snapshot:
+      primaryMarketFrame?.snapshot_time || primaryMarketFrame?.latest_snapshot
+        ? {
+            snapshot_time: primaryMarketFrame?.snapshot_time || null,
+            open_snapshot: primaryMarketFrame?.open_snapshot || null,
+            latest_snapshot: primaryMarketFrame?.latest_snapshot || null,
+          }
+        : null,
+    sports_market_overround:
+      primaryMarketFrame?.overround == null ? null : Number(primaryMarketFrame.overround),
+    market_truth_confidence: marketTruthConfidence,
+    retail_sentiment_only: !sharpMarketAvailable && retailSentimentPressure != null,
+    retail_sentiment_pressure: retailSentimentPressure,
+    retail_bias_risk: retailBiasRisk,
+    source_weight_profile: sourceWeightProfile,
     notes,
     key_drivers: uniqueStrings(notes).slice(0, 3),
     invalidators: buildSportsMarketInvalidators({
@@ -1262,7 +1539,7 @@ async function buildSportsMarketOverlay({ db, admin, fetchJson, queryText = "", 
     signals,
     google_trends: trendOverlay || null,
     polymarket_public: polymarketOverlay || null,
-    market_consensus_strength: marketConsensusStrength,
+    market_consensus_strength: marketTruthConfidence,
     market_disagreement_score: marketDisagreementScore,
     price_move_pressure: priceMovePressure,
     narrative_hype_score: narrativeHypeScore,
@@ -1615,6 +1892,42 @@ function normalizeTheSportsDbEvent(event = {}) {
   };
 }
 
+function buildResolvedSportsFixtureOutcome(fixture = null, providerSourceId = "thesportsdb_public") {
+  if (!fixture?.fixture?.id) return null;
+  const homeGoals = safeNumber(fixture?.goals?.home);
+  const awayGoals = safeNumber(fixture?.goals?.away);
+  if (!Number.isFinite(homeGoals) || !Number.isFinite(awayGoals)) return null;
+  if (safeText(fixture?.fixture?.status?.short) !== "FT") return null;
+  const outcomeKey = homeGoals > awayGoals ? "home" : awayGoals > homeGoals ? "away" : "draw";
+  return {
+    fixture_id: Number(fixture.fixture.id),
+    provider_source_id: safeText(providerSourceId, "thesportsdb_public"),
+    resolved_at: safeText(fixture?.fixture?.date) || null,
+    outcome_key: outcomeKey,
+    home_goals: homeGoals,
+    away_goals: awayGoals,
+    league_name: safeText(fixture?.league?.name) || null,
+  };
+}
+
+async function fetchResolvedSportsFixtureOutcome(fetchJson, fixtureId, providerSourceId = "thesportsdb_public") {
+  const numericFixtureId = safeNumber(fixtureId);
+  if (!numericFixtureId || typeof fetchJson !== "function") return null;
+  try {
+    if (safeText(providerSourceId) === "api_football_optional") {
+      const payload = await callApiFootball(fetchJson, "/fixtures", { id: numericFixtureId });
+      const fixture = Array.isArray(payload?.response) ? payload.response[0] : null;
+      return buildResolvedSportsFixtureOutcome(fixture, "api_football_optional");
+    }
+    const payload = await callTheSportsDbApi(fetchJson, "lookupevent.php", { id: numericFixtureId });
+    const rawEvent = Array.isArray(payload?.events) ? payload.events[0] : Array.isArray(payload?.results) ? payload.results[0] : null;
+    const fixture = normalizeTheSportsDbEvent(rawEvent);
+    return buildResolvedSportsFixtureOutcome(fixture, "thesportsdb_public");
+  } catch (_error) {
+    return null;
+  }
+}
+
 function normalizeTheSportsDbTableRow(row = {}) {
   const teamId = safeNumber(row?.idTeam);
   if (!teamId) return null;
@@ -1711,6 +2024,48 @@ async function searchHeadToHeadEventTheSportsDb(fetchJson, homeTeam, awayTeam, d
   return null;
 }
 
+async function fetchResolvedSportsFixtureOutcomeByLabels(fetchJson, homeTeam, awayTeam, anchorDate = null) {
+  if (typeof fetchJson !== "function") return null;
+  const attempts = uniqueStrings([
+    `${homeTeam} vs ${awayTeam}`,
+    `${awayTeam} vs ${homeTeam}`,
+    `${homeTeam}_${awayTeam}`,
+    `${awayTeam}_${homeTeam}`,
+  ]);
+  const anchorMs = anchorDate ? Date.parse(anchorDate) : Date.now();
+  const resolvedCandidates = [];
+
+  for (const term of attempts) {
+    try {
+      const payload = await callTheSportsDbApi(fetchJson, "searchevents.php", { e: term });
+      const events = (Array.isArray(payload?.event) ? payload.event : []).filter((event) => eventMatchesHeadToHead(event, homeTeam, awayTeam));
+      if (!events.length) continue;
+      for (const rawEvent of events) {
+        const fixture = normalizeTheSportsDbEvent(rawEvent);
+        const resolved = buildResolvedSportsFixtureOutcome(fixture, "thesportsdb_public");
+        if (!resolved) continue;
+        const resolvedMs = Date.parse(safeText(resolved?.resolved_at));
+        if (!Number.isFinite(resolvedMs) || resolvedMs > anchorMs + 6 * 60 * 60 * 1000) continue;
+        resolvedCandidates.push({
+          outcome: resolved,
+          resolvedMs,
+          distance: Math.abs(resolvedMs - anchorMs),
+        });
+      }
+      if (resolvedCandidates.length) break;
+    } catch (_error) {
+      continue;
+    }
+  }
+
+  if (!resolvedCandidates.length) return null;
+  resolvedCandidates.sort((left, right) => {
+    if (left.distance !== right.distance) return left.distance - right.distance;
+    return right.resolvedMs - left.resolvedMs;
+  });
+  return resolvedCandidates[0].outcome;
+}
+
 async function fetchEventsByDayTheSportsDb(fetchJson, date) {
   const day = toUtcDateKey(date);
   if (!day) return [];
@@ -1797,7 +2152,8 @@ function buildDirectTeamRecordFromEvent(event = {}, preferredSide = "home") {
   };
 }
 
-async function findFixtureTheSportsDb(fetchJson, homeTeam, awayTeam, date) {
+async function findFixtureTheSportsDb(fetchJson, homeTeam, awayTeam, date, options = {}) {
+  const competitionHint = inferCompetitionHint(options?.queryText, options?.queryPlan);
   const datedOrWindowEvent = await findFixtureByDateWindowTheSportsDb(fetchJson, homeTeam, awayTeam, date);
   const directEvent = datedOrWindowEvent || (await searchHeadToHeadEventTheSportsDb(fetchJson, homeTeam, awayTeam, date));
   const directEventHome = normalizeTeamName(directEvent?.strHomeTeam);
@@ -1834,20 +2190,25 @@ async function findFixtureTheSportsDb(fetchJson, homeTeam, awayTeam, date) {
   const lastFixture =
     selectMutualFixture(homeLast, homeId, awayId, true) ||
     selectMutualFixture(awayLast, homeId, awayId, false);
-  let fixture = null;
-
-  if (datedOrWindowEvent) {
-    fixture = normalizeTheSportsDbEvent(datedOrWindowEvent);
-  } else if (date && directEvent) {
-    fixture = normalizeTheSportsDbEvent(directEvent);
-  }
-
-  if (!fixture) {
-    fixture = nextFixture || lastFixture || (directEvent ? normalizeTheSportsDbEvent(directEvent) : null);
-  }
+  const candidateSelection = selectBestFixtureCandidate(
+    []
+      .concat(datedOrWindowEvent ? [normalizeTheSportsDbEvent(datedOrWindowEvent)] : [])
+      .concat(directEvent ? [normalizeTheSportsDbEvent(directEvent)] : [])
+      .concat(nextFixture ? [nextFixture] : [])
+      .concat(lastFixture ? [lastFixture] : []),
+    {
+      homeTeam,
+      awayTeam,
+      explicitDate: date,
+      competitionHint,
+    }
+  );
+  const fixture = candidateSelection?.selected?.fixture || null;
 
   return {
     fixture,
+    fixture_resolution: candidateSelection?.selected || null,
+    fixture_candidates: Array.isArray(candidateSelection?.candidates) ? candidateSelection.candidates : [],
     homeTeam: homeRecord,
     awayTeam: awayRecord,
   };
@@ -1864,7 +2225,8 @@ async function searchTeamApiFootball(fetchJson, name) {
   return exact || items[0];
 }
 
-async function findFixtureApiFootball(fetchJson, homeTeam, awayTeam, date) {
+async function findFixtureApiFootball(fetchJson, homeTeam, awayTeam, date, options = {}) {
+  const competitionHint = inferCompetitionHint(options?.queryText, options?.queryPlan);
   const home = await searchTeamApiFootball(fetchJson, homeTeam);
   const away = await searchTeamApiFootball(fetchJson, awayTeam);
   if (!home?.team?.id || !away?.team?.id) {
@@ -1928,13 +2290,12 @@ async function findFixtureApiFootball(fetchJson, homeTeam, awayTeam, date) {
       strictHomeAway: false,
     }
   );
-
-  let match = null;
+  const candidateFixtures = [];
   for (const candidate of listCandidates) {
     try {
       const payload = await callApiFootball(fetchJson, candidate.path, candidate.query);
       const fixtures = Array.isArray(payload?.response) ? payload.response : [];
-      match = fixtures.find((fixture) => {
+      const matches = fixtures.filter((fixture) => {
         const left = Number(fixture?.teams?.home?.id);
         const right = Number(fixture?.teams?.away?.id);
         if (candidate.strictHomeAway) {
@@ -1942,14 +2303,22 @@ async function findFixtureApiFootball(fetchJson, homeTeam, awayTeam, date) {
         }
         return (left === homeId && right === awayId) || (left === awayId && right === homeId);
       });
-      if (match) break;
+      candidateFixtures.push(...matches);
     } catch (_error) {
       continue;
     }
   }
+  const candidateSelection = selectBestFixtureCandidate(candidateFixtures, {
+    homeTeam,
+    awayTeam,
+    explicitDate: date,
+    competitionHint,
+  });
 
   return {
-    fixture: match || null,
+    fixture: candidateSelection?.selected?.fixture || null,
+    fixture_resolution: candidateSelection?.selected || null,
+    fixture_candidates: Array.isArray(candidateSelection?.candidates) ? candidateSelection.candidates : [],
     homeTeam: home,
     awayTeam: away,
   };
@@ -1959,14 +2328,14 @@ async function searchTeam(fetchJson, name) {
   return searchTeamTheSportsDb(fetchJson, name);
 }
 
-async function findFixture(fetchJson, homeTeam, awayTeam, date) {
+async function findFixture(fetchJson, homeTeam, awayTeam, date, options = {}) {
   const config = getSportsConfig();
-  const sportsDbResult = await findFixtureTheSportsDb(fetchJson, homeTeam, awayTeam, date);
+  const sportsDbResult = await findFixtureTheSportsDb(fetchJson, homeTeam, awayTeam, date, options);
   if (sportsDbResult?.fixture && sportsDbResult?.homeTeam?.team?.id && sportsDbResult?.awayTeam?.team?.id) {
     return sportsDbResult;
   }
   if (shouldUseApiFootballEnhancer(config)) {
-    return (await findFixtureApiFootball(fetchJson, homeTeam, awayTeam, date).catch(() => null)) || sportsDbResult;
+    return (await findFixtureApiFootball(fetchJson, homeTeam, awayTeam, date, options).catch(() => null)) || sportsDbResult;
   }
   return sportsDbResult;
 }
@@ -2085,24 +2454,37 @@ function buildOddsSummary(payload) {
   return {
     summary,
     market,
+    bookmaker: safeText(firstBookmaker?.name),
+    snapshot_time: safeText(first?.update || first?.fixture?.date),
   };
 }
 
-async function fetchFixtureOdds(fetchJson, fixtureId) {
+async function fetchFixtureOdds(fetchJson, fixtureId, labels = {}) {
   const config = getSportsConfig();
   if (!config.apiFootballKey || !fixtureId) {
     return {
       summary: [],
       market: null,
+      market_frame: null,
     };
   }
   try {
     const payload = await callApiFootball(fetchJson, "/odds", { fixture: fixtureId });
-    return buildOddsSummary(payload);
+    const oddsSummary = buildOddsSummary(payload);
+    return {
+      ...oddsSummary,
+      market_frame: normalizeApiFootballMarket({
+        market: oddsSummary.market,
+        snapshotTime: oddsSummary.snapshot_time,
+        bookmaker: oddsSummary.bookmaker,
+        labels,
+      }),
+    };
   } catch (_error) {
     return {
       summary: [],
       market: null,
+      market_frame: null,
     };
   }
 }
@@ -2207,9 +2589,12 @@ function buildSportsGroundedRead({
   homeStanding = null,
   awayStanding = null,
   oddsMarket = null,
+  marketFrame = null,
   leagueName = "",
   kickoffUtc = "",
   venue = "",
+  fixtureId = null,
+  fixtureResolution = null,
   providerSourceId = "thesportsdb_public",
   providerLabel = "TheSportsDB",
 }) {
@@ -2231,8 +2616,12 @@ function buildSportsGroundedRead({
   const awayFormStrength = calculateFormStrength(awayForm);
   const homeStandingStrength = calculateStandingStrength(homeStanding);
   const awayStandingStrength = calculateStandingStrength(awayStanding);
-  const homeConsensus = Number(oddsMarket?.home_implied_probability);
-  const awayConsensus = Number(oddsMarket?.away_implied_probability);
+  const sharpMarketFrame = marketFrame && safeText(marketFrame?.source_class) === "sharp" ? marketFrame : null;
+  const marketSelection = sharpMarketFrame?.selection_probabilities || null;
+  const fairMarketProbabilities = sharpMarketFrame?.fair_probabilities || null;
+  const homeConsensus = Number(fairMarketProbabilities?.home ?? marketSelection?.home ?? oddsMarket?.home_implied_probability);
+  const drawConsensus = Number(fairMarketProbabilities?.draw ?? marketSelection?.draw ?? oddsMarket?.draw_implied_probability);
+  const awayConsensus = Number(fairMarketProbabilities?.away ?? marketSelection?.away ?? oddsMarket?.away_implied_probability);
   const hasTableEdge = Boolean(homeStanding && awayStanding);
   const hasProviderEdge =
     Number(homeForm?.games || 0) > 0 ||
@@ -2326,6 +2715,28 @@ function buildSportsGroundedRead({
     });
   }
 
+  const probabilityFrame = distributeModelProbabilities({
+    questionSideA,
+    questionSideB,
+    winningSide,
+    winningProbability,
+    marketProbabilities:
+      fairMarketProbabilities ||
+      (Number.isFinite(homeConsensus) && Number.isFinite(drawConsensus) && Number.isFinite(awayConsensus)
+        ? {
+            home: homeConsensus,
+            draw: drawConsensus,
+            away: awayConsensus,
+          }
+        : null),
+  });
+  const fixtureCandidateScore = Number.isFinite(Number(fixtureResolution?.candidate_score))
+    ? Number(fixtureResolution.candidate_score)
+    : null;
+  const fixtureDateMatch = fixtureResolution?.date_match === true;
+  const fixtureCompetitionMatch =
+    fixtureResolution?.competition_match == null ? null : fixtureResolution.competition_match === true;
+
   return {
     provider_required: true,
     provider_configured: true,
@@ -2338,6 +2749,30 @@ function buildSportsGroundedRead({
     question_side_b: questionSideB,
     winning_side: winningSide,
     winning_probability: winningProbability,
+    model_probabilities: probabilityFrame.model_probabilities,
+    market_probabilities: probabilityFrame.market_probabilities,
+    fair_prices: probabilityFrame.fair_prices,
+    model_favorite: safeText(probabilityFrame?.model_probabilities?.favorite_label) || null,
+    market_favorite: safeText(probabilityFrame?.market_probabilities?.favorite_label) || null,
+    fixture_id: fixtureId == null ? null : Number(fixtureId),
+    sports_fixture_kind: safeText(fixtureResolution?.fixture_kind) || null,
+    sports_fixture_candidate_score: fixtureCandidateScore,
+    sports_fixture_resolution_reason: safeText(fixtureResolution?.resolution_reason) || null,
+    sports_fixture_date_match: fixtureDateMatch,
+    sports_fixture_competition_match: fixtureCompetitionMatch,
+    sports_market_source: safeText(sharpMarketFrame?.source) || null,
+    sports_market_source_class: safeText(sharpMarketFrame?.source_class) || "none",
+    sports_market_quality_tier: safeText(sharpMarketFrame?.market_quality_tier) || "none",
+    sports_market_snapshot:
+      sharpMarketFrame?.snapshot_time || sharpMarketFrame?.latest_snapshot
+        ? {
+            snapshot_time: sharpMarketFrame?.snapshot_time || null,
+            open_snapshot: sharpMarketFrame?.open_snapshot || null,
+            latest_snapshot: sharpMarketFrame?.latest_snapshot || null,
+          }
+        : null,
+    sports_market_overround: sharpMarketFrame?.overround == null ? null : Number(sharpMarketFrame.overround),
+    market_frame: sharpMarketFrame || null,
     reason: `${providerLabel} grounding leans ${winningSide} over ${losingSide}.`,
     key_drivers: uniqueStrings([
       recentFormSummary,
@@ -2416,6 +2851,17 @@ function mergeSportsGroundedReadWithOverlay(groundedRead = {}, semanticOverlay =
       marketOverlay?.market_disagreement_score == null ? null : Number(marketOverlay.market_disagreement_score),
     price_move_pressure: marketOverlay?.price_move_pressure == null ? null : Number(marketOverlay.price_move_pressure),
     narrative_hype_score: marketOverlay?.narrative_hype_score == null ? null : Number(marketOverlay.narrative_hype_score),
+    sports_market_source: safeText(marketOverlay?.sports_market_source, safeText(groundedRead?.sports_market_source)) || null,
+    sports_market_source_class:
+      safeText(marketOverlay?.sports_market_source_class, safeText(groundedRead?.sports_market_source_class, "none")) || "none",
+    sports_market_quality_tier:
+      safeText(marketOverlay?.sports_market_quality_tier, safeText(groundedRead?.sports_market_quality_tier, "none")) || "none",
+    sports_market_snapshot: marketOverlay?.sports_market_snapshot || groundedRead?.sports_market_snapshot || null,
+    sports_market_overround:
+      marketOverlay?.sports_market_overround == null
+        ? groundedRead?.sports_market_overround ?? null
+        : Number(marketOverlay.sports_market_overround),
+    market_frame: marketOverlay?.market_frame || groundedRead?.market_frame || null,
     sportsbook_readiness_state: safeText(marketOverlay?.sportsbook_readiness_state),
     sports_pick_state: safeText(overlayState?.sports_pick_state),
     sports_grounded: overlayState?.sports_grounded === true,
@@ -2428,7 +2874,7 @@ function mergeSportsGroundedReadWithOverlay(groundedRead = {}, semanticOverlay =
   };
 }
 
-async function resolveFixtureContext(fetchJson, fixtureLabel, date) {
+async function resolveFixtureContext(fetchJson, fixtureLabel, date, options = {}) {
   const split = splitFixtureLabel(fixtureLabel);
   if (!split) {
     return {
@@ -2439,7 +2885,7 @@ async function resolveFixtureContext(fetchJson, fixtureLabel, date) {
   }
 
   const config = getSportsConfig();
-  const resolved = await findFixture(fetchJson, split.homeTeam, split.awayTeam, date);
+  const resolved = await findFixture(fetchJson, split.homeTeam, split.awayTeam, date, options);
   if (!resolved?.homeTeam?.team?.id || !resolved?.awayTeam?.team?.id) {
     return {
       label: fixtureLabel,
@@ -2465,7 +2911,11 @@ async function resolveFixtureContext(fetchJson, fixtureLabel, date) {
   let [homeRecent, awayRecent, odds, tableRows] = await Promise.all([
     fetchRecentFixtures(fetchJson, resolved.homeTeam.team.id, leagueId, season),
     fetchRecentFixtures(fetchJson, resolved.awayTeam.team.id, leagueId, season),
-    fetchFixtureOdds(fetchJson, fixture?.fixture?.id),
+    fetchFixtureOdds(fetchJson, fixture?.fixture?.id, {
+      home_label: safeText(resolved.homeTeam?.team?.name, split.homeTeam),
+      away_label: safeText(resolved.awayTeam?.team?.name, split.awayTeam),
+      draw_label: "Draw",
+    }),
     fetchLeagueTable(fetchJson, leagueId, season),
   ]);
 
@@ -2492,9 +2942,12 @@ async function resolveFixtureContext(fetchJson, fixtureLabel, date) {
     homeStanding,
     awayStanding,
     oddsMarket: odds?.market || null,
+    marketFrame: odds?.market_frame || null,
     leagueName,
     kickoffUtc,
     venue,
+    fixtureId: fixture?.fixture?.id,
+    fixtureResolution: resolved?.fixture_resolution || null,
     providerSourceId,
     providerLabel,
   });
@@ -2545,6 +2998,9 @@ async function resolveFixtureContext(fetchJson, fixtureLabel, date) {
     fixtureWindowNote: fixtureWindow.note,
     odds_snapshot: Array.isArray(odds?.summary) ? odds.summary : [],
     odds_market: odds?.market || null,
+    market_frame: odds?.market_frame || null,
+    fixture_resolution: resolved?.fixture_resolution || null,
+    fixture_candidates: Array.isArray(resolved?.fixture_candidates) ? resolved.fixture_candidates : [],
     grounded_read: groundedReadWithWindow,
     parity_ready: Boolean(groundedReadWithWindow?.parity_ready),
     used_source_ids: usedSourceIds,
@@ -2586,7 +3042,7 @@ async function buildSportsForecastContext({ queryText, queryPlan, fetchJson, db,
     const label = safeText(entity?.label, safeText(entity?.entity_id));
     if (!label) continue;
     try {
-      fixtures.push(await resolveFixtureContext(fetchJson, label, date));
+      fixtures.push(await resolveFixtureContext(fetchJson, label, date, { queryText, queryPlan }));
     } catch (_error) {
       fixtures.push({
         label,
@@ -2732,17 +3188,40 @@ async function buildSportsForecastContext({ queryText, queryPlan, fetchJson, db,
       .concat(Array.isArray(marketOverlay?.used_source_ids) ? marketOverlay.used_source_ids : [])
       .concat(primaryFixture?.used_source_ids || [])
   );
+  const sportsState = computeSportsContractState({
+    sportsGrounding: {
+      provider_configured: true,
+      fixture_resolved: Boolean(primaryFixture?.grounded_read?.fixture_resolved),
+      sports_grounded: sportsGrounded,
+      sports_pick_state: sportsPickState,
+      publish_gate_ready: publishGateReady,
+      fixture_window_state: fixtureWindowState,
+      fixture_window_open: fixtureWindowOpen,
+      sports_confidence_tier: sportsConfidenceTier,
+      sports_extraction_provenance: extractionProvenance,
+    },
+    sportsContext: {
+      grounded: sportsGrounded,
+      pick_state: sportsPickState,
+      publish_gate_ready: publishGateReady,
+      fixture_window_state: fixtureWindowState,
+      fixture_window_open: fixtureWindowOpen,
+      sports_confidence_tier: sportsConfidenceTier,
+      sports_extraction_provenance: extractionProvenance,
+    },
+    semanticOverlay,
+  });
   const primaryGroundedRead = mergeSportsGroundedReadWithOverlay(primaryFixture?.grounded_read || null, semanticOverlay || null, marketOverlay || null, {
     semantic_ready: semanticStrong,
     overlay_confidence: overlayConfidence,
     overlay_blocker_reason: overlayBlockerReason,
-    publish_gate_ready: publishGateReady,
-    sports_pick_state: sportsPickState,
-    sports_grounded: sportsGrounded,
-    fixture_window_state: fixtureWindowState,
-    fixture_window_open: fixtureWindowOpen,
-    sports_confidence_tier: sportsConfidenceTier,
-    sports_extraction_provenance: extractionProvenance,
+    publish_gate_ready: sportsState.sportsPublishGateReady,
+    sports_pick_state: sportsState.sportsPickState,
+    sports_grounded: sportsState.sportsGrounded,
+    fixture_window_state: sportsState.fixtureWindowState,
+    fixture_window_open: sportsState.fixtureWindowOpen,
+    sports_confidence_tier: sportsState.sportsConfidenceTier,
+    sports_extraction_provenance: sportsState.sportsExtractionProvenance,
   });
   const semanticReady = Boolean(semanticStrong);
   const sportsbookReadinessState =
@@ -2776,6 +3255,9 @@ async function buildSportsForecastContext({ queryText, queryPlan, fetchJson, db,
     marketOverlay?.available
       ? [
           "SPORTS MARKET OVERLAY",
+          safeText(primaryGroundedRead?.sports_market_source || marketOverlay?.sports_market_source)
+            ? `Market source: ${safeText(primaryGroundedRead?.sports_market_source || marketOverlay?.sports_market_source)} (${safeText(primaryGroundedRead?.sports_market_source_class || marketOverlay?.sports_market_source_class || "none")}).`
+            : "",
           marketOverlay.market_consensus_strength != null ? `Market consensus strength: ${marketOverlay.market_consensus_strength}.` : "",
           marketOverlay.market_disagreement_score != null ? `Market disagreement score: ${marketOverlay.market_disagreement_score}.` : "",
           marketOverlay.price_move_pressure != null ? `Price move pressure: ${marketOverlay.price_move_pressure}.` : "",
@@ -2805,20 +3287,33 @@ async function buildSportsForecastContext({ queryText, queryPlan, fetchJson, db,
     semantic_ready: semanticReady,
     overlay_confidence: overlayConfidence,
     overlay_blocker_reason: overlayBlockerReason,
-    publish_gate_ready: publishGateReady,
+    publish_gate_ready: sportsState.sportsPublishGateReady,
     market_consensus_strength:
       marketOverlay?.market_consensus_strength == null ? null : Number(marketOverlay.market_consensus_strength),
     market_disagreement_score:
       marketOverlay?.market_disagreement_score == null ? null : Number(marketOverlay.market_disagreement_score),
     price_move_pressure: marketOverlay?.price_move_pressure == null ? null : Number(marketOverlay.price_move_pressure),
     narrative_hype_score: marketOverlay?.narrative_hype_score == null ? null : Number(marketOverlay.narrative_hype_score),
+    sports_market_source: safeText(primaryGroundedRead?.sports_market_source) || null,
+    sports_market_source_class: safeText(primaryGroundedRead?.sports_market_source_class, "none"),
+    sports_market_quality_tier: safeText(primaryGroundedRead?.sports_market_quality_tier, "none"),
+    sports_market_snapshot: primaryGroundedRead?.sports_market_snapshot || null,
+    sports_market_overround:
+      primaryGroundedRead?.sports_market_overround == null ? null : Number(primaryGroundedRead.sports_market_overround),
     sportsbook_readiness_state: sportsbookReadinessState,
-    pick_state: sportsPickState,
-    grounded: sportsGrounded,
-    fixture_window_state: fixtureWindowState,
-    fixture_window_open: fixtureWindowOpen,
-    sports_confidence_tier: sportsConfidenceTier,
-    sports_extraction_provenance: extractionProvenance,
+    pick_state: sportsState.sportsPickState,
+    grounded: sportsState.sportsGrounded,
+    fixture_window_state: sportsState.fixtureWindowState,
+    fixture_window_open: sportsState.fixtureWindowOpen,
+    sports_fixture_kind: safeText(primaryGroundedRead?.sports_fixture_kind) || null,
+    sports_fixture_candidate_score:
+      primaryGroundedRead?.sports_fixture_candidate_score == null ? null : Number(primaryGroundedRead.sports_fixture_candidate_score),
+    sports_fixture_resolution_reason: safeText(primaryGroundedRead?.sports_fixture_resolution_reason) || null,
+    sports_fixture_date_match: primaryGroundedRead?.sports_fixture_date_match === true,
+    sports_fixture_competition_match:
+      primaryGroundedRead?.sports_fixture_competition_match == null ? null : primaryGroundedRead.sports_fixture_competition_match === true,
+    sports_confidence_tier: sportsState.sportsConfidenceTier,
+    sports_extraction_provenance: sportsState.sportsExtractionProvenance,
     fixtures,
     notes: uniqueStrings(
       fixtures
@@ -2826,11 +3321,11 @@ async function buildSportsForecastContext({ queryText, queryPlan, fetchJson, db,
         .map((fixture) => `${fixture.label}: ${safeText(fixture.note)}`)
         .concat(Array.isArray(semanticOverlay?.notes) ? semanticOverlay.notes : [])
         .concat(Array.isArray(marketOverlay?.notes) ? marketOverlay.notes : [])
-        .concat(sportsPickState === "grounded_lean" ? ["Crystal grounded the fixture and can show a lean, but the live sports evidence is still only partial."] : [])
+        .concat(sportsState.sportsPickState === "grounded_lean" ? ["Crystal grounded the fixture and can show a lean, but the live sports evidence is still only partial."] : [])
     ).slice(0, 6),
     contextText:
       contextLines.length > 0 || semanticContextLines.length > 0 || marketContextLines.length > 0
-        ? ["SPORTS DATA", `Sports pick state: ${sportsPickState}.`, ...contextLines, ...semanticContextLines, ...marketContextLines].join("\n")
+        ? ["SPORTS DATA", `Sports pick state: ${sportsState.sportsPickState}.`, ...contextLines, ...semanticContextLines, ...marketContextLines].join("\n")
         : "",
     grounded_read: primaryGroundedRead,
     signals: Array.isArray(primaryGroundedRead?.signals) ? primaryGroundedRead.signals : [],
@@ -2844,6 +3339,8 @@ module.exports = {
   buildSportsForecastContext,
   buildSportsFixtureWindow,
   buildSportsGroundedRead,
+  fetchResolvedSportsFixtureOutcomeByLabels,
+  fetchResolvedSportsFixtureOutcome,
   getSportsRuntimeHealth,
   getSportsConfig,
   getSportsProviderStates,
@@ -2854,4 +3351,10 @@ module.exports = {
     return resolved === SPORTS_MATCH_OUTCOMES_DOMAIN || resolved === SPORTS_PROBABILITY_MODE_DOMAIN;
   },
   looksLikeSportsMatchQuery,
+  __testables: {
+    dedupeFixtureCandidates,
+    inferCompetitionHint,
+    scoreFixtureCandidate,
+    selectBestFixtureCandidate,
+  },
 };

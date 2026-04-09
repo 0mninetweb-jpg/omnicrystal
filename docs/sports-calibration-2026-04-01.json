@@ -1,0 +1,106 @@
+{
+  "by_horizon": [],
+  "summary": {
+    "favorite_reliability_buckets": [
+      {
+        "favorite_win_rate": 0,
+        "avg_favorite_probability": 0,
+        "bucket_start": 0,
+        "sample_size": 0,
+        "bucket_end": 0.2,
+        "bucket_index": 0
+      },
+      {
+        "favorite_win_rate": 0,
+        "avg_favorite_probability": 0,
+        "bucket_start": 0.2,
+        "sample_size": 0,
+        "bucket_index": 1,
+        "bucket_end": 0.4
+      },
+      {
+        "sample_size": 0,
+        "bucket_end": 0.6,
+        "bucket_index": 2,
+        "favorite_win_rate": 0,
+        "avg_favorite_probability": 0,
+        "bucket_start": 0.4
+      },
+      {
+        "favorite_win_rate": 0,
+        "avg_favorite_probability": 0,
+        "bucket_start": 0.6,
+        "sample_size": 0,
+        "bucket_index": 3,
+        "bucket_end": 0.8
+      },
+      {
+        "avg_favorite_probability": 0,
+        "favorite_win_rate": 0,
+        "bucket_start": 0.8,
+        "sample_size": 0,
+        "bucket_end": 1,
+        "bucket_index": 4
+      }
+    ],
+    "no_bet_rate": null,
+    "by_league": [],
+    "by_horizon": [],
+    "brier_score": null,
+    "sample_size": 0,
+    "log_loss": null,
+    "favorite_vs_edge_confusion_rate": null,
+    "upset_recall": null
+  },
+  "artifact_type": "sports_calibration",
+  "generated_at": "2026-04-01T15:42:32.031Z",
+  "updated_at": "2026-04-01T15:42:32.297Z",
+  "favorite_reliability_buckets": [
+    {
+      "avg_favorite_probability": 0,
+      "favorite_win_rate": 0,
+      "bucket_start": 0,
+      "sample_size": 0,
+      "bucket_index": 0,
+      "bucket_end": 0.2
+    },
+    {
+      "bucket_start": 0.2,
+      "favorite_win_rate": 0,
+      "avg_favorite_probability": 0,
+      "bucket_end": 0.4,
+      "bucket_index": 1,
+      "sample_size": 0
+    },
+    {
+      "avg_favorite_probability": 0,
+      "favorite_win_rate": 0,
+      "bucket_start": 0.4,
+      "sample_size": 0,
+      "bucket_index": 2,
+      "bucket_end": 0.6
+    },
+    {
+      "avg_favorite_probability": 0,
+      "favorite_win_rate": 0,
+      "bucket_start": 0.6,
+      "sample_size": 0,
+      "bucket_end": 0.8,
+      "bucket_index": 3
+    },
+    {
+      "avg_favorite_probability": 0,
+      "favorite_win_rate": 0,
+      "bucket_start": 0.8,
+      "sample_size": 0,
+      "bucket_end": 1,
+      "bucket_index": 4
+    }
+  ],
+  "output_date": "2026-04-01",
+  "by_league": [],
+  "lookback_days": 30,
+  "source": "crystal-core-eval-job",
+  "operation_name": "projects/omnicrystal/locations/europe-west1/operations/b33dde7a-6974-4f78-8ba5-e4aa811b101e",
+  "fetched_at": "2026-04-01T15:42:46.810Z"
+}

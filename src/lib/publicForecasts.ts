@@ -2,6 +2,12 @@ import { collection, doc, getDoc, getDocs } from 'firebase/firestore';
 import { db } from '../firebase';
 import type { CardData } from '../types/crystal';
 import type { ForecastGeography, ForecastHorizon, ForecastResolvedContext, ForecastUiFilters } from '../types/forecastV1';
+import {
+  filterActivePublicForecasts,
+  findForecastRecordBySlug,
+  resolvePublicForecastPageRecord,
+  toSortNumber as toPublicForecastSortNumber,
+} from './publicForecastLifecycle';
 
 export interface PublicForecastRecord extends CardData {
   id: string;
@@ -27,6 +33,8 @@ export interface PublicForecastRecord extends CardData {
   createdAt?: unknown;
   updatedAt?: unknown;
   resolution_status?: string;
+  resolution_due_at?: unknown;
+  event_date?: unknown;
 }
 
 export type PublicForecastLoadSource = 'live' | 'cache';
@@ -100,58 +108,6 @@ function writeCachedPublicForecasts(records: PublicForecastRecord[]) {
   }
 }
 
-function findForecastRecordBySlug(records: PublicForecastRecord[], slug: string) {
-  return records.find((record) => (record.public_slug || record.id) === slug) || null;
-}
-
-function parseDateValue(value: unknown) {
-  const numeric = toSortNumber(value);
-  if (!numeric) return null;
-  const parsed = new Date(numeric);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
-}
-
-function parseDateOnlyAtEndOfDay(value: unknown) {
-  if (typeof value !== 'string' || !value.trim()) return null;
-  const normalized = value.trim();
-  const parsed = /^\d{4}-\d{2}-\d{2}$/.test(normalized)
-    ? new Date(`${normalized}T23:59:59.999Z`)
-    : new Date(normalized);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
-}
-
-function getResolvedWindowEnd(record: PublicForecastRecord) {
-  return (
-    record.resolved_time_window?.end_date ||
-    record.temporal_context?.resolved_time_window?.end_date ||
-    record.query_plan?.temporal_context?.resolved_time_window?.end_date ||
-    null
-  );
-}
-
-function getPublicForecastDeadline(record: PublicForecastRecord) {
-  return (
-    parseDateValue(record.resolution_target?.resolution_due_at) ||
-    parseDateOnlyAtEndOfDay(record.resolution_target?.event_date) ||
-    parseDateOnlyAtEndOfDay(record.query_plan?.event_date) ||
-    parseDateOnlyAtEndOfDay(getResolvedWindowEnd(record))
-  );
-}
-
-export function isPublicForecastConcluded(record: PublicForecastRecord, now = new Date()) {
-  const status = String(record.resolution_status || '').trim().toLowerCase();
-  if (status === 'resolved' || status === 'closed' || status === 'expired' || status === 'canceled' || status === 'cancelled') {
-    return true;
-  }
-
-  const deadline = getPublicForecastDeadline(record);
-  return Boolean(deadline && deadline.getTime() < now.getTime());
-}
-
-export function filterActivePublicForecasts(records: PublicForecastRecord[], now = new Date()) {
-  return records.filter((record) => !isPublicForecastConcluded(record, now));
-}
-
 export async function fetchPublicForecasts() {
   const snapshot = await getDocs(collection(db, 'public_forecasts'));
   return filterActivePublicForecasts(snapshot.docs.map(mapSnapshotToPublicForecast));
@@ -171,7 +127,7 @@ export async function fetchPublicForecastBySlug(slug: string, timeoutMs = PUBLIC
 }
 
 export async function fetchPublicForecastCollection(timeoutMs = PUBLIC_FORECAST_TIMEOUT_MS): Promise<PublicForecastCollectionResult> {
-  const cachedRecords = filterActivePublicForecasts(readCachedPublicForecasts());
+  const cachedRecords = filterActivePublicForecasts(readCachedPublicForecasts()) as PublicForecastRecord[];
 
   try {
     const snapshot = await withTimeout(
@@ -179,7 +135,7 @@ export async function fetchPublicForecastCollection(timeoutMs = PUBLIC_FORECAST_
       timeoutMs,
       'Crystal timed out while loading the public forecast gallery.'
     );
-    const records = filterActivePublicForecasts(snapshot.docs.map(mapSnapshotToPublicForecast));
+    const records = filterActivePublicForecasts(snapshot.docs.map(mapSnapshotToPublicForecast)) as PublicForecastRecord[];
     writeCachedPublicForecasts(records);
     return {
       records,
@@ -210,7 +166,7 @@ export async function fetchPublicForecastPageData(
   try {
     const directRecord = await fetchPublicForecastBySlug(slug, timeoutMs);
     if (directRecord) {
-      record = directRecord;
+      record = resolvePublicForecastPageRecord(collectionResult.records, slug, directRecord);
       if (collectionResult.source === 'live') {
         source = 'live';
       }
@@ -230,7 +186,9 @@ export async function fetchPublicForecastPageData(
             (candidate.entity_slug === record.entity_slug || candidate.topic_slug === record.topic_slug)
         )
         .sort(
-          (left, right) => toSortNumber(right.published_at || right.updatedAt) - toSortNumber(left.published_at || left.updatedAt)
+          (left, right) =>
+            toPublicForecastSortNumber(right.published_at || right.updatedAt) -
+            toPublicForecastSortNumber(left.published_at || left.updatedAt)
         )
         .slice(0, 3)
     : [];
@@ -243,22 +201,7 @@ export async function fetchPublicForecastPageData(
   };
 }
 
-export function toSortNumber(value: unknown) {
-  if (!value) return 0;
-  if (typeof value === 'string') {
-    const parsed = Date.parse(value);
-    return Number.isNaN(parsed) ? 0 : parsed;
-  }
-  if (typeof value === 'object' && value !== null) {
-    if ('seconds' in value && typeof (value as { seconds?: unknown }).seconds === 'number') {
-      return Number((value as { seconds: number }).seconds) * 1000;
-    }
-    if ('toDate' in value && typeof (value as { toDate?: unknown }).toDate === 'function') {
-      return (value as { toDate: () => Date }).toDate().getTime();
-    }
-  }
-  return 0;
-}
+export { toSortNumber } from './publicForecastLifecycle';
 
 export function getPublicForecastState(record: PublicForecastRecord) {
   if (record.card_state_ui === 'coverage_gap' || record.card_state === 'blocked') return 'coverage_gap' as const;
@@ -308,7 +251,7 @@ export function resolvePublicForecastContext(record: PublicForecastRecord): Fore
 }
 
 export function formatPublicForecastDate(value: unknown) {
-  const numeric = toSortNumber(value);
+  const numeric = toPublicForecastSortNumber(value);
   if (!numeric) return 'Updated recently';
   return new Date(numeric).toLocaleDateString('en-US', {
     month: 'short',
@@ -349,10 +292,10 @@ export function rankTrendingForecasts(records: PublicForecastRecord[]) {
   return [...records].sort((left, right) => {
     const leftScore =
       (left.trust_confidence || left.trust_layer?.confidence_score || 0) * 0.7 +
-      toSortNumber(left.published_at || left.updatedAt) / 1e14;
+      toPublicForecastSortNumber(left.published_at || left.updatedAt) / 1e14;
     const rightScore =
       (right.trust_confidence || right.trust_layer?.confidence_score || 0) * 0.7 +
-      toSortNumber(right.published_at || right.updatedAt) / 1e14;
+      toPublicForecastSortNumber(right.published_at || right.updatedAt) / 1e14;
     return rightScore - leftScore;
   });
 }

@@ -1,8 +1,7 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { RUNTIME_COPY, WORLD_SIM_BRAND } from '../content/brand';
 import type { RuntimeCapabilities } from '../types/runtime';
-
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || process.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '');
+import { invokeCrystalApi } from '../platform/appwriteFunctionApi';
 
 const defaultCapabilities: RuntimeCapabilities = {
   isChecking: true,
@@ -31,10 +30,6 @@ let runtimeRequest: Promise<RuntimeCapabilities> | null = null;
 function hasClientForecastFallback() {
   const clientKey = import.meta.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
   return Boolean(clientKey && clientKey !== 'undefined');
-}
-
-function looksLikeHtml(text: string) {
-  return /<!doctype html>|<html[\s>]/i.test(text);
 }
 
 function formatProviderLabel(provider?: string | null) {
@@ -133,27 +128,12 @@ async function probeRuntimeCapabilities(): Promise<RuntimeCapabilities> {
     let healthPayload: any = null;
 
     try {
-      const controller = new AbortController();
-      const timeout = window.setTimeout(() => controller.abort(), 3000);
-
-      try {
-        const response = await fetch(`${API_BASE_URL}/health`, {
-          method: 'GET',
-          headers: { Accept: 'application/json' },
-          signal: controller.signal,
-        });
-
-        const contentType = response.headers.get('content-type') || '';
-        if (response.ok && contentType.includes('application/json')) {
-          healthPayload = await response.json();
-          apiAvailable = healthPayload?.ok === true;
-        } else if (response.ok) {
-          const text = await response.text();
-          apiAvailable = !looksLikeHtml(text);
-        }
-      } finally {
-        window.clearTimeout(timeout);
-      }
+      healthPayload = await invokeCrystalApi<any>('health', {
+        method: 'GET',
+        requireAuth: false,
+        headers: { Accept: 'application/json' },
+      });
+      apiAvailable = healthPayload?.ok === true;
     } catch (_error) {
       apiAvailable = false;
     }

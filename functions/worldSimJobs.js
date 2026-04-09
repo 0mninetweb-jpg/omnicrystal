@@ -1193,6 +1193,30 @@ async function createOrReuseMatrixSimulationJob(context, payload) {
 
 async function refreshJob(context, job) {
   if (isTerminalStatus(job.status)) {
+    const missingObserveArtifacts =
+      job.status === "completed" &&
+      job.jobType !== WORLD_SIM_JOB_KIND_MATRIX &&
+      !job.resultAvailable &&
+      !job.digest &&
+      !job.resultCard &&
+      !job.resultSection;
+    const missingMatrixArtifacts =
+      job.status === "completed" &&
+      job.jobType === WORLD_SIM_JOB_KIND_MATRIX &&
+      (!job.resultAvailable || !job.digest || !job.matrixResult);
+
+    if (missingObserveArtifacts || missingMatrixArtifacts) {
+      if (process.env.MIROFISH_BASE_URL) {
+        return refreshExternalJob(context, {
+          ...job,
+          status: "running",
+        });
+      }
+      if (job.jobType === WORLD_SIM_JOB_KIND_MATRIX) {
+        return finalizeFallbackMatrixJob(context, job);
+      }
+      return finalizeFallbackJob(context, job);
+    }
     return job;
   }
 

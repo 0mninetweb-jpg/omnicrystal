@@ -19,6 +19,10 @@ const {
   getSportsRuntimeHealth,
   looksLikeSportsMatchQuery,
 } = require("../sportsData");
+const { computeSportsContractState, sportsB36LiveEnabled } = require("./sportsState");
+const { buildSportsDecisionFrame } = require("./sportsDecision");
+const { buildGenericDecisionKernel } = require("./decisionKernel");
+const { buildCoordinationTrace } = require("./coordinator");
 const {
   buildRoutingHints,
   buildTemporalContext,
@@ -80,6 +84,7 @@ const JSON_STAGE_MAX_TOKENS = {
   verbalizer: 900,
 };
 const EXECUTION_BUDGET_MS = 90 * 1000;
+const FORECAST_RESULT_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const STAGE_RETRY_POLICY = {
   planner: { retries: 2, baseDelayMs: 1200, timeoutMs: 18 * 1000 },
   dossier: { retries: 2, baseDelayMs: 1500, timeoutMs: 24 * 1000 },
@@ -419,6 +424,67 @@ async function ensureRunActive(db, runId) {
 
 function createHash(value) {
   return crypto.createHash("sha256").update(String(value || "")).digest("hex");
+}
+
+function buildForecastCacheKey(queryText, normalizedQuery = {}, options = {}) {
+  const payload = {
+    query: safeText(queryText).toLowerCase(),
+    domain_id: safeText(normalizedQuery?.primary_domain_id || normalizedQuery?.domain_id || normalizedQuery?.domain),
+    intent_shape: safeText(normalizedQuery?.intent_shape),
+    resolution_frame: safeText(normalizedQuery?.resolution_frame),
+    question_side_a: safeText(normalizedQuery?.question_side_a),
+    question_side_b: safeText(normalizedQuery?.question_side_b),
+    event_date: safeText(normalizedQuery?.event_date),
+    jurisdiction: safeText(normalizedQuery?.jurisdiction),
+    request_time_zone: safeText(options?.requestTimeZone),
+    engine: safeText(options?.engine),
+    plan: safeText(options?.plan),
+  };
+  return `forecast_${createHash(JSON.stringify(payload)).slice(0, 48)}`;
+}
+
+function toTimestampMillis(value) {
+  if (!value) return null;
+  if (value instanceof Date) return Number.isFinite(value.getTime()) ? value.getTime() : null;
+  if (typeof value?.toDate === "function") {
+    const date = value.toDate();
+    return date instanceof Date && Number.isFinite(date.getTime()) ? date.getTime() : null;
+  }
+  if (typeof value === "string") {
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+async function readForecastResultCache(db, cacheKey, maxAgeMs = FORECAST_RESULT_CACHE_TTL_MS) {
+  if (!db || !cacheKey) return null;
+  const snapshot = await db.collection("cached_cards").doc(cacheKey).get();
+  if (!snapshot.exists) return null;
+  const payload = snapshot.data() || {};
+  const cachedAtMs =
+    toTimestampMillis(payload.cached_at) ||
+    toTimestampMillis(payload.updated_at) ||
+    toTimestampMillis(payload.created_at);
+  if (!Number.isFinite(cachedAtMs)) return null;
+  const ageMs = Date.now() - cachedAtMs;
+  if (ageMs < 0 || ageMs > maxAgeMs) return null;
+  return {
+    ...payload,
+    age_ms: ageMs,
+  };
+}
+
+async function writeForecastResultCache(db, admin, cacheKey, payload = {}) {
+  if (!db || !cacheKey) return;
+  await db.collection("cached_cards").doc(cacheKey).set(
+    {
+      ...payload,
+      cached_at: nowIso(),
+      updated_at: serverTimestamp(admin),
+    },
+    { merge: true }
+  );
 }
 
 function getPrimaryLocationFromPlan(queryPlan = {}) {
@@ -2380,6 +2446,137 @@ function buildFinalCard({
       : computeEvidenceQuality(verifiedEvidencePack, domainConfig, "extended");
   const confidenceScore = clamp01(scorecard?.confidence_score, 0.58);
   const publicationState = safeText(scorecard?.publication_state, "limited");
+  const sportsContractState = computeSportsContractState({
+    sportsGrounding: verifiedEvidencePack?.sports_grounding,
+    semanticOverlay: verifiedEvidencePack?.sports_semantic_overlay,
+  });
+  const derivedSportsDecision = buildSportsDecisionFrame({
+    sportsGrounding: verifiedEvidencePack?.sports_grounding || {},
+    sportsMarketOverlay: verifiedEvidencePack?.sports_market_overlay || {},
+    sportsSemanticOverlay: verifiedEvidencePack?.sports_semantic_overlay || {},
+    sportsContractState,
+    domainId: safeText(normalizedQuery?.primary_domain_id || normalizedQuery?.domain_id || normalizedQuery?.domain),
+    simulationTuning: {
+      probability_delta: simulationDigest?.probability_delta,
+      confidence_delta: simulationDigest?.confidence_delta,
+      quality_score: simulationDigest?.quality_score,
+      graph_coverage: simulationDigest?.graph_coverage,
+      agent_convergence: simulationDigest?.agent_convergence,
+      notes: Array.isArray(simulationDigest?.notes) ? simulationDigest.notes : [],
+    },
+  });
+  const sportsDecision =
+    simulationDigest?.sports_decision && typeof simulationDigest.sports_decision === "object"
+      ? simulationDigest.sports_decision
+      : derivedSportsDecision;
+  const domainId = safeText(normalizedQuery?.primary_domain_id || normalizedQuery?.domain_id || normalizedQuery?.domain);
+  const whaleMode =
+    scorecard?.whale_mode && typeof scorecard.whale_mode === "object"
+      ? scorecard.whale_mode
+      : buildGenericDecisionKernel({
+          domainId,
+          normalizedQuery,
+          scorecard,
+          evidenceBundle: verifiedEvidencePack,
+          simulationDigest,
+          sportsDecision,
+        });
+  const coordinationTrace = buildCoordinationTrace({
+    domainId,
+    normalizedQuery,
+    evidenceBundle: verifiedEvidencePack,
+    simulationDigest,
+    scorecard,
+    sportsDecision,
+    runtimeContext: "predict",
+  });
+  const publicationBasis =
+    scorecard?.publication_basis && typeof scorecard.publication_basis === "object"
+      ? {
+          ...scorecard.publication_basis,
+          decision_state: safeText(scorecard?.decision_state, safeText(whaleMode?.decision_state)) || undefined,
+          decision_reason: safeText(scorecard?.decision_reason, safeText(whaleMode?.decision_reason)) || undefined,
+          reference_source_class:
+            safeText(scorecard?.reference_source_class, safeText(whaleMode?.reference_source_class, "none")) || undefined,
+          reference_probability:
+            scorecard?.reference_probability == null
+              ? whaleMode?.reference_probability ?? undefined
+              : Number(scorecard.reference_probability),
+          edge_delta: scorecard?.edge_delta == null ? whaleMode?.edge_delta ?? undefined : Number(scorecard.edge_delta),
+          fragility_score:
+            scorecard?.fragility_score == null ? whaleMode?.fragility_score ?? undefined : Number(scorecard.fragility_score),
+          no_action_reason: safeText(scorecard?.no_action_reason, safeText(whaleMode?.no_action_reason)) || undefined,
+          flip_conditions:
+            Array.isArray(scorecard?.flip_conditions) && scorecard.flip_conditions.length
+              ? scorecard.flip_conditions
+              : Array.isArray(whaleMode?.flip_conditions)
+                ? whaleMode.flip_conditions
+                : undefined,
+          simulation_confidence:
+            scorecard?.simulation_confidence == null
+              ? whaleMode?.simulation_confidence ?? undefined
+              : Number(scorecard.simulation_confidence),
+          sports_decision_state:
+            safeText(scorecard?.sports_decision_state, safeText(sportsDecision?.decision_state)) || undefined,
+          sports_decision_reason:
+            safeText(scorecard?.sports_decision_reason, safeText(sportsDecision?.decision_reason)) || undefined,
+          sports_no_bet_reason:
+            safeText(scorecard?.sports_no_bet_reason, safeText(sportsDecision?.no_bet_reason)) || undefined,
+          sports_model_probabilities:
+            scorecard?.sports_model_probabilities || sportsDecision?.model_probabilities || undefined,
+          sports_market_probabilities:
+            scorecard?.sports_market_probabilities || sportsDecision?.market_probabilities || undefined,
+          sports_edge_delta: scorecard?.sports_edge_delta || sportsDecision?.edge_delta || undefined,
+          sports_fair_prices: scorecard?.sports_fair_prices || sportsDecision?.fair_prices || undefined,
+          sports_fragility_score: Number.isFinite(Number(scorecard?.sports_fragility_score))
+            ? Number(scorecard.sports_fragility_score)
+            : sportsDecision?.fragility_score ?? undefined,
+          sports_simulation_confidence: Number.isFinite(Number(scorecard?.sports_simulation_confidence))
+            ? Number(scorecard.sports_simulation_confidence)
+            : sportsDecision?.simulation_confidence ?? undefined,
+          sports_model_favorite:
+            safeText(scorecard?.sports_model_favorite, safeText(sportsDecision?.model_favorite)) || undefined,
+          sports_market_favorite:
+            safeText(scorecard?.sports_market_favorite, safeText(sportsDecision?.market_favorite)) || undefined,
+          sports_favorite_but_no_bet:
+            scorecard?.sports_favorite_but_no_bet === true || sportsDecision?.favorite_but_no_bet === true,
+          sports_fixture_kind:
+            safeText(verifiedEvidencePack?.sports_grounding?.sports_fixture_kind) || undefined,
+          sports_fixture_candidate_score: Number.isFinite(Number(verifiedEvidencePack?.sports_grounding?.sports_fixture_candidate_score))
+            ? Number(verifiedEvidencePack.sports_grounding.sports_fixture_candidate_score)
+            : undefined,
+          sports_fixture_resolution_reason:
+            safeText(verifiedEvidencePack?.sports_grounding?.sports_fixture_resolution_reason) || undefined,
+          sports_fixture_date_match: verifiedEvidencePack?.sports_grounding?.sports_fixture_date_match === true,
+          sports_fixture_competition_match:
+            verifiedEvidencePack?.sports_grounding?.sports_fixture_competition_match == null
+              ? undefined
+              : verifiedEvidencePack.sports_grounding.sports_fixture_competition_match === true,
+          sports_market_source:
+            safeText(
+              verifiedEvidencePack?.sports_grounding?.sports_market_source,
+              safeText(verifiedEvidencePack?.sports_market_overlay?.sports_market_source)
+            ) || undefined,
+          sports_market_source_class:
+            safeText(
+              verifiedEvidencePack?.sports_grounding?.sports_market_source_class,
+              safeText(verifiedEvidencePack?.sports_market_overlay?.sports_market_source_class, "none")
+            ) || undefined,
+          sports_market_quality_tier:
+            safeText(
+              verifiedEvidencePack?.sports_grounding?.sports_market_quality_tier,
+              safeText(verifiedEvidencePack?.sports_market_overlay?.sports_market_quality_tier, "none")
+            ) || undefined,
+          sports_market_snapshot:
+            verifiedEvidencePack?.sports_grounding?.sports_market_snapshot ||
+            verifiedEvidencePack?.sports_market_overlay?.sports_market_snapshot ||
+            undefined,
+          sports_market_overround:
+            verifiedEvidencePack?.sports_grounding?.sports_market_overround == null
+              ? verifiedEvidencePack?.sports_market_overlay?.sports_market_overround ?? undefined
+              : Number(verifiedEvidencePack.sports_grounding.sports_market_overround),
+        }
+      : null;
   const now = nowIso();
   const temporalContext =
     normalizedQuery?.temporal_context && typeof normalizedQuery.temporal_context === "object"
@@ -2390,6 +2587,21 @@ function buildFinalCard({
   const runAsOfUtc = safeText(temporalContext?.as_of_utc, now);
   const runAsOfTimezone = safeText(temporalContext?.as_of_timezone, "Europe/Rome");
   const runAsOfLocalDate = safeText(temporalContext?.as_of_local_date);
+  const rawSportsbookReadinessState =
+    safeText(
+      verifiedEvidencePack?.sports_grounding?.sportsbook_readiness_state,
+      safeText(verifiedEvidencePack?.sports_market_overlay?.sportsbook_readiness_state)
+    ) || undefined;
+  const normalizedSportsbookReadinessState =
+    domainId === SPORTS_PROBABILITY_MODE_DOMAIN
+      ? sportsContractState.sportsPublishGateReady
+        ? sportsB36LiveEnabled()
+          ? "probability_mode_live"
+          : "probability_mode_preview"
+        : sportsContractState.sportsGrounded && safeText(sportsContractState.sportsPickState) === "grounded_lean"
+          ? "probability_mode_preview"
+          : rawSportsbookReadinessState || "benchmark_only"
+      : rawSportsbookReadinessState;
   const coverageNotes = uniqueStrings(
     normalizeTextList(voicePayload?.coverage_notes, 4).concat(
       normalizeTextList(scorecard?.publication_basis?.notes, 4),
@@ -2447,7 +2659,7 @@ function buildFinalCard({
     counter_signals: normalizeTextList(scorecard?.counter_signals, 4),
     historical_anchors: normalizeTextList(scorecard?.historical_anchors, 4),
     invalidators: normalizeTextList(scorecard?.invalidators, 4),
-    publication_basis: scorecard?.publication_basis || null,
+    publication_basis: publicationBasis,
     what_to_watch: whatToWatch,
     how_to_raise_confidence: howToRaiseConfidence,
     evidence_drawer: {
@@ -2486,7 +2698,15 @@ function buildFinalCard({
       },
     },
     prediction_market_frame: verifiedEvidencePack?.prediction_market_frame || null,
-    world_sim: simulationDigest || undefined,
+    coordination_trace: coordinationTrace || undefined,
+    world_sim: simulationDigest || whaleMode
+      ? {
+          ...(simulationDigest || {}),
+          sports_decision: simulationDigest?.sports_decision || sportsDecision || null,
+          whale_mode: whaleMode || null,
+          coordination_trace: coordinationTrace || null,
+        }
+      : undefined,
     resolution_target: resolutionTarget || undefined,
     evaluation_eligible: Boolean(evaluationEligible),
     runtime_transport: safeText(runtimeTransport, "local_core"),
@@ -2500,15 +2720,104 @@ function buildFinalCard({
       ? Number(verifiedEvidencePack.sports_grounding.overlay_confidence)
       : undefined,
     sports_overlay_blocker_reason: safeText(verifiedEvidencePack?.sports_grounding?.overlay_blocker_reason) || undefined,
-    sports_publish_gate_ready: verifiedEvidencePack?.sports_grounding?.publish_gate_ready === true,
-    sports_pick_state: safeText(verifiedEvidencePack?.sports_grounding?.sports_pick_state) || undefined,
-    sports_grounded: verifiedEvidencePack?.sports_grounding?.sports_grounded === true,
-    fixture_window_state: safeText(verifiedEvidencePack?.sports_grounding?.fixture_window_state) || undefined,
-    fixture_window_open: verifiedEvidencePack?.sports_grounding?.fixture_window_open === true,
-    sports_extraction_provenance: Array.isArray(verifiedEvidencePack?.sports_grounding?.sports_extraction_provenance)
-      ? verifiedEvidencePack.sports_grounding.sports_extraction_provenance
+    sports_publish_gate_ready: sportsContractState.sportsPublishGateReady === true,
+    sports_pick_state: safeText(sportsContractState.sportsPickState) || undefined,
+    sports_grounded: sportsContractState.sportsGrounded === true,
+    fixture_window_state: safeText(sportsContractState.fixtureWindowState) || undefined,
+    fixture_window_open: sportsContractState.fixtureWindowOpen === true,
+    sports_extraction_provenance: Array.isArray(sportsContractState.sportsExtractionProvenance)
+      ? sportsContractState.sportsExtractionProvenance
       : undefined,
-    sports_confidence_tier: safeText(verifiedEvidencePack?.sports_grounding?.sports_confidence_tier) || undefined,
+    sports_confidence_tier: safeText(sportsContractState.sportsConfidenceTier) || undefined,
+    decision_state: safeText(scorecard?.decision_state, safeText(whaleMode?.decision_state)) || undefined,
+    decision_reason: safeText(scorecard?.decision_reason, safeText(whaleMode?.decision_reason)) || undefined,
+    reference_source_class:
+      safeText(scorecard?.reference_source_class, safeText(whaleMode?.reference_source_class, "none")) || undefined,
+    reference_probability:
+      scorecard?.reference_probability == null
+        ? whaleMode?.reference_probability ?? undefined
+        : Number(scorecard.reference_probability),
+    edge_delta: scorecard?.edge_delta == null ? whaleMode?.edge_delta ?? undefined : Number(scorecard.edge_delta),
+    fragility_score:
+      scorecard?.fragility_score == null ? whaleMode?.fragility_score ?? undefined : Number(scorecard.fragility_score),
+    no_action_reason: safeText(scorecard?.no_action_reason, safeText(whaleMode?.no_action_reason)) || undefined,
+    flip_conditions:
+      Array.isArray(scorecard?.flip_conditions) && scorecard.flip_conditions.length
+        ? scorecard.flip_conditions
+        : Array.isArray(whaleMode?.flip_conditions)
+          ? whaleMode.flip_conditions
+          : undefined,
+    simulation_confidence:
+      scorecard?.simulation_confidence == null
+        ? whaleMode?.simulation_confidence ?? undefined
+        : Number(scorecard.simulation_confidence),
+    sports_decision_state:
+      safeText(scorecard?.sports_decision_state, safeText(sportsDecision?.decision_state)) || undefined,
+    sports_decision_reason:
+      safeText(scorecard?.sports_decision_reason, safeText(sportsDecision?.decision_reason)) || undefined,
+    sports_no_bet_reason:
+      safeText(scorecard?.sports_no_bet_reason, safeText(sportsDecision?.no_bet_reason)) || undefined,
+    sports_model_probabilities: scorecard?.sports_model_probabilities || sportsDecision?.model_probabilities || undefined,
+    sports_market_probabilities:
+      scorecard?.sports_market_probabilities || sportsDecision?.market_probabilities || undefined,
+    sports_edge_delta: scorecard?.sports_edge_delta || sportsDecision?.edge_delta || undefined,
+    sports_fair_prices: scorecard?.sports_fair_prices || sportsDecision?.fair_prices || undefined,
+    sports_fragility_score: Number.isFinite(Number(scorecard?.sports_fragility_score))
+      ? Number(scorecard.sports_fragility_score)
+      : sportsDecision?.fragility_score ?? undefined,
+    sports_simulation_confidence: Number.isFinite(Number(scorecard?.sports_simulation_confidence))
+      ? Number(scorecard.sports_simulation_confidence)
+      : sportsDecision?.simulation_confidence ?? undefined,
+    sports_upset_rate: Number.isFinite(Number(scorecard?.sports_upset_rate))
+      ? Number(scorecard.sports_upset_rate)
+      : sportsDecision?.upset_rate ?? undefined,
+    sports_draw_volatility: Number.isFinite(Number(scorecard?.sports_draw_volatility))
+      ? Number(scorecard.sports_draw_volatility)
+      : sportsDecision?.draw_volatility ?? undefined,
+    sports_flip_conditions:
+      normalizeTextList(scorecard?.sports_flip_conditions, 4).length > 0
+        ? normalizeTextList(scorecard?.sports_flip_conditions, 4)
+        : normalizeTextList(sportsDecision?.flip_conditions, 4),
+    sports_model_favorite:
+      safeText(scorecard?.sports_model_favorite, safeText(sportsDecision?.model_favorite)) || undefined,
+    sports_market_favorite:
+      safeText(scorecard?.sports_market_favorite, safeText(sportsDecision?.market_favorite)) || undefined,
+    sports_favorite_but_no_bet:
+      scorecard?.sports_favorite_but_no_bet === true || sportsDecision?.favorite_but_no_bet === true,
+    sports_fixture_kind: safeText(verifiedEvidencePack?.sports_grounding?.sports_fixture_kind) || undefined,
+    sports_fixture_candidate_score: Number.isFinite(Number(verifiedEvidencePack?.sports_grounding?.sports_fixture_candidate_score))
+      ? Number(verifiedEvidencePack.sports_grounding.sports_fixture_candidate_score)
+      : undefined,
+    sports_fixture_resolution_reason:
+      safeText(verifiedEvidencePack?.sports_grounding?.sports_fixture_resolution_reason) || undefined,
+    sports_fixture_date_match: verifiedEvidencePack?.sports_grounding?.sports_fixture_date_match === true,
+    sports_fixture_competition_match:
+      verifiedEvidencePack?.sports_grounding?.sports_fixture_competition_match == null
+        ? undefined
+        : verifiedEvidencePack.sports_grounding.sports_fixture_competition_match === true,
+    sports_market_source:
+      safeText(
+        verifiedEvidencePack?.sports_grounding?.sports_market_source,
+        safeText(verifiedEvidencePack?.sports_market_overlay?.sports_market_source)
+      ) || undefined,
+    sports_market_source_class:
+      safeText(
+        verifiedEvidencePack?.sports_grounding?.sports_market_source_class,
+        safeText(verifiedEvidencePack?.sports_market_overlay?.sports_market_source_class, "none")
+      ) || undefined,
+    sports_market_quality_tier:
+      safeText(
+        verifiedEvidencePack?.sports_grounding?.sports_market_quality_tier,
+        safeText(verifiedEvidencePack?.sports_market_overlay?.sports_market_quality_tier, "none")
+      ) || undefined,
+    sports_market_snapshot:
+      verifiedEvidencePack?.sports_grounding?.sports_market_snapshot ||
+      verifiedEvidencePack?.sports_market_overlay?.sports_market_snapshot ||
+      undefined,
+    sports_market_overround:
+      verifiedEvidencePack?.sports_grounding?.sports_market_overround == null
+        ? verifiedEvidencePack?.sports_market_overlay?.sports_market_overround ?? undefined
+        : Number(verifiedEvidencePack.sports_grounding.sports_market_overround),
     market_consensus_strength: Number.isFinite(Number(verifiedEvidencePack?.sports_grounding?.market_consensus_strength))
       ? Number(verifiedEvidencePack.sports_grounding.market_consensus_strength)
       : verifiedEvidencePack?.sports_market_overlay?.market_consensus_strength,
@@ -2521,11 +2830,7 @@ function buildFinalCard({
     narrative_hype_score: Number.isFinite(Number(verifiedEvidencePack?.sports_grounding?.narrative_hype_score))
       ? Number(verifiedEvidencePack.sports_grounding.narrative_hype_score)
       : verifiedEvidencePack?.sports_market_overlay?.narrative_hype_score,
-    sportsbook_readiness_state:
-      safeText(
-        verifiedEvidencePack?.sports_grounding?.sportsbook_readiness_state,
-        safeText(verifiedEvidencePack?.sports_market_overlay?.sportsbook_readiness_state)
-      ) || undefined,
+    sportsbook_readiness_state: normalizedSportsbookReadinessState,
     core_version: CRYSTAL_CORE_VERSION,
     _source: "crystal-core",
   };
@@ -2640,6 +2945,9 @@ function buildBaselineConsensusPack({ verifiedEvidencePack = {}, normalizedQuery
 
 function inferSimulationDomainFamily(normalizedQuery = {}) {
   const domainId = safeText(normalizedQuery?.primary_domain_id);
+  if (domainId === "A.23.markets_and_asset_regimes") return "market_regime";
+  if (domainId === SPORTS_MATCH_OUTCOMES_DOMAIN || domainId === SPORTS_PROBABILITY_MODE_DOMAIN) return "sports_match_decision";
+  if (domainId === "B.3.5.business_idea_outcomes") return "business_tradeoff";
   if (domainId === "A.24.governance_policy_and_public_timeline") return "governance_timeline";
   if (domainId === "A.25.geopolitics_and_conflict_dynamics") return "geopolitics_conflict";
   if (domainId === "A.26.human_history_and_long_run_analogs") return "long_run_analog";
@@ -2661,8 +2969,11 @@ function buildSimulationEntityEventLocation(normalizedQuery = {}) {
 
 function inferSimulationDecisionFrame(normalizedQuery = {}, verifiedEvidencePack = {}) {
   const domainId = safeText(normalizedQuery?.primary_domain_id);
+  if (domainId === "A.23.markets_and_asset_regimes") return "market_regime";
   const publicationBasis = verifiedEvidencePack?.publication_basis || {};
   const decisionReadyState = safeText(publicationBasis?.decision_ready_state || verifiedEvidencePack?.decision_ready_state);
+  if (domainId === SPORTS_PROBABILITY_MODE_DOMAIN) return "sports_probability_mode";
+  if (domainId === SPORTS_MATCH_OUTCOMES_DOMAIN) return "sports_match_forecast";
   if (domainId === "B.3.8.personal_decisions_and_tradeoffs") return "personal_tradeoff";
   if (domainId === "B.3.5.business_idea_outcomes") return "business_tradeoff";
   if (domainId === "A.24.governance_policy_and_public_timeline") return "governance_timeline";
@@ -2685,8 +2996,7 @@ function buildSimulationLiveSignalsSummary(verifiedEvidencePack = {}) {
 function buildSimulationContext({ queryText = "", normalizedQuery = {}, verifiedEvidencePack = {} }) {
   const domainFamily = inferSimulationDomainFamily(normalizedQuery);
   if (!domainFamily) return null;
-
-  return {
+  const baseContext = {
     domain_family: domainFamily,
     entity_event_location: buildSimulationEntityEventLocation(normalizedQuery),
     horizon: safeText(
@@ -2695,6 +3005,34 @@ function buildSimulationContext({ queryText = "", normalizedQuery = {}, verified
     ),
     decision_frame: inferSimulationDecisionFrame(normalizedQuery, verifiedEvidencePack),
     live_signals_summary: buildSimulationLiveSignalsSummary(verifiedEvidencePack),
+  };
+  if (domainFamily !== "sports_match_decision") {
+    return baseContext;
+  }
+
+  const sportsGrounding = verifiedEvidencePack?.sports_grounding || {};
+  const sportsSemanticOverlay = verifiedEvidencePack?.sports_semantic_overlay || null;
+  const sportsMarketOverlay = verifiedEvidencePack?.sports_market_overlay || null;
+  const sportsContractState = computeSportsContractState({
+    sportsGrounding,
+    semanticOverlay: sportsSemanticOverlay,
+  });
+  const sportsDecisionInput = buildSportsDecisionFrame({
+    sportsGrounding,
+    sportsMarketOverlay,
+    sportsSemanticOverlay,
+    sportsContractState,
+    domainId: safeText(normalizedQuery?.primary_domain_id),
+  });
+
+  return {
+    ...baseContext,
+    sports_grounding: sportsGrounding,
+    sports_semantic_overlay: sportsSemanticOverlay,
+    sports_market_overlay: sportsMarketOverlay,
+    sports_contract_state: sportsContractState,
+    sports_decision_input: sportsDecisionInput,
+    fixture_window_open: sportsContractState.fixtureWindowOpen === true,
   };
 }
 
@@ -3041,6 +3379,11 @@ async function buildVerifiedEvidencePack(context, { runId, queryText, normalized
         winning_probability: Number.isFinite(Number(sportsContext?.grounded_read?.winning_probability))
           ? Number(sportsContext.grounded_read.winning_probability)
           : null,
+        model_probabilities: sportsContext?.grounded_read?.model_probabilities || null,
+        market_probabilities: sportsContext?.grounded_read?.market_probabilities || null,
+        fair_prices: sportsContext?.grounded_read?.fair_prices || null,
+        model_favorite: safeText(sportsContext?.grounded_read?.model_favorite) || null,
+        market_favorite: safeText(sportsContext?.grounded_read?.market_favorite) || null,
         market_consensus_strength: Number.isFinite(Number(sportsContext?.market_consensus_strength))
           ? Number(sportsContext.market_consensus_strength)
           : null,
@@ -3195,6 +3538,7 @@ async function executeForecastRun(context, payload = {}) {
   const runAsOfUtc = safeText(payload.runAsOfUtc, nowIso());
   const runDeadlineAt = Date.now() + EXECUTION_BUDGET_MS;
   const clearField = deleteSentinel(admin);
+  let cacheKey = "";
 
   await writeRunPatch(db, admin, runId, {
     run_id: runId,
@@ -3287,6 +3631,55 @@ async function executeForecastRun(context, payload = {}) {
       current_stage: "query_domain_agent",
     });
     await writeArtifact(db, admin, runId, "normalized_query", normalizedQuery);
+
+    cacheKey = buildForecastCacheKey(queryText, normalizedQuery, {
+      requestTimeZone,
+      engine,
+      plan,
+    });
+    const cachedForecast = await readForecastResultCache(db, cacheKey, FORECAST_RESULT_CACHE_TTL_MS);
+    if (cachedForecast?.card) {
+      await writeRunPatch(db, admin, runId, {
+        status: "completed",
+        current_stage: "completed",
+        completed_at: serverTimestamp(admin),
+        result_card: cachedForecast.card,
+        query_plan: normalizedQuery,
+        resolution_target: cachedForecast.resolution_target || null,
+        evaluation_eligible: Boolean(cachedForecast.evaluation_eligible),
+        resolution_status: cachedForecast.evaluation_eligible ? "pending" : "skipped",
+        runtime_transport: runtimeTransport,
+        rollout_bucket: rolloutBucket || null,
+        core_version: CRYSTAL_CORE_VERSION,
+        core_runtime: CRYSTAL_CORE_VERSION,
+        cache_hit: true,
+        cache_key: cacheKey,
+        cache_source_run_id: safeText(cachedForecast.source_run_id),
+        last_error_code: clearField,
+        last_error_message: clearField,
+        last_error_stage: clearField,
+        last_provider: clearField,
+      });
+      await writeArtifact(db, admin, runId, "forecast_cache_hit", {
+        cache_key: cacheKey,
+        source_run_id: safeText(cachedForecast.source_run_id),
+        cached_at: safeText(cachedForecast.cached_at),
+        age_ms: Number.isFinite(Number(cachedForecast.age_ms)) ? Number(cachedForecast.age_ms) : null,
+      });
+      logCoreEvent("run_completed", {
+        runId,
+        transport: runtimeTransport,
+        publication_state: safeText(cachedForecast?.card?.card_state),
+        domain: safeText(cachedForecast?.card?.domain),
+        cache_hit: true,
+      });
+      return {
+        run_id: runId,
+        status: "completed",
+        query_plan: normalizedQuery,
+        card: cachedForecast.card,
+      };
+    }
 
     await ensureRunActive(db, runId);
     const { research_plan, variable_selection_pack } = runContextualVariableSelection(normalizedQuery);
@@ -3421,7 +3814,7 @@ async function executeForecastRun(context, payload = {}) {
                 () =>
                   llmRuntime.generateJson({
                     modelKind: "forecast",
-                    temperature: 0.1,
+                    temperature: 0,
                     systemInstruction:
                       "You are Crystal's Dossier and Prediction Agent. Return exactly one JSON object. Stay concrete, directional, and grounded in the supplied evidence.",
                     prompt: buildDossierPredictionPrompt({
@@ -3688,7 +4081,7 @@ async function executeForecastRun(context, payload = {}) {
                 () =>
                   llmRuntime.generateJson({
                     modelKind: "forecast",
-                    temperature: 0.15,
+                    temperature: 0,
                     systemInstruction:
                       "You write Crystal prediction cards. Return exactly one JSON object. Put the call first, keep the tone precise, and never hide the thesis behind vague uncertainty copy.",
                     prompt: buildForecastVerbalizationPrompt({
@@ -3781,6 +4174,17 @@ async function executeForecastRun(context, payload = {}) {
       last_error_message: clearField,
       last_error_stage: clearField,
       last_provider: clearField,
+    });
+    await writeForecastResultCache(db, admin, cacheKey, {
+      source_run_id: runId,
+      query_text: queryText,
+      query_plan: normalizedQuery,
+      card,
+      resolution_target: resolutionTarget,
+      evaluation_eligible: evaluationEligible,
+      calibration_snapshot: calibrationSnapshot || null,
+      runtime_transport: runtimeTransport,
+      visibility,
     });
     logCoreEvent("run_completed", {
       runId,
@@ -3974,6 +4378,7 @@ module.exports = {
     buildTemporalContext,
     buildVerifiedEvidencePack,
     buildFallbackVerifiedEvidencePack,
+    buildFinalCard,
     buildSourceUsageSummary,
     buildMarketStructure,
     getAllProviderRuntimeStatuses,

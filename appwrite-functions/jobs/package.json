@@ -1,0 +1,9 @@
+{
+  "name": "crystal-appwrite-jobs",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "google-auth-library": "^9.15.1",
+    "node-appwrite": "^20.3.0"
+  }
+}

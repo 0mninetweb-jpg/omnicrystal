@@ -1,6 +1,5 @@
 import { auth } from '../firebase';
-
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || process.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '');
+import { invokeCrystalApi } from '../platform/appwriteFunctionApi';
 
 type ServerRequestContext = {
   sourceView?: string;
@@ -158,18 +157,22 @@ async function requestServer<T>(
     }
   }
 
-  let response: Response;
   try {
-    response = await fetch(`${API_BASE_URL}/${path}`, {
+    return await invokeCrystalApi<T>(path, {
       method,
+      body,
       headers,
-      body: body !== undefined ? JSON.stringify(body) : undefined,
+      requireAuth,
     });
   } catch (_error) {
-    throw new BackendUnavailableError('Backend API non raggiungibile.');
+    if (_error instanceof BackendUnavailableError) {
+      throw _error;
+    }
+    if (_error instanceof Error && /Backend API non disponibile|Backend API non raggiungibile/i.test(_error.message)) {
+      throw new BackendUnavailableError(_error.message);
+    }
+    throw _error;
   }
-
-  return parseServerResponse(response) as Promise<T>;
 }
 
 export async function withServerRequestContext<T>(context: ServerRequestContext, fn: () => Promise<T>) {

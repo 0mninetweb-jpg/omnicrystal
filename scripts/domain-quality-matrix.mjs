@@ -9,6 +9,7 @@ const require = createRequire(import.meta.url);
 const { CATALOG_DOMAINS, getDomain, GENERAL_FORECAST_DOMAIN } = require("../functions/catalogRegistry.js");
 const { buildRoutingHints, finalizeScorecard, safeText, clamp01 } = require("../functions/predictionCore.js");
 const { runContextualVariableSelection } = require("../functions/crystalCore/adapterRegistry.js");
+const { computeSportsContractState } = require("../functions/crystalCore/sportsState.js");
 const {
   SHARED_IMPLEMENTED_SOURCE_IDS,
   buildRequiredSourcesForQuery,
@@ -208,6 +209,38 @@ function uniqueStrings(values = []) {
 
 function ensureDirname(filePath) {
   return fs.mkdir(path.dirname(filePath), { recursive: true });
+}
+
+async function readSportsProbeArtifact({ currentDate, docsDir } = {}) {
+  const effectiveDate = safeText(currentDate, new Date().toISOString().slice(0, 10));
+  const targetDocsDir = docsDir || path.resolve(process.cwd(), "docs");
+  const artifactPath = path.resolve(targetDocsDir, `sports-probe-${effectiveDate}.json`);
+  try {
+    const raw = await fs.readFile(artifactPath, "utf8");
+    const normalized = raw.replace(/^\uFEFF/, "");
+    return {
+      artifactPath,
+      data: JSON.parse(normalized),
+    };
+  } catch (_error) {
+    return null;
+  }
+}
+
+async function readSportsCalibrationArtifact({ currentDate, docsDir } = {}) {
+  const effectiveDate = safeText(currentDate, new Date().toISOString().slice(0, 10));
+  const targetDocsDir = docsDir || path.resolve(process.cwd(), "docs");
+  const artifactPath = path.resolve(targetDocsDir, `sports-calibration-${effectiveDate}.json`);
+  try {
+    const raw = await fs.readFile(artifactPath, "utf8");
+    const normalized = raw.replace(/^\uFEFF/, "");
+    return {
+      artifactPath,
+      data: JSON.parse(normalized),
+    };
+  } catch (_error) {
+    return null;
+  }
 }
 
 function inferFlags(domainId = "") {
@@ -533,7 +566,95 @@ function buildSyntheticSignals(usedSources = [], variant = "canonical", context 
   return baseSignals.concat(extras);
 }
 
-function buildSyntheticEvidenceBundle({ domainConfig, sourceUsage, variant = "canonical", flags, queryText = "" }) {
+function buildSportsGroundingFromProbe({ domainId, sportsProbeArtifact, sportsProvider }) {
+  const artifactData = sportsProbeArtifact?.data || null;
+  const summary = artifactData?.summary || null;
+  const probeRow =
+    domainId === "A.29.sports_performance_and_outcomes"
+      ? artifactData?.a29_probe
+      : domainId === "B.3.6.sports_outcomes_probability_mode"
+        ? artifactData?.b36_probe
+        : null;
+
+  if (!probeRow || !summary) {
+    return {
+      provider_required: true,
+      provider_configured: sportsProvider?.configured === true,
+      fixture_resolved: false,
+      parity_ready: false,
+      semantic_ready: false,
+      overlay_confidence: null,
+      overlay_blocker_reason: "sports_probe_artifact_missing",
+      publish_gate_ready: false,
+      sports_pick_state: "hold",
+      sports_grounded: false,
+      fixture_window_state: "unresolved",
+      fixture_window_open: false,
+      sports_extraction_provenance: [],
+      sports_confidence_tier: "hold",
+      market_consensus_strength: null,
+      market_disagreement_score: null,
+      price_move_pressure: null,
+      narrative_hype_score: null,
+      sportsbook_readiness_state:
+        domainId === "B.3.6.sports_outcomes_probability_mode" ? "benchmark_only" : "forecast_only",
+    };
+  }
+
+  const providerConfigured = probeRow.local_provider_configured === true && probeRow.remote_provider_configured === true;
+  const fixtureResolved = probeRow.local_fixture_resolved === true && probeRow.remote_fixture_resolved === true;
+  const parityReady = probeRow.local_sports_ready === true && probeRow.remote_sports_ready === true;
+  const semanticReady = probeRow.local_sports_semantic_ready === true && probeRow.remote_sports_semantic_ready === true;
+  const publishGateReady = probeRow.local_sports_publish_gate_ready === true && probeRow.remote_sports_publish_gate_ready === true;
+  const sportsGrounded = probeRow.local_sports_grounded === true && probeRow.remote_sports_grounded === true;
+  const sportsPickState =
+    safeText(probeRow.local_sports_pick_state) === safeText(probeRow.remote_sports_pick_state)
+      ? safeText(probeRow.local_sports_pick_state, publishGateReady ? "publishable_controlled" : sportsGrounded ? "grounded_lean" : "hold")
+      : publishGateReady
+        ? "publishable_controlled"
+        : sportsGrounded
+          ? "grounded_lean"
+          : "hold";
+  const fixtureWindowState =
+    safeText(probeRow.local_fixture_window_state) === safeText(probeRow.remote_fixture_window_state)
+      ? safeText(probeRow.local_fixture_window_state, sportsGrounded ? "resolved" : "unresolved")
+      : safeText(probeRow.remote_fixture_window_state || probeRow.local_fixture_window_state, sportsGrounded ? "resolved" : "unresolved");
+  const fixtureWindowOpen = probeRow.local_fixture_window_open === true && probeRow.remote_fixture_window_open === true;
+  const overlayBlockerReason =
+    safeText(probeRow.local_sports_overlay_blocker_reason) === safeText(probeRow.remote_sports_overlay_blocker_reason)
+      ? safeText(probeRow.local_sports_overlay_blocker_reason)
+      : safeText(probeRow.local_sports_overlay_blocker_reason || probeRow.remote_sports_overlay_blocker_reason);
+  const sportsbookReadinessState =
+    safeText(probeRow.local_sportsbook_readiness_state) === safeText(probeRow.remote_sportsbook_readiness_state)
+      ? safeText(probeRow.local_sportsbook_readiness_state)
+      : safeText(probeRow.local_sportsbook_readiness_state || probeRow.remote_sportsbook_readiness_state);
+
+  return {
+    provider_required: true,
+    provider_configured: providerConfigured || sportsProvider?.configured === true,
+    fixture_resolved: fixtureResolved,
+    parity_ready: parityReady,
+    semantic_ready: semanticReady,
+    overlay_confidence: publishGateReady ? 0.79 : semanticReady ? 0.67 : sportsGrounded ? 0.58 : null,
+    overlay_blocker_reason: overlayBlockerReason,
+    publish_gate_ready: publishGateReady,
+    sports_pick_state: sportsPickState,
+    sports_grounded: sportsGrounded,
+    fixture_window_state: fixtureWindowState,
+    fixture_window_open: fixtureWindowOpen,
+    sports_extraction_provenance: sportsGrounded ? ["official", "allowlist_search", "probe_artifact"] : [],
+    sports_confidence_tier: publishGateReady ? "controlled" : sportsGrounded ? "lean" : "hold",
+    market_consensus_strength: probeRow.local_sports_market_overlay_available === true && probeRow.remote_sports_market_overlay_available === true ? 0.66 : null,
+    market_disagreement_score: domainId === "B.3.6.sports_outcomes_probability_mode" ? 0.18 : 0.12,
+    price_move_pressure: probeRow.local_sports_market_overlay_available === true && probeRow.remote_sports_market_overlay_available === true ? 0.31 : null,
+    narrative_hype_score: probeRow.local_sports_market_overlay_available === true && probeRow.remote_sports_market_overlay_available === true ? 0.54 : null,
+    sportsbook_readiness_state:
+      sportsbookReadinessState ||
+      (domainId === "B.3.6.sports_outcomes_probability_mode" ? "benchmark_only" : "forecast_betting_aware"),
+  };
+}
+
+function buildSyntheticEvidenceBundle({ domainConfig, sourceUsage, variant = "canonical", flags, queryText = "", sportsProbeArtifact = null }) {
   const domainId = safeText(domainConfig?.domain_id);
   const liveSignals = buildSyntheticSignals(sourceUsage.used_sources, variant, { domainConfig, sourceUsage, flags });
   const broadGeneralDomain = domainId === GENERAL_FORECAST_DOMAIN;
@@ -543,31 +664,22 @@ function buildSyntheticEvidenceBundle({ domainConfig, sourceUsage, variant = "ca
   const hasWeek3EdgeDepth = week3FocusEdge && sourceUsage.used_sources.length >= 4 && sourceUsage.missing_required_sources.length === 0;
   const sportsProvider = sourceUsage.provider_states.find((provider) => provider.source_id === "thesportsdb_public");
   const decisionMetadata = buildWeek3DecisionMetadata(domainId, queryText, variant, sourceUsage);
-  const a29SportsDomain = domainId === "A.29.sports_performance_and_outcomes";
-  const b36SportsDomain = domainId === "B.3.6.sports_outcomes_probability_mode";
   const sportsGrounding =
     flags.sportsLike
-      ? {
-          provider_required: true,
-          provider_configured: sportsProvider?.configured === true,
-          fixture_resolved: sportsProvider?.configured === true,
-          parity_ready: sportsProvider?.configured === true,
-          semantic_ready: sportsProvider?.configured === true && (a29SportsDomain || b36SportsDomain),
-          overlay_confidence: sportsProvider?.configured === true && (a29SportsDomain || b36SportsDomain) ? 0.79 : null,
-          overlay_blocker_reason: a29SportsDomain || b36SportsDomain ? "" : "sports_semantic_overlay_pending",
-          publish_gate_ready: sportsProvider?.configured === true && (a29SportsDomain || b36SportsDomain),
-          sports_pick_state: sportsProvider?.configured === true ? "publishable_controlled" : "hold",
-          sports_grounded: sportsProvider?.configured === true,
-          fixture_window_state: sportsProvider?.configured === true ? "upcoming" : "unanchored",
-          fixture_window_open: sportsProvider?.configured === true,
-          sports_extraction_provenance: sportsProvider?.configured === true ? ["official", "allowlist_search", "broad_web", "polymarket_public", "google_trends"] : [],
-          sports_confidence_tier: sportsProvider?.configured === true ? "controlled" : "hold",
-          market_consensus_strength: sportsProvider?.configured === true && (a29SportsDomain || b36SportsDomain) ? 0.67 : null,
-          market_disagreement_score: sportsProvider?.configured === true && b36SportsDomain ? 0.24 : 0.18,
-          price_move_pressure: sportsProvider?.configured === true && (a29SportsDomain || b36SportsDomain) ? 0.38 : null,
-          narrative_hype_score: sportsProvider?.configured === true && (a29SportsDomain || b36SportsDomain) ? 0.58 : null,
-          sportsbook_readiness_state: a29SportsDomain ? "forecast_betting_aware" : b36SportsDomain ? "probability_mode_live" : "forecast_only",
-        }
+      ? (() => {
+          const probeGrounding = buildSportsGroundingFromProbe({ domainId, sportsProbeArtifact, sportsProvider });
+          const sportsContractState = computeSportsContractState({ sportsGrounding: probeGrounding });
+          return {
+            ...probeGrounding,
+            sports_pick_state: sportsContractState.sportsPickState,
+            sports_grounded: sportsContractState.sportsGrounded,
+            publish_gate_ready: sportsContractState.sportsPublishGateReady,
+            fixture_window_state: sportsContractState.fixtureWindowState,
+            fixture_window_open: sportsContractState.fixtureWindowOpen,
+            sports_extraction_provenance: sportsContractState.sportsExtractionProvenance,
+            sports_confidence_tier: sportsContractState.sportsConfidenceTier,
+          };
+        })()
       : undefined;
 
   return {
@@ -612,13 +724,14 @@ function buildSyntheticEvidenceBundle({ domainConfig, sourceUsage, variant = "ca
     notes: uniqueStrings([
       safeText(domainConfig?.status_reason),
       week3FocusEdge ? "Week 3 focus row now uses a thicker live-first edge pack." : "",
+      flags.sportsLike && sportsProbeArtifact?.artifactPath ? `Sports probe artifact: ${path.basename(sportsProbeArtifact.artifactPath)}` : "",
     ]),
     hard_stop: Boolean(flags.sportsLike && sportsGrounding?.sports_grounded !== true),
     sports_grounding: sportsGrounding,
     sports_semantic_overlay: flags.sportsLike
       ? {
-          enabled: true,
-          mode: a29SportsDomain ? "a29" : "observe",
+        enabled: true,
+          mode: domainId === "A.29.sports_performance_and_outcomes" ? "a29" : "observe",
           ready: sportsGrounding?.semantic_ready === true,
           publish_gate_ready: sportsGrounding?.publish_gate_ready === true,
           confidence: sportsGrounding?.overlay_confidence ?? null,
@@ -628,9 +741,13 @@ function buildSyntheticEvidenceBundle({ domainConfig, sourceUsage, variant = "ca
     sports_market_overlay: flags.sportsLike
       ? {
           enabled: true,
-          available: sportsProvider?.configured === true && (a29SportsDomain || b36SportsDomain),
-          used_source_ids: sportsProvider?.configured === true && (a29SportsDomain || b36SportsDomain) ? ["polymarket_public", "google_trends"] : [],
-          source_count: sportsProvider?.configured === true && (a29SportsDomain || b36SportsDomain) ? 2 : 0,
+          available: sportsGrounding?.market_consensus_strength !== null || sportsGrounding?.price_move_pressure !== null,
+          used_source_ids:
+            sportsGrounding?.market_consensus_strength !== null || sportsGrounding?.price_move_pressure !== null
+              ? ["polymarket_public", "google_trends"]
+              : [],
+          source_count:
+            sportsGrounding?.market_consensus_strength !== null || sportsGrounding?.price_move_pressure !== null ? 2 : 0,
           market_consensus_strength: sportsGrounding?.market_consensus_strength ?? null,
           market_disagreement_score: sportsGrounding?.market_disagreement_score ?? null,
           price_move_pressure: sportsGrounding?.price_move_pressure ?? null,
@@ -912,7 +1029,7 @@ function buildExpectedQualityState(domainConfig = {}, sourceUsage = {}, flags = 
   return "watchlist";
 }
 
-function buildDomainRow({ domainCase, queryText, variant }) {
+function buildDomainRow({ domainCase, queryText, variant, sportsProbeArtifact = null }) {
   const domainConfig = getDomain(domainCase.domainId, GENERAL_FORECAST_DOMAIN);
   const routingHints = buildRoutingHints(queryText);
   const normalizedQuery = buildSyntheticQueryPlan(queryText, routingHints);
@@ -936,6 +1053,7 @@ function buildDomainRow({ domainCase, queryText, variant }) {
     variant,
     flags,
     queryText,
+    sportsProbeArtifact,
   });
   evidenceBundle.query_text = queryText;
   const rawScorecard = buildSyntheticRawScorecard({
@@ -1204,11 +1322,13 @@ function buildMarkdownReport(report) {
   return lines.join("\n");
 }
 
-export async function runDomainQualityMatrix() {
+export async function runDomainQualityMatrix({ currentDate, docsDir } = {}) {
+  const sportsProbeArtifact = await readSportsProbeArtifact({ currentDate, docsDir });
+  const sportsCalibrationArtifact = await readSportsCalibrationArtifact({ currentDate, docsDir });
   const rows = [];
   for (const domainCase of DOMAIN_MATRIX_CASES) {
-    rows.push(buildDomainRow({ domainCase, queryText: domainCase.canonicalQuery, variant: "canonical" }));
-    rows.push(buildDomainRow({ domainCase, queryText: domainCase.edgeQuery, variant: "edge" }));
+    rows.push(buildDomainRow({ domainCase, queryText: domainCase.canonicalQuery, variant: "canonical", sportsProbeArtifact }));
+    rows.push(buildDomainRow({ domainCase, queryText: domainCase.edgeQuery, variant: "edge", sportsProbeArtifact }));
   }
 
   const domains = DOMAIN_MATRIX_CASES.map((domainCase) => {
@@ -1390,6 +1510,12 @@ export async function runDomainQualityMatrix() {
       ? "week3_edge_predictive_lift_ready"
       : "week3_needs_more_edge_depth";
 
+    const sportsProbeSummary = sportsProbeArtifact?.data?.summary || null;
+    const sportsCalibrationSummary = sportsCalibrationArtifact?.data?.summary || null;
+    const sportsCalibrationStatus = safeText(
+      sportsCalibrationArtifact?.data?.artifact_status,
+      safeText(sportsCalibrationSummary?.artifact_status, sportsCalibrationArtifact ? "warming_up" : "unavailable")
+    );
     const week4HardBlockers = uniqueStrings(
       canonicalRows
         .filter((row) => {
@@ -1401,6 +1527,14 @@ export async function runDomainQualityMatrix() {
           return hasExplicitBlocker || missingFredRequired;
         })
         .map((row) => safeText(row.quality.blocker_reason || row.domain_id))
+        .concat(
+          sportsProbeSummary && sportsProbeSummary.local_remote_green !== true
+            ? ["sports_probe_local_remote_not_green"]
+            : [],
+          sportsCalibrationStatus === "unavailable"
+            ? ["sports_calibration_artifact_unavailable"]
+            : []
+        )
     );
 
     return {
@@ -1453,6 +1587,11 @@ export async function runDomainQualityMatrix() {
         rollout_bucket: "0/0",
         canary_posture: week4HardBlockers.length === 0 ? "sports_feature_flag_candidate" : "defer_until_after_prediction_quality_sprint",
         hard_blockers: week4HardBlockers,
+        sports_probe_artifact: sportsProbeArtifact?.artifactPath || null,
+        sports_probe_summary: sportsProbeSummary,
+        sports_calibration_artifact: sportsCalibrationArtifact?.artifactPath || null,
+        sports_calibration_status: sportsCalibrationStatus,
+        sports_calibration_summary: sportsCalibrationSummary,
       },
       domains,
     rows,
@@ -1475,7 +1614,7 @@ export {
 };
 
 export async function writeDomainQualityMatrixReport({ currentDate, docsDir } = {}) {
-  const report = await runDomainQualityMatrix();
+  const report = await runDomainQualityMatrix({ currentDate, docsDir });
   const effectiveDate = safeText(currentDate, new Date().toISOString().slice(0, 10));
   const targetDocsDir = docsDir || path.resolve(process.cwd(), "docs");
   const markdownPath = path.resolve(targetDocsDir, `domain-quality-matrix-${effectiveDate}.md`);

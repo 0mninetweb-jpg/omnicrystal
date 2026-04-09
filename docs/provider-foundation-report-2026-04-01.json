@@ -1,0 +1,1406 @@
+{
+  "summary": {
+    "generated_at": "2026-04-01T23:06:06.138Z",
+    "report_date": "2026-04-01",
+    "total_cases": 6,
+    "top3_miss_count": 0,
+    "source_coverage_failures": 0,
+    "location_structure_failures": 0,
+    "mobility_structure_failures": 0,
+    "public_data_structure_failures": 0,
+    "runtime_provider_count": 20,
+    "runtime_config_blocker_count": 0,
+    "runtime_optional_missing_count": 1,
+    "runtime_state_source": "live_health",
+    "synthetic_smoke_verdict": "connector-ready",
+    "runtime_config_verdict": "config-ready",
+    "verdict": "foundation-ready"
+  },
+  "runtime_provider_states": [
+    {
+      "source_id": "open_meteo",
+      "title": "open meteo",
+      "category": "weather",
+      "access_profile": "public",
+      "implementation_status": "implemented",
+      "configured": true,
+      "available": true,
+      "status": "available"
+    },
+    {
+      "source_id": "polymarket_public",
+      "title": "polymarket public",
+      "category": "prediction_market",
+      "access_profile": "public",
+      "implementation_status": "implemented",
+      "configured": true,
+      "available": true,
+      "status": "available"
+    },
+    {
+      "source_id": "wikidata",
+      "title": "wikidata",
+      "category": "entity_resolution",
+      "access_profile": "public",
+      "implementation_status": "implemented",
+      "configured": true,
+      "available": true,
+      "status": "available"
+    },
+    {
+      "source_id": "gdelt",
+      "title": "gdelt",
+      "category": "news_attention",
+      "access_profile": "public",
+      "implementation_status": "implemented",
+      "configured": true,
+      "available": true,
+      "status": "available"
+    },
+    {
+      "source_id": "rss_allowlist",
+      "title": "rss allowlist",
+      "category": "news_attention",
+      "access_profile": "public",
+      "implementation_status": "implemented",
+      "configured": true,
+      "available": true,
+      "status": "available"
+    },
+    {
+      "source_id": "google_trends",
+      "title": "google trends",
+      "category": "attention",
+      "access_profile": "public",
+      "implementation_status": "implemented",
+      "configured": true,
+      "available": true,
+      "status": "available"
+    },
+    {
+      "source_id": "yahoo_finance",
+      "title": "yahoo finance",
+      "category": "markets",
+      "access_profile": "public",
+      "implementation_status": "implemented",
+      "configured": true,
+      "available": true,
+      "status": "available"
+    },
+    {
+      "source_id": "fred_api",
+      "title": "FRED API",
+      "category": "macro",
+      "access_profile": "public",
+      "implementation_status": "implemented",
+      "configured": true,
+      "available": true,
+      "status": "available",
+      "notes": []
+    },
+    {
+      "source_id": "nominatim",
+      "title": "Nominatim",
+      "category": "geography",
+      "access_profile": "public",
+      "implementation_status": "implemented",
+      "configured": true,
+      "available": true,
+      "status": "available",
+      "base_url": "https://nominatim.openstreetmap.org"
+    },
+    {
+      "source_id": "overpass",
+      "title": "Overpass API",
+      "category": "geography",
+      "access_profile": "public",
+      "implementation_status": "implemented",
+      "configured": true,
+      "available": true,
+      "status": "available",
+      "base_url": "https://overpass-api.de/api/interpreter"
+    },
+    {
+      "source_id": "gtfs_static",
+      "title": "GTFS Static",
+      "category": "mobility",
+      "access_profile": "public",
+      "implementation_status": "implemented",
+      "configured": true,
+      "available": true,
+      "status": "available",
+      "feed_count": 1,
+      "notes": []
+    },
+    {
+      "source_id": "gtfs_realtime",
+      "title": "GTFS Realtime",
+      "category": "mobility",
+      "access_profile": "public",
+      "implementation_status": "implemented",
+      "configured": true,
+      "available": true,
+      "status": "available",
+      "feed_count": 1,
+      "notes": []
+    },
+    {
+      "source_id": "opensky",
+      "title": "OpenSky",
+      "category": "travel",
+      "access_profile": "public",
+      "implementation_status": "implemented",
+      "configured": true,
+      "available": true,
+      "status": "available",
+      "auth_mode": "anonymous_public",
+      "base_url": "https://opensky-network.org/api"
+    },
+    {
+      "source_id": "openaq",
+      "title": "OpenAQ",
+      "category": "environment",
+      "access_profile": "public",
+      "implementation_status": "implemented",
+      "configured": false,
+      "available": false,
+      "status": "config_missing",
+      "notes": [
+        "OPENAQ_API_KEY is required by the current OpenAQ v3 runtime path."
+      ]
+    },
+    {
+      "source_id": "world_bank_api",
+      "title": "World Bank Indicators API",
+      "category": "macro",
+      "access_profile": "public",
+      "implementation_status": "implemented",
+      "configured": true,
+      "available": true,
+      "status": "available",
+      "base_url": "https://api.worldbank.org/v2"
+    },
+    {
+      "source_id": "eurostat_api",
+      "title": "Eurostat API",
+      "category": "macro",
+      "access_profile": "public",
+      "implementation_status": "implemented",
+      "configured": true,
+      "available": true,
+      "status": "available",
+      "base_url": "https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data"
+    },
+    {
+      "source_id": "oecd_api",
+      "title": "OECD SDMX-JSON API",
+      "category": "macro",
+      "access_profile": "public",
+      "implementation_status": "implemented",
+      "configured": true,
+      "available": true,
+      "status": "available",
+      "base_url": "https://stats.oecd.org/SDMX-JSON/data"
+    },
+    {
+      "source_id": "eia_api",
+      "title": "EIA API",
+      "category": "energy",
+      "access_profile": "public",
+      "implementation_status": "implemented",
+      "configured": false,
+      "available": false,
+      "status": "config_missing",
+      "notes": [
+        "EIA_API_KEY is required to activate EIA in runtime."
+      ]
+    },
+    {
+      "source_id": "thesportsdb_public",
+      "title": "TheSportsDB",
+      "category": "sports",
+      "access_profile": "public",
+      "implementation_status": "implemented",
+      "configured": true,
+      "available": true,
+      "status": "available",
+      "provider": "thesportsdb",
+      "base_url": "https://www.thesportsdb.com/api/v1/json",
+      "notes": [
+        "Using TheSportsDB as the live sports backbone for fixture grounding, recent form, and table context."
+      ]
+    },
+    {
+      "source_id": "api_football_optional",
+      "title": "API-Football",
+      "category": "sports",
+      "access_profile": "optional_non_default",
+      "implementation_status": "implemented",
+      "configured": true,
+      "available": true,
+      "status": "available",
+      "provider": "api-football",
+      "base_url": "https://v3.football.api-sports.io",
+      "notes": [
+        "API-Football is configured as optional sports context only (history, odds, standings) and never drives live fixture unlock."
+      ]
+    }
+  ],
+  "runtime_config_blockers": [],
+  "runtime_optional_missing": [
+    {
+      "source_id": "openaq",
+      "status": "config_missing",
+      "configured": false,
+      "available": false,
+      "notes": [
+        "OPENAQ_API_KEY is required by the current OpenAQ v3 runtime path."
+      ]
+    }
+  ],
+  "cases": [
+    {
+      "cluster": "city_geo",
+      "query": "City pulse in Rome next 30 days",
+      "expectedDomains": [
+        "A.7.city_pulse_and_urban_pressure"
+      ],
+      "requiredSources": [
+        "nominatim",
+        "overpass"
+      ],
+      "expectLocation": true,
+      "primary_domain_id": "A.7.city_pulse_and_urban_pressure",
+      "candidate_domains_top3": [
+        "A.7.city_pulse_and_urban_pressure",
+        "A.17.technology_adoption_and_digital_pulse",
+        "B.3.5.business_idea_outcomes"
+      ],
+      "top3_hit": true,
+      "used_sources": [
+        "nominatim",
+        "overpass",
+        "google_trends",
+        "historical-cache"
+      ],
+      "required_sources": [
+        "nominatim",
+        "overpass"
+      ],
+      "optional_sources": [],
+      "missing_required_sources": [],
+      "missing_optional_sources": [],
+      "location_ready": true,
+      "mobility_ready": true,
+      "public_data_ready": true,
+      "source_usage": {
+        "policy_like": false,
+        "market_like": false,
+        "sports_like": false,
+        "geo_like": true,
+        "mobility_like": false,
+        "travel_like": false,
+        "macro_public_like": false,
+        "energy_like": false,
+        "environment_like": false,
+        "required_sources": [
+          "nominatim",
+          "overpass"
+        ],
+        "optional_sources": [],
+        "used_sources": [
+          "nominatim",
+          "overpass",
+          "google_trends",
+          "historical-cache"
+        ],
+        "missing_required_sources": [],
+        "missing_optional_sources": [],
+        "provider_states": [
+          {
+            "source_id": "nominatim",
+            "title": "Nominatim",
+            "category": "geography",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "base_url": "https://nominatim.openstreetmap.org",
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "overpass",
+            "title": "Overpass API",
+            "category": "geography",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "base_url": "https://overpass-api.de/api/interpreter",
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "google_trends",
+            "title": "google trends",
+            "category": "attention",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": false,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "historical-cache",
+            "title": "historical-cache",
+            "category": "runtime",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": false,
+            "optional_for_query": false,
+            "used_in_run": true
+          }
+        ]
+      },
+      "location_structure": {
+        "resolved_place": {
+          "display_name": "Rome, Italy",
+          "lat": 41.8933,
+          "lon": 12.4829,
+          "type": "city"
+        },
+        "poi_context": {
+          "source_id": "overpass",
+          "display_name": "Rome, Italy",
+          "poi_count": 128,
+          "transit_poi_count": 24,
+          "hospitality_poi_count": 38
+        }
+      },
+      "mobility_structure": null,
+      "public_data_structure": null
+    },
+    {
+      "cluster": "mobility",
+      "query": "Mobility congestion in Rome next week",
+      "expectedDomains": [
+        "A.8.mobility_congestion_and_accessibility",
+        "A.7.city_pulse_and_urban_pressure"
+      ],
+      "requiredSources": [
+        "nominatim",
+        "overpass"
+      ],
+      "optionalSources": [
+        "gtfs_static",
+        "gtfs_realtime"
+      ],
+      "expectLocation": true,
+      "expectMobility": true,
+      "primary_domain_id": "A.8.mobility_congestion_and_accessibility",
+      "candidate_domains_top3": [
+        "A.8.mobility_congestion_and_accessibility",
+        "A.21.trade_supply_and_disruption_signals",
+        "B.3.7.travel_personal_outcomes"
+      ],
+      "top3_hit": true,
+      "used_sources": [
+        "nominatim",
+        "gtfs_realtime",
+        "gtfs_static",
+        "overpass",
+        "google_trends",
+        "historical-cache"
+      ],
+      "required_sources": [
+        "nominatim",
+        "overpass",
+        "gtfs_static"
+      ],
+      "optional_sources": [
+        "gtfs_realtime"
+      ],
+      "missing_required_sources": [],
+      "missing_optional_sources": [],
+      "location_ready": true,
+      "mobility_ready": true,
+      "public_data_ready": true,
+      "source_usage": {
+        "policy_like": false,
+        "market_like": false,
+        "sports_like": false,
+        "geo_like": true,
+        "mobility_like": true,
+        "travel_like": false,
+        "macro_public_like": false,
+        "energy_like": false,
+        "environment_like": false,
+        "required_sources": [
+          "nominatim",
+          "overpass",
+          "gtfs_static"
+        ],
+        "optional_sources": [
+          "gtfs_realtime"
+        ],
+        "used_sources": [
+          "nominatim",
+          "gtfs_realtime",
+          "gtfs_static",
+          "overpass",
+          "google_trends",
+          "historical-cache"
+        ],
+        "missing_required_sources": [],
+        "missing_optional_sources": [],
+        "provider_states": [
+          {
+            "source_id": "nominatim",
+            "title": "Nominatim",
+            "category": "geography",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "base_url": "https://nominatim.openstreetmap.org",
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "overpass",
+            "title": "Overpass API",
+            "category": "geography",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "base_url": "https://overpass-api.de/api/interpreter",
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "gtfs_static",
+            "title": "GTFS Static",
+            "category": "mobility",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "feed_count": 1,
+            "notes": [],
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "gtfs_realtime",
+            "title": "GTFS Realtime",
+            "category": "mobility",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "feed_count": 1,
+            "notes": [],
+            "required_for_query": false,
+            "optional_for_query": true,
+            "used_in_run": true
+          },
+          {
+            "source_id": "google_trends",
+            "title": "google trends",
+            "category": "attention",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": false,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "historical-cache",
+            "title": "historical-cache",
+            "category": "runtime",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": false,
+            "optional_for_query": false,
+            "used_in_run": true
+          }
+        ]
+      },
+      "location_structure": {
+        "resolved_place": {
+          "display_name": "Rome, Italy",
+          "lat": 41.8933,
+          "lon": 12.4829,
+          "type": "city"
+        },
+        "poi_context": {
+          "source_id": "overpass",
+          "display_name": "Rome, Italy",
+          "poi_count": 128,
+          "transit_poi_count": 24,
+          "hospitality_poi_count": 38
+        }
+      },
+      "mobility_structure": {
+        "summary": [
+          "Transit routes: 132",
+          "Live vehicles: 54"
+        ],
+        "flight_context": null,
+        "gtfs_static": {
+          "source_id": "gtfs_static",
+          "feed_label": "Synthetic GTFS Static",
+          "routes": 132,
+          "stops": 1488,
+          "service_rows": 28
+        },
+        "gtfs_realtime": {
+          "source_id": "gtfs_realtime",
+          "feed_label": "Synthetic GTFS Realtime",
+          "trip_updates": 18,
+          "vehicle_positions": 54,
+          "alerts": 3
+        }
+      },
+      "public_data_structure": null
+    },
+    {
+      "cluster": "travel",
+      "query": "Travel disruption risk in Rome next 90 days",
+      "expectedDomains": [
+        "A.9.travel_flows_and_disruption"
+      ],
+      "requiredSources": [
+        "nominatim",
+        "overpass",
+        "opensky"
+      ],
+      "optionalSources": [
+        "gtfs_static",
+        "gtfs_realtime"
+      ],
+      "expectLocation": true,
+      "expectMobility": true,
+      "primary_domain_id": "A.9.travel_flows_and_disruption",
+      "candidate_domains_top3": [
+        "A.9.travel_flows_and_disruption",
+        "A.28.public_health_and_environmental_exposure",
+        "A.25.geopolitics_and_conflict_dynamics"
+      ],
+      "top3_hit": true,
+      "used_sources": [
+        "nominatim",
+        "gtfs_realtime",
+        "opensky",
+        "gtfs_static",
+        "overpass",
+        "google_trends",
+        "historical-cache"
+      ],
+      "required_sources": [
+        "nominatim",
+        "overpass",
+        "gtfs_static",
+        "opensky"
+      ],
+      "optional_sources": [
+        "gtfs_realtime",
+        "gtfs_static"
+      ],
+      "missing_required_sources": [],
+      "missing_optional_sources": [],
+      "location_ready": true,
+      "mobility_ready": true,
+      "public_data_ready": true,
+      "source_usage": {
+        "policy_like": false,
+        "market_like": false,
+        "sports_like": false,
+        "geo_like": true,
+        "mobility_like": true,
+        "travel_like": true,
+        "macro_public_like": false,
+        "energy_like": false,
+        "environment_like": false,
+        "required_sources": [
+          "nominatim",
+          "overpass",
+          "gtfs_static",
+          "opensky"
+        ],
+        "optional_sources": [
+          "gtfs_realtime",
+          "gtfs_static"
+        ],
+        "used_sources": [
+          "nominatim",
+          "gtfs_realtime",
+          "opensky",
+          "gtfs_static",
+          "overpass",
+          "google_trends",
+          "historical-cache"
+        ],
+        "missing_required_sources": [],
+        "missing_optional_sources": [],
+        "provider_states": [
+          {
+            "source_id": "nominatim",
+            "title": "Nominatim",
+            "category": "geography",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "base_url": "https://nominatim.openstreetmap.org",
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "overpass",
+            "title": "Overpass API",
+            "category": "geography",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "base_url": "https://overpass-api.de/api/interpreter",
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "gtfs_static",
+            "title": "GTFS Static",
+            "category": "mobility",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "feed_count": 1,
+            "notes": [],
+            "required_for_query": true,
+            "optional_for_query": true,
+            "used_in_run": true
+          },
+          {
+            "source_id": "opensky",
+            "title": "OpenSky",
+            "category": "travel",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "auth_mode": "anonymous_public",
+            "base_url": "https://opensky-network.org/api",
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "gtfs_realtime",
+            "title": "GTFS Realtime",
+            "category": "mobility",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "feed_count": 1,
+            "notes": [],
+            "required_for_query": false,
+            "optional_for_query": true,
+            "used_in_run": true
+          },
+          {
+            "source_id": "google_trends",
+            "title": "google trends",
+            "category": "attention",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": false,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "historical-cache",
+            "title": "historical-cache",
+            "category": "runtime",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": false,
+            "optional_for_query": false,
+            "used_in_run": true
+          }
+        ]
+      },
+      "location_structure": {
+        "resolved_place": {
+          "display_name": "Rome, Italy",
+          "lat": 41.8933,
+          "lon": 12.4829,
+          "type": "city"
+        },
+        "poi_context": {
+          "source_id": "overpass",
+          "display_name": "Rome, Italy",
+          "poi_count": 128,
+          "transit_poi_count": 24,
+          "hospitality_poi_count": 38
+        }
+      },
+      "mobility_structure": {
+        "summary": [
+          "Flights in sample: 47",
+          "Transit routes: 132",
+          "Live vehicles: 54"
+        ],
+        "flight_context": {
+          "source_id": "opensky",
+          "aircraft_count": 47,
+          "bbox": {
+            "north": 41.99,
+            "south": 41.79,
+            "east": 12.6,
+            "west": 12.3
+          }
+        },
+        "gtfs_static": {
+          "source_id": "gtfs_static",
+          "feed_label": "Synthetic GTFS Static",
+          "routes": 132,
+          "stops": 1488,
+          "service_rows": 28
+        },
+        "gtfs_realtime": {
+          "source_id": "gtfs_realtime",
+          "feed_label": "Synthetic GTFS Realtime",
+          "trip_updates": 18,
+          "vehicle_positions": 54,
+          "alerts": 3
+        }
+      },
+      "public_data_structure": null
+    },
+    {
+      "cluster": "macro_public",
+      "query": "Inflation in Italy next 12 months",
+      "expectedDomains": [
+        "A.14.macro_economy_and_cycles",
+        "A.11.cost_of_living_and_price_pressure"
+      ],
+      "requiredSources": [
+        "world_bank_api",
+        "eurostat_api",
+        "oecd_api",
+        "fred_api"
+      ],
+      "expectPublicData": true,
+      "primary_domain_id": "A.14.macro_economy_and_cycles",
+      "candidate_domains_top3": [
+        "A.14.macro_economy_and_cycles",
+        "A.11.cost_of_living_and_price_pressure",
+        "A.24.governance_policy_and_public_timeline"
+      ],
+      "top3_hit": true,
+      "used_sources": [
+        "yahoo_finance",
+        "fred_api",
+        "eurostat_api",
+        "oecd_api",
+        "world_bank_api",
+        "google_trends",
+        "historical-cache"
+      ],
+      "required_sources": [
+        "yahoo_finance",
+        "google_trends",
+        "fred_api",
+        "eurostat_api"
+      ],
+      "optional_sources": [
+        "world_bank_api",
+        "oecd_api"
+      ],
+      "missing_required_sources": [],
+      "missing_optional_sources": [],
+      "location_ready": true,
+      "mobility_ready": true,
+      "public_data_ready": true,
+      "source_usage": {
+        "policy_like": false,
+        "market_like": true,
+        "sports_like": false,
+        "geo_like": false,
+        "mobility_like": false,
+        "travel_like": false,
+        "macro_public_like": true,
+        "energy_like": false,
+        "environment_like": false,
+        "required_sources": [
+          "yahoo_finance",
+          "google_trends",
+          "fred_api",
+          "eurostat_api"
+        ],
+        "optional_sources": [
+          "world_bank_api",
+          "oecd_api"
+        ],
+        "used_sources": [
+          "yahoo_finance",
+          "fred_api",
+          "eurostat_api",
+          "oecd_api",
+          "world_bank_api",
+          "google_trends",
+          "historical-cache"
+        ],
+        "missing_required_sources": [],
+        "missing_optional_sources": [],
+        "provider_states": [
+          {
+            "source_id": "yahoo_finance",
+            "title": "yahoo finance",
+            "category": "markets",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "google_trends",
+            "title": "google trends",
+            "category": "attention",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "fred_api",
+            "title": "FRED API",
+            "category": "macro",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "notes": [],
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "eurostat_api",
+            "title": "Eurostat API",
+            "category": "macro",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "base_url": "https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data",
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "world_bank_api",
+            "title": "World Bank Indicators API",
+            "category": "macro",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "base_url": "https://api.worldbank.org/v2",
+            "required_for_query": false,
+            "optional_for_query": true,
+            "used_in_run": true
+          },
+          {
+            "source_id": "oecd_api",
+            "title": "OECD SDMX-JSON API",
+            "category": "macro",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "base_url": "https://stats.oecd.org/SDMX-JSON/data",
+            "required_for_query": false,
+            "optional_for_query": true,
+            "used_in_run": true
+          },
+          {
+            "source_id": "historical-cache",
+            "title": "historical-cache",
+            "category": "runtime",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": false,
+            "optional_for_query": false,
+            "used_in_run": true
+          }
+        ]
+      },
+      "location_structure": null,
+      "mobility_structure": null,
+      "public_data_structure": {
+        "signals": [
+          {
+            "source_id": "world_bank_api",
+            "label": "Synthetic World Bank indicator",
+            "country": "ITA",
+            "latest_value": 2.5,
+            "previous_value": 2.9,
+            "latest_date": "2025"
+          },
+          {
+            "source_id": "eurostat_api",
+            "label": "Synthetic Eurostat baseline",
+            "geography": "IT",
+            "latest_value": 2.4,
+            "previous_value": 2.8
+          },
+          {
+            "source_id": "oecd_api",
+            "label": "Synthetic OECD baseline",
+            "geography": "ITA",
+            "latest_value": 99.3,
+            "previous_value": 99.1
+          },
+          {
+            "series_id": "synthetic_foundation_macro",
+            "label": "Synthetic macro baseline",
+            "latest_value": 2.4,
+            "previous_value": 2.8,
+            "delta": -0.4,
+            "lean": "down"
+          }
+        ]
+      }
+    },
+    {
+      "cluster": "energy",
+      "query": "Oil price regime next 90 days",
+      "expectedDomains": [
+        "A.23.markets_and_asset_regimes",
+        "A.13.energy_and_utilities_markets"
+      ],
+      "requiredSources": [
+        "yahoo_finance",
+        "google_trends",
+        "eia_api"
+      ],
+      "expectPublicData": true,
+      "primary_domain_id": "A.23.markets_and_asset_regimes",
+      "candidate_domains_top3": [
+        "A.13.energy_and_utilities_markets",
+        "A.23.markets_and_asset_regimes",
+        "A.5.food_security_and_staple_prices"
+      ],
+      "top3_hit": true,
+      "used_sources": [
+        "yahoo_finance",
+        "fred_api",
+        "eia_api",
+        "google_trends",
+        "historical-cache"
+      ],
+      "required_sources": [
+        "yahoo_finance",
+        "google_trends",
+        "fred_api",
+        "eia_api"
+      ],
+      "optional_sources": [],
+      "missing_required_sources": [],
+      "missing_optional_sources": [],
+      "location_ready": true,
+      "mobility_ready": true,
+      "public_data_ready": true,
+      "source_usage": {
+        "policy_like": false,
+        "market_like": true,
+        "sports_like": false,
+        "geo_like": false,
+        "mobility_like": false,
+        "travel_like": false,
+        "macro_public_like": false,
+        "energy_like": true,
+        "environment_like": false,
+        "required_sources": [
+          "yahoo_finance",
+          "google_trends",
+          "fred_api",
+          "eia_api"
+        ],
+        "optional_sources": [],
+        "used_sources": [
+          "yahoo_finance",
+          "fred_api",
+          "eia_api",
+          "google_trends",
+          "historical-cache"
+        ],
+        "missing_required_sources": [],
+        "missing_optional_sources": [],
+        "provider_states": [
+          {
+            "source_id": "yahoo_finance",
+            "title": "yahoo finance",
+            "category": "markets",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "google_trends",
+            "title": "google trends",
+            "category": "attention",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "fred_api",
+            "title": "FRED API",
+            "category": "macro",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "notes": [],
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "eia_api",
+            "title": "EIA API",
+            "category": "energy",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "notes": [],
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "historical-cache",
+            "title": "historical-cache",
+            "category": "runtime",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": false,
+            "optional_for_query": false,
+            "used_in_run": true
+          }
+        ]
+      },
+      "location_structure": null,
+      "mobility_structure": null,
+      "public_data_structure": {
+        "signals": [
+          {
+            "series_id": "synthetic_foundation_macro",
+            "label": "Synthetic macro baseline",
+            "latest_value": 2.4,
+            "previous_value": 2.8,
+            "delta": -0.4,
+            "lean": "down"
+          },
+          {
+            "source_id": "eia_api",
+            "label": "Synthetic energy baseline",
+            "latest_value": 81.7,
+            "previous_value": 78.9
+          }
+        ]
+      }
+    },
+    {
+      "cluster": "environment",
+      "query": "Air quality risk in Milan next week",
+      "expectedDomains": [
+        "A.28.public_health_and_environmental_exposure",
+        "A.4.environmental_quality_and_exposure"
+      ],
+      "requiredSources": [
+        "nominatim",
+        "overpass",
+        "openaq"
+      ],
+      "expectLocation": true,
+      "expectPublicData": true,
+      "primary_domain_id": "A.28.public_health_and_environmental_exposure",
+      "candidate_domains_top3": [
+        "A.28.public_health_and_environmental_exposure",
+        "A.4.environment_and_exposure",
+        "A.1.weather_and_atmosphere"
+      ],
+      "top3_hit": true,
+      "used_sources": [
+        "nominatim",
+        "overpass",
+        "openaq",
+        "google_trends",
+        "historical-cache"
+      ],
+      "required_sources": [
+        "nominatim",
+        "overpass",
+        "open_meteo",
+        "rss_allowlist",
+        "google_trends",
+        "openaq"
+      ],
+      "optional_sources": [
+        "wikidata",
+        "openaq"
+      ],
+      "missing_required_sources": [],
+      "missing_optional_sources": [],
+      "location_ready": true,
+      "mobility_ready": true,
+      "public_data_ready": true,
+      "source_usage": {
+        "policy_like": false,
+        "market_like": false,
+        "sports_like": false,
+        "geo_like": true,
+        "mobility_like": false,
+        "travel_like": false,
+        "macro_public_like": false,
+        "energy_like": false,
+        "environment_like": true,
+        "required_sources": [
+          "nominatim",
+          "overpass",
+          "open_meteo",
+          "rss_allowlist",
+          "google_trends",
+          "openaq"
+        ],
+        "optional_sources": [
+          "wikidata",
+          "openaq"
+        ],
+        "used_sources": [
+          "nominatim",
+          "overpass",
+          "openaq",
+          "google_trends",
+          "historical-cache"
+        ],
+        "missing_required_sources": [
+          "open_meteo",
+          "rss_allowlist"
+        ],
+        "missing_optional_sources": [
+          "wikidata"
+        ],
+        "provider_states": [
+          {
+            "source_id": "nominatim",
+            "title": "Nominatim",
+            "category": "geography",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "base_url": "https://nominatim.openstreetmap.org",
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "overpass",
+            "title": "Overpass API",
+            "category": "geography",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "base_url": "https://overpass-api.de/api/interpreter",
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "open_meteo",
+            "title": "open meteo",
+            "category": "weather",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "required_not_used",
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": false
+          },
+          {
+            "source_id": "rss_allowlist",
+            "title": "rss allowlist",
+            "category": "news_attention",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "required_not_used",
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": false
+          },
+          {
+            "source_id": "google_trends",
+            "title": "google trends",
+            "category": "attention",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": true,
+            "optional_for_query": false,
+            "used_in_run": true
+          },
+          {
+            "source_id": "openaq",
+            "title": "OpenAQ",
+            "category": "environment",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "notes": [],
+            "required_for_query": true,
+            "optional_for_query": true,
+            "used_in_run": true
+          },
+          {
+            "source_id": "wikidata",
+            "title": "wikidata",
+            "category": "entity_resolution",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "available",
+            "required_for_query": false,
+            "optional_for_query": true,
+            "used_in_run": false
+          },
+          {
+            "source_id": "historical-cache",
+            "title": "historical-cache",
+            "category": "runtime",
+            "access_profile": "public",
+            "implementation_status": "implemented",
+            "configured": true,
+            "available": true,
+            "status": "used",
+            "required_for_query": false,
+            "optional_for_query": false,
+            "used_in_run": true
+          }
+        ]
+      },
+      "location_structure": {
+        "resolved_place": {
+          "display_name": "Milan, Italy",
+          "lat": 45.4642,
+          "lon": 9.19,
+          "type": "city"
+        },
+        "poi_context": {
+          "source_id": "overpass",
+          "display_name": "Milan, Italy",
+          "poi_count": 128,
+          "transit_poi_count": 24,
+          "hospitality_poi_count": 38
+        }
+      },
+      "mobility_structure": null,
+      "public_data_structure": {
+        "signals": [
+          {
+            "source_id": "openaq",
+            "country": "IT",
+            "location_count": 6
+          }
+        ]
+      }
+    }
+  ]
+}

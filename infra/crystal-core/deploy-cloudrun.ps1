@@ -90,6 +90,46 @@ function Get-GcloudOptionalValue {
   }
 }
 
+function Invoke-GcloudBestEffort {
+  param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Args)
+  try {
+    Invoke-GcloudChecked @Args
+    return $true
+  } catch {
+    Write-Warning ($_ | Out-String).Trim()
+    return $false
+  }
+}
+
+function Grant-ArtifactRegistryReader {
+  param(
+    [string]$Member,
+    [string]$RepositoryName,
+    [string]$Location,
+    [string]$Project
+  )
+
+  if ([string]::IsNullOrWhiteSpace($Member)) {
+    return
+  }
+
+  $repoBindingGranted = Invoke-GcloudBestEffort artifacts repositories add-iam-policy-binding $RepositoryName `
+    --location $Location `
+    --project $Project `
+    --member $Member `
+    --role "roles/artifactregistry.reader"
+
+  if ($repoBindingGranted) {
+    return
+  }
+
+  Write-Warning "Falling back to project-level Artifact Registry reader binding for $Member."
+  Invoke-GcloudChecked projects add-iam-policy-binding $Project `
+    --member $Member `
+    --role "roles/artifactregistry.reader" `
+    --condition=None
+}
+
 function New-EnvYamlFile {
   param(
     [string]$Path,
@@ -108,6 +148,7 @@ function New-EnvYamlFile {
 $gcloud = Get-GcloudExecutable
 $repoRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path))
 $imageUri = "$Region-docker.pkg.dev/$ProjectId/cloud-run-source-deploy/$ImageName"
+$projectNumber = Get-GcloudOptionalValue projects describe $ProjectId --format "value(projectNumber)" --quiet
 
 if ([string]::IsNullOrWhiteSpace($RunnerServiceAccountEmail)) {
   throw "RunnerServiceAccountEmail obbligatoria per Cloud Tasks -> Cloud Run."
@@ -120,6 +161,22 @@ $repoName = "cloud-run-source-deploy"
 $repoExists = Get-GcloudOptionalValue artifacts repositories describe $repoName --location $Region --project $ProjectId --format "value(name)" --quiet
 if ([string]::IsNullOrWhiteSpace($repoExists)) {
   Invoke-GcloudChecked artifacts repositories create $repoName --repository-format docker --location $Region --project $ProjectId
+}
+
+if (-not [string]::IsNullOrWhiteSpace($projectNumber)) {
+  $cloudRunServiceAgent = "service-$projectNumber@serverless-robot-prod.iam.gserviceaccount.com"
+  Grant-ArtifactRegistryReader `
+    -Member "serviceAccount:$cloudRunServiceAgent" `
+    -RepositoryName $repoName `
+    -Location $Region `
+    -Project $ProjectId
+  if (-not [string]::IsNullOrWhiteSpace($RunnerServiceAccountEmail)) {
+    Grant-ArtifactRegistryReader `
+      -Member "serviceAccount:$RunnerServiceAccountEmail" `
+      -RepositoryName $repoName `
+      -Location $Region `
+      -Project $ProjectId
+  }
 }
 
 $queueExists = Get-GcloudOptionalValue tasks queues describe $TaskQueueName --location $Region --project $ProjectId --format "value(name)" --quiet

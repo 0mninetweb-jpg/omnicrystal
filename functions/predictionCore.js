@@ -1,4 +1,7 @@
 const { GENERAL_FORECAST_DOMAIN, SPORTS_MATCH_OUTCOMES_DOMAIN, CATALOG_DOMAINS, getDomain } = require("./catalogRegistry");
+const { computeSportsContractState, sportsB36LiveEnabled } = require("./crystalCore/sportsState");
+const { buildSportsDecisionFrame, normalizeSportsDecisionState } = require("./crystalCore/sportsDecision");
+const { buildGenericDecisionKernel } = require("./crystalCore/decisionKernel");
 
 const SPORTS_PROBABILITY_MODE_DOMAIN = "B.3.6.sports_outcomes_probability_mode";
 
@@ -3036,15 +3039,57 @@ function finalizeScorecard(rawScorecard = {}, evidenceBundle = {}, queryPlan = {
       (Array.isArray(evidenceBundle?.source_usage?.missing_required_sources) &&
         evidenceBundle.source_usage.missing_required_sources.length > 0)
   );
-  const sportsGrounded =
-    evidenceBundle?.sports_grounding?.sports_grounded === true ||
-    (evidenceBundle?.sports_grounding?.fixture_resolved === true && evidenceBundle?.sports_grounding?.provider_configured === true);
-  const sportsPickState = safeText(
-    evidenceBundle?.sports_grounding?.sports_pick_state,
-    sportsGrounded ? "grounded_lean" : "hold"
-  );
+  const sportsContractState = computeSportsContractState({
+    sportsGrounding: evidenceBundle?.sports_grounding,
+    semanticOverlay: evidenceBundle?.sports_semantic_overlay,
+  });
+  const baseSportsDecision = buildSportsDecisionFrame({
+    sportsGrounding: evidenceBundle?.sports_grounding,
+    sportsMarketOverlay: evidenceBundle?.sports_market_overlay,
+    sportsSemanticOverlay: evidenceBundle?.sports_semantic_overlay,
+    sportsContractState,
+    domainId,
+  });
+  const sportsDecisionState = normalizeSportsDecisionState(rawScorecard?.sports_decision_state, baseSportsDecision.decision_state);
+  const sportsDecision = {
+    ...baseSportsDecision,
+    decision_state: sportsDecisionState,
+    decision_reason: safeText(rawScorecard?.sports_decision_reason, baseSportsDecision.decision_reason),
+    no_bet_reason: safeText(rawScorecard?.sports_no_bet_reason, safeText(baseSportsDecision.no_bet_reason)) || null,
+    model_probabilities: rawScorecard?.sports_model_probabilities || baseSportsDecision.model_probabilities || null,
+    market_probabilities: rawScorecard?.sports_market_probabilities || baseSportsDecision.market_probabilities || null,
+    fair_prices: rawScorecard?.sports_fair_prices || baseSportsDecision.fair_prices || null,
+    edge_delta: rawScorecard?.sports_edge_delta || baseSportsDecision.edge_delta || null,
+    upset_rate:
+      Number.isFinite(Number(rawScorecard?.sports_upset_rate))
+        ? Number(rawScorecard.sports_upset_rate)
+        : baseSportsDecision.upset_rate,
+    draw_volatility:
+      Number.isFinite(Number(rawScorecard?.sports_draw_volatility))
+        ? Number(rawScorecard.sports_draw_volatility)
+        : baseSportsDecision.draw_volatility,
+    fragility_score:
+      Number.isFinite(Number(rawScorecard?.sports_fragility_score))
+        ? Number(rawScorecard.sports_fragility_score)
+        : baseSportsDecision.fragility_score,
+    flip_conditions: uniqueStrings(
+      []
+        .concat(Array.isArray(rawScorecard?.sports_flip_conditions) ? rawScorecard.sports_flip_conditions : [])
+        .concat(Array.isArray(baseSportsDecision.flip_conditions) ? baseSportsDecision.flip_conditions : [])
+    ).slice(0, 4),
+    simulation_confidence:
+      Number.isFinite(Number(rawScorecard?.sports_simulation_confidence))
+        ? Number(rawScorecard.sports_simulation_confidence)
+        : baseSportsDecision.simulation_confidence,
+    model_favorite: safeText(rawScorecard?.sports_model_favorite, safeText(baseSportsDecision.model_favorite)) || null,
+    market_favorite: safeText(rawScorecard?.sports_market_favorite, safeText(baseSportsDecision.market_favorite)) || null,
+    favorite_but_no_bet:
+      rawScorecard?.sports_favorite_but_no_bet === true || baseSportsDecision.favorite_but_no_bet === true,
+  };
+  const sportsGrounded = sportsContractState.sportsGrounded;
+  const sportsPickState = sportsContractState.sportsPickState;
   const sportsPublishGateReady =
-    evidenceBundle?.sports_grounding?.publish_gate_ready === true ||
+    sportsContractState.sportsPublishGateReady ||
     (evidenceBundle?.sports_grounding?.publish_gate_ready == null && Boolean(evidenceBundle?.sports_grounding?.parity_ready));
   const providerRequiredNoPick =
     hardStop &&
@@ -3140,6 +3185,15 @@ function finalizeScorecard(rawScorecard = {}, evidenceBundle = {}, queryPlan = {
   if (binaryContract && !recommendedPosture) {
     recommendedPosture = "Treat this as a bounded directional read and monitor the flip conditions before acting more aggressively.";
   }
+  if (sportsDecision.decision_state === "no_bet" && sportsGrounded) {
+    recommendedPosture =
+      sportsDecision.no_bet_reason ||
+      "Favorite does not automatically mean edge. Crystal would stand down here instead of forcing a bet.";
+  } else if (sportsDecision.decision_state === "edge" && sportsGrounded) {
+    recommendedPosture = sportsDecision.decision_reason || recommendedPosture;
+  } else if (sportsDecision.decision_state === "lean" && sportsGrounded && !recommendedPosture) {
+    recommendedPosture = "Treat this as a lean, not a full edge, and keep watching the flip conditions.";
+  }
 
   if (!primaryCall) {
     publicationState = "blocked";
@@ -3225,6 +3279,9 @@ function finalizeScorecard(rawScorecard = {}, evidenceBundle = {}, queryPlan = {
       sportsPickState === "grounded_lean" ? "sports_grounded_lean" : "",
       sportsPickState === "publishable_controlled" ? "sports_publishable_controlled" : "",
       sportsPickState === "publishable_full" ? "sports_publishable_full" : "",
+      sportsDecision.decision_state === "no_bet" ? "sports_no_bet" : "",
+      sportsDecision.decision_state === "lean" ? "sports_lean" : "",
+      sportsDecision.decision_state === "edge" ? "sports_edge" : "",
       requiredSourceGap ? "missing_required_sources" : "",
       binaryQuestion && !binaryContract ? "missing_binary_contract" : "",
       missingPersonalInputs ? "missing_personal_inputs" : "",
@@ -3244,6 +3301,15 @@ function finalizeScorecard(rawScorecard = {}, evidenceBundle = {}, queryPlan = {
         : "",
       sportsPickState === "grounded_lean" && sportsGrounded
         ? "Crystal grounded the fixture and can surface a lean, but the sports evidence stack is still only partially converged."
+        : "",
+      sportsDecision.decision_state === "no_bet" && sportsGrounded
+        ? safeText(sportsDecision.no_bet_reason, "Crystal sees the favorite, but the market is already pricing it too tightly for a real edge.")
+        : "",
+      sportsDecision.decision_state === "edge" && sportsGrounded
+        ? safeText(sportsDecision.decision_reason, "Crystal sees a meaningful sports edge after comparing the model with the market frame.")
+        : "",
+      sportsDecision.decision_state === "lean" && sportsGrounded
+        ? safeText(sportsDecision.decision_reason, "Crystal sees a modest sports lean, but not a full edge.")
         : "",
       providerRequiredNoPick && safeText(evidenceBundle?.sports_grounding?.overlay_blocker_reason)
         ? `Sports overlay blocker: ${safeText(evidenceBundle.sports_grounding.overlay_blocker_reason).replace(/_/g, " ")}.`
@@ -3267,6 +3333,33 @@ function finalizeScorecard(rawScorecard = {}, evidenceBundle = {}, queryPlan = {
       publicationState === "published" ? "The evidence stack is sufficiently converged for a public card." : "",
     ].filter(Boolean)
   ).slice(0, 5);
+  const rawSportsbookReadinessState =
+    safeText(
+      evidenceBundle?.sports_grounding?.sportsbook_readiness_state,
+      safeText(evidenceBundle?.sports_market_overlay?.sportsbook_readiness_state)
+    ) || null;
+  const normalizedSportsbookReadinessState =
+    domainId === SPORTS_PROBABILITY_MODE_DOMAIN
+      ? sportsPublishGateReady
+        ? sportsB36LiveEnabled()
+          ? "probability_mode_live"
+          : "probability_mode_preview"
+        : sportsGrounded && sportsPickState === "grounded_lean"
+          ? "probability_mode_preview"
+          : rawSportsbookReadinessState || "benchmark_only"
+      : rawSportsbookReadinessState;
+  const whaleMode = buildGenericDecisionKernel({
+    domainId,
+    normalizedQuery: queryPlan,
+    scorecard: {
+      binary_contract: providerRequiredNoPick ? null : binaryContract,
+      probability_split: providerRequiredNoPick ? null : probabilitySplit,
+      invalidators,
+      publication_state: publicationState,
+    },
+    evidenceBundle,
+    sportsDecision,
+  });
 
   return {
     primary_call: primaryCall,
@@ -3280,6 +3373,63 @@ function finalizeScorecard(rawScorecard = {}, evidenceBundle = {}, queryPlan = {
     historical_anchors: historicalAnchors,
     why_this_side: whyThisSide,
     recommended_posture: recommendedPosture,
+    decision_state: safeText(whaleMode?.decision_state) || null,
+    decision_reason: safeText(whaleMode?.decision_reason) || null,
+    reference_source_class: safeText(whaleMode?.reference_source_class, "none") || "none",
+    reference_probability:
+      whaleMode?.reference_probability == null ? null : Number(whaleMode.reference_probability),
+    edge_delta: whaleMode?.edge_delta == null ? null : Number(whaleMode.edge_delta),
+    fragility_score: whaleMode?.fragility_score == null ? null : Number(whaleMode.fragility_score),
+    no_action_reason: safeText(whaleMode?.no_action_reason) || null,
+    flip_conditions: Array.isArray(whaleMode?.flip_conditions) ? whaleMode.flip_conditions : null,
+    simulation_confidence:
+      whaleMode?.simulation_confidence == null ? null : Number(whaleMode.simulation_confidence),
+    sports_decision_state: sportsDecision.decision_state,
+    sports_decision_reason: sportsDecision.decision_reason,
+    sports_no_bet_reason: sportsDecision.no_bet_reason,
+    sports_model_probabilities: sportsDecision.model_probabilities,
+    sports_market_probabilities: sportsDecision.market_probabilities,
+    sports_edge_delta: sportsDecision.edge_delta,
+    sports_fair_prices: sportsDecision.fair_prices,
+    sports_fragility_score: sportsDecision.fragility_score,
+    sports_simulation_confidence: sportsDecision.simulation_confidence,
+    sports_upset_rate: sportsDecision.upset_rate,
+    sports_draw_volatility: sportsDecision.draw_volatility,
+    sports_flip_conditions: sportsDecision.flip_conditions,
+    sports_model_favorite: sportsDecision.model_favorite,
+    sports_market_favorite: sportsDecision.market_favorite,
+    sports_favorite_but_no_bet: sportsDecision.favorite_but_no_bet,
+    sports_fixture_kind: safeText(evidenceBundle?.sports_grounding?.sports_fixture_kind) || null,
+    sports_fixture_candidate_score: Number.isFinite(Number(evidenceBundle?.sports_grounding?.sports_fixture_candidate_score))
+      ? Number(evidenceBundle.sports_grounding.sports_fixture_candidate_score)
+      : null,
+    sports_fixture_resolution_reason: safeText(evidenceBundle?.sports_grounding?.sports_fixture_resolution_reason) || null,
+    sports_fixture_date_match: evidenceBundle?.sports_grounding?.sports_fixture_date_match === true,
+    sports_fixture_competition_match:
+      evidenceBundle?.sports_grounding?.sports_fixture_competition_match == null
+        ? null
+        : evidenceBundle.sports_grounding.sports_fixture_competition_match === true,
+    sports_market_source:
+      safeText(evidenceBundle?.sports_grounding?.sports_market_source, safeText(evidenceBundle?.sports_market_overlay?.sports_market_source)) || null,
+    sports_market_source_class:
+      safeText(
+        evidenceBundle?.sports_grounding?.sports_market_source_class,
+        safeText(evidenceBundle?.sports_market_overlay?.sports_market_source_class, "none")
+      ) || "none",
+    sports_market_quality_tier:
+      safeText(
+        evidenceBundle?.sports_grounding?.sports_market_quality_tier,
+        safeText(evidenceBundle?.sports_market_overlay?.sports_market_quality_tier, "none")
+      ) || "none",
+    sports_market_snapshot:
+      evidenceBundle?.sports_grounding?.sports_market_snapshot ||
+      evidenceBundle?.sports_market_overlay?.sports_market_snapshot ||
+      null,
+    sports_market_overround:
+      evidenceBundle?.sports_grounding?.sports_market_overround == null
+        ? evidenceBundle?.sports_market_overlay?.sports_market_overround ?? null
+        : Number(evidenceBundle.sports_grounding.sports_market_overround),
+    whale_mode: whaleMode || null,
     publication_basis: {
       coverage_score: evidenceQuality.coverage_score,
       freshness_score: evidenceQuality.freshness_score,
@@ -3308,14 +3458,25 @@ function finalizeScorecard(rawScorecard = {}, evidenceBundle = {}, queryPlan = {
       required_source_gap: requiredSourceGap,
       hard_stop: hardStop,
       provider_required_no_pick: providerRequiredNoPick,
+      decision_state: safeText(whaleMode?.decision_state) || null,
+      decision_reason: safeText(whaleMode?.decision_reason) || null,
+      reference_source_class: safeText(whaleMode?.reference_source_class, "none") || "none",
+      reference_probability:
+        whaleMode?.reference_probability == null ? null : Number(whaleMode.reference_probability),
+      edge_delta: whaleMode?.edge_delta == null ? null : Number(whaleMode.edge_delta),
+      fragility_score: whaleMode?.fragility_score == null ? null : Number(whaleMode.fragility_score),
+      no_action_reason: safeText(whaleMode?.no_action_reason) || null,
+      flip_conditions: Array.isArray(whaleMode?.flip_conditions) ? whaleMode.flip_conditions : null,
+      simulation_confidence:
+        whaleMode?.simulation_confidence == null ? null : Number(whaleMode.simulation_confidence),
       sports_pick_state: sportsPickState || null,
       sports_grounded: sportsGrounded,
-      fixture_window_state: safeText(evidenceBundle?.sports_grounding?.fixture_window_state) || null,
-      fixture_window_open: evidenceBundle?.sports_grounding?.fixture_window_open === true,
-      sports_extraction_provenance: Array.isArray(evidenceBundle?.sports_grounding?.sports_extraction_provenance)
-        ? evidenceBundle.sports_grounding.sports_extraction_provenance
+      fixture_window_state: safeText(sportsContractState.fixtureWindowState) || null,
+      fixture_window_open: sportsContractState.fixtureWindowOpen === true,
+      sports_extraction_provenance: Array.isArray(sportsContractState.sportsExtractionProvenance)
+        ? sportsContractState.sportsExtractionProvenance
         : null,
-      sports_confidence_tier: safeText(evidenceBundle?.sports_grounding?.sports_confidence_tier) || null,
+      sports_confidence_tier: safeText(sportsContractState.sportsConfidenceTier) || null,
       sports_semantic_ready: evidenceBundle?.sports_grounding?.semantic_ready === true,
       sports_overlay_confidence: Number.isFinite(Number(evidenceBundle?.sports_grounding?.overlay_confidence))
         ? Number(evidenceBundle.sports_grounding.overlay_confidence)
@@ -3334,8 +3495,52 @@ function finalizeScorecard(rawScorecard = {}, evidenceBundle = {}, queryPlan = {
       narrative_hype_score: Number.isFinite(Number(evidenceBundle?.sports_grounding?.narrative_hype_score))
         ? Number(evidenceBundle.sports_grounding.narrative_hype_score)
         : evidenceBundle?.sports_market_overlay?.narrative_hype_score ?? null,
-      sportsbook_readiness_state:
-        safeText(evidenceBundle?.sports_grounding?.sportsbook_readiness_state, safeText(evidenceBundle?.sports_market_overlay?.sportsbook_readiness_state)) || null,
+      sportsbook_readiness_state: normalizedSportsbookReadinessState,
+      sports_decision_state: sportsDecision.decision_state,
+      sports_decision_reason: sportsDecision.decision_reason || null,
+      sports_no_bet_reason: sportsDecision.no_bet_reason,
+      sports_model_probabilities: sportsDecision.model_probabilities,
+      sports_market_probabilities: sportsDecision.market_probabilities,
+      sports_edge_delta: sportsDecision.edge_delta,
+      sports_fair_prices: sportsDecision.fair_prices,
+      sports_fragility_score: sportsDecision.fragility_score,
+      sports_simulation_confidence: sportsDecision.simulation_confidence,
+      sports_upset_rate: sportsDecision.upset_rate,
+      sports_draw_volatility: sportsDecision.draw_volatility,
+      sports_flip_conditions: sportsDecision.flip_conditions,
+      sports_model_favorite: sportsDecision.model_favorite,
+      sports_market_favorite: sportsDecision.market_favorite,
+      sports_favorite_but_no_bet: sportsDecision.favorite_but_no_bet,
+      sports_fixture_kind: safeText(evidenceBundle?.sports_grounding?.sports_fixture_kind) || null,
+      sports_fixture_candidate_score: Number.isFinite(Number(evidenceBundle?.sports_grounding?.sports_fixture_candidate_score))
+        ? Number(evidenceBundle.sports_grounding.sports_fixture_candidate_score)
+        : null,
+      sports_fixture_resolution_reason: safeText(evidenceBundle?.sports_grounding?.sports_fixture_resolution_reason) || null,
+      sports_fixture_date_match: evidenceBundle?.sports_grounding?.sports_fixture_date_match === true,
+      sports_fixture_competition_match:
+        evidenceBundle?.sports_grounding?.sports_fixture_competition_match == null
+          ? null
+          : evidenceBundle.sports_grounding.sports_fixture_competition_match === true,
+      sports_market_source:
+        safeText(evidenceBundle?.sports_grounding?.sports_market_source, safeText(evidenceBundle?.sports_market_overlay?.sports_market_source)) || null,
+      sports_market_source_class:
+        safeText(
+          evidenceBundle?.sports_grounding?.sports_market_source_class,
+          safeText(evidenceBundle?.sports_market_overlay?.sports_market_source_class, "none")
+        ) || "none",
+      sports_market_quality_tier:
+        safeText(
+          evidenceBundle?.sports_grounding?.sports_market_quality_tier,
+          safeText(evidenceBundle?.sports_market_overlay?.sports_market_quality_tier, "none")
+        ) || "none",
+      sports_market_snapshot:
+        evidenceBundle?.sports_grounding?.sports_market_snapshot ||
+        evidenceBundle?.sports_market_overlay?.sports_market_snapshot ||
+        null,
+      sports_market_overround:
+        evidenceBundle?.sports_grounding?.sports_market_overround == null
+          ? evidenceBundle?.sports_market_overlay?.sports_market_overround ?? null
+          : Number(evidenceBundle.sports_grounding.sports_market_overround),
       domain_state: domainConfig.current_state || "limited",
       reasons: publicationReasons,
       notes: publicationNotes,

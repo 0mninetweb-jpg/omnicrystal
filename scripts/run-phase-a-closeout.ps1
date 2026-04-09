@@ -4,6 +4,8 @@ param(
   [string]$LocalApiBase = "https://api-paaqyfwena-ew.a.run.app",
   [string]$ParityMarkdownPath = "docs/parity-report-2026-03-24.md",
   [string]$ParityJsonPath = "docs/parity-report-2026-03-24.json",
+  [string]$SportsProbeJsonPath = "",
+  [string]$SportsCalibrationJsonPath = "",
   [string]$OutputMarkdownPath = "",
   [string]$OutputJsonPath = ""
 )
@@ -183,6 +185,14 @@ function Invoke-PhaseADeploy {
 $envPath = Resolve-RepoPath $EnvFilePath
 $parityMarkdownFullPath = Resolve-RepoPath $ParityMarkdownPath
 $parityJsonFullPath = Resolve-RepoPath $ParityJsonPath
+if ([string]::IsNullOrWhiteSpace($SportsProbeJsonPath)) {
+  $SportsProbeJsonPath = "docs/sports-probe-$reportDate.json"
+}
+if ([string]::IsNullOrWhiteSpace($SportsCalibrationJsonPath)) {
+  $SportsCalibrationJsonPath = "docs/sports-calibration-$reportDate.json"
+}
+$sportsProbeJsonFullPath = Resolve-RepoPath $SportsProbeJsonPath
+$sportsCalibrationJsonFullPath = Resolve-RepoPath $SportsCalibrationJsonPath
 $outputMarkdownFullPath = Resolve-RepoPath $OutputMarkdownPath
 $outputJsonFullPath = Resolve-RepoPath $OutputJsonPath
 
@@ -214,13 +224,15 @@ $steps += Invoke-Step -Name "report:markets-assets" -Script { npm.cmd run report
 $steps += Invoke-Step -Name "check:provider-foundation" -Script { npm.cmd run check:provider-foundation }
 $steps += Invoke-Step -Name "report:provider-foundation" -Script { npm.cmd run report:provider-foundation }
 $steps += Invoke-Step -Name "check:domain-quality-grid" -Script { npm.cmd run check:domain-quality-grid }
-$steps += Invoke-Step -Name "report:domain-quality-grid" -Script { npm.cmd run report:domain-quality-grid }
 $steps += Invoke-Step -Name "parity:direct-api" -Script {
   powershell -ExecutionPolicy Bypass -File (Join-Path $repoRoot "scripts/run-parity-direct-api.ps1") `
     -LocalApiBase $LocalApiBase `
     -OutputMarkdownPath $parityMarkdownFullPath `
-    -OutputJsonPath $parityJsonFullPath
+    -OutputJsonPath $parityJsonFullPath `
+    -SportsProbeOutputPath $sportsProbeJsonFullPath
 }
+$steps += Invoke-Step -Name "report:sports-calibration" -Script { npm.cmd run report:sports-calibration }
+$steps += Invoke-Step -Name "report:domain-quality-grid" -Script { npm.cmd run report:domain-quality-grid }
 
 $health = $null
 $healthError = ""
@@ -235,6 +247,8 @@ $marketsReport = Read-JsonFile -Path (Join-Path $repoRoot "docs/markets-quality-
 $providerReport = Read-JsonFile -Path (Join-Path $repoRoot "docs/provider-foundation-report-$reportDate.json")
 $domainMatrixReport = Read-JsonFile -Path (Join-Path $repoRoot "docs/domain-quality-matrix-$reportDate.json")
 $parityReport = Read-JsonFile -Path $parityJsonFullPath
+$sportsProbeReport = Read-JsonFile -Path $sportsProbeJsonFullPath
+$sportsCalibrationReport = Read-JsonFile -Path $sportsCalibrationJsonFullPath
 $week4DecisionPath = Join-Path $repoRoot "docs/week4-canary-decision-2026-03-26.md"
 $signedInQaCertified = Test-SignedInQaCertified -Path $week4DecisionPath
 
@@ -253,11 +267,35 @@ $theSportsDbState = Get-ProviderState -ProviderStates $providerStates -SourceId 
 $apiFootballState = Get-ProviderState -ProviderStates $providerStates -SourceId "api_football_optional"
 
 $rolloutFrozen = ($null -ne $health -and $health.crystalCore.rollout.signed_in_percent -eq 0 -and $health.crystalCore.rollout.guest_percent -eq 0)
-$sportsProbeReady = ($null -ne $parityReport -and [bool]$parityReport.summary.sports_probe_ready)
-$sportsProbabilityProbeReady = ($null -ne $parityReport -and [bool]$parityReport.summary.sports_probability_probe_ready)
-$missingBinaryContractRate = if ($null -ne $parityReport) { [double]$parityReport.summary.missing_binary_contract_rate } else { -1 }
-$winnerMismatchRate = if ($null -ne $parityReport) { [double]$parityReport.summary.binary_winner_mismatch_rate } else { -1 }
-$parityGreen = ($null -ne $parityReport -and $sportsProbeReady -and $sportsProbabilityProbeReady -and $missingBinaryContractRate -eq 0 -and $winnerMismatchRate -eq 0)
+$sportsProbeSummary = if ($null -ne $sportsProbeReport) { $sportsProbeReport.summary } else { $null }
+$sportsCalibrationSummary = if ($null -ne $sportsCalibrationReport) { $sportsCalibrationReport.summary } else { $null }
+$sportsCalibrationStatus =
+  if ($null -ne $sportsCalibrationReport -and -not [string]::IsNullOrWhiteSpace([string]$sportsCalibrationReport.artifact_status)) { [string]$sportsCalibrationReport.artifact_status }
+  elseif ($null -ne $sportsCalibrationSummary -and -not [string]::IsNullOrWhiteSpace([string]$sportsCalibrationSummary.artifact_status)) { [string]$sportsCalibrationSummary.artifact_status }
+  elseif ($null -ne $sportsCalibrationSummary) { "warming_up" }
+  else { "unavailable" }
+$sportsProbeReady =
+  if ($null -ne $sportsProbeSummary) { [bool]$sportsProbeSummary.a29_ready }
+  elseif ($null -ne $parityReport) { [bool]$parityReport.summary.sports_probe_ready }
+  else { $false }
+$sportsProbabilityProbeReady =
+  if ($null -ne $sportsProbeSummary) { [bool]$sportsProbeSummary.b36_ready }
+  elseif ($null -ne $parityReport) { [bool]$parityReport.summary.sports_probability_probe_ready }
+  else { $false }
+$missingBinaryContractRate =
+  if ($null -ne $sportsProbeSummary -and $null -ne $sportsProbeSummary.missing_binary_contract_rate) { [double]$sportsProbeSummary.missing_binary_contract_rate }
+  elseif ($null -ne $parityReport) { [double]$parityReport.summary.missing_binary_contract_rate }
+  else { -1 }
+$winnerMismatchRate =
+  if ($null -ne $sportsProbeSummary -and $null -ne $sportsProbeSummary.winner_mismatch_rate) { [double]$sportsProbeSummary.winner_mismatch_rate }
+  elseif ($null -ne $parityReport) { [double]$parityReport.summary.binary_winner_mismatch_rate }
+  else { -1 }
+$parityGreen =
+  if ($null -ne $sportsProbeSummary) {
+    [bool]$sportsProbeSummary.local_remote_green -and $sportsProbeReady -and $sportsProbabilityProbeReady -and $missingBinaryContractRate -eq 0 -and $winnerMismatchRate -eq 0
+  } else {
+    ($null -ne $parityReport -and $sportsProbeReady -and $sportsProbabilityProbeReady -and $missingBinaryContractRate -eq 0 -and $winnerMismatchRate -eq 0)
+  }
 $fredAvailable = ($null -ne $fredState -and [bool]$fredState.available)
 $gtfsStaticReady = ($null -ne $gtfsStaticState -and [bool]$gtfsStaticState.available -and [int]$gtfsStaticState.feed_count -gt 0)
 $gtfsRealtimeReady = ($null -ne $gtfsRealtimeState -and [bool]$gtfsRealtimeState.available -and [int]$gtfsRealtimeState.feed_count -gt 0)
@@ -301,10 +339,24 @@ $gateRows = @(
   [pscustomobject]@{
     gate = "Sports parity closed"
     status = Get-GateStatus $parityGreen
-    notes = if ($null -ne $parityReport) {
-      "winner_mismatch_rate=$winnerMismatchRate, missing_binary_contract_rate=$missingBinaryContractRate, a29_ready=$sportsProbeReady, b36_ready=$sportsProbabilityProbeReady"
+    notes = if ($null -ne $sportsProbeSummary) {
+      "probe_artifact=$sportsProbeJsonFullPath, winner_mismatch_rate=$winnerMismatchRate, missing_binary_contract_rate=$missingBinaryContractRate, a29_ready=$sportsProbeReady, b36_ready=$sportsProbabilityProbeReady"
+    } elseif ($null -ne $parityReport) {
+      "parity_summary_fallback, winner_mismatch_rate=$winnerMismatchRate, missing_binary_contract_rate=$missingBinaryContractRate, a29_ready=$sportsProbeReady, b36_ready=$sportsProbabilityProbeReady"
     } else {
       "Parity report not available."
+    }
+  },
+  [pscustomobject]@{
+    gate = "Sports calibration artifact"
+    status =
+      if ($sportsCalibrationStatus -eq "active") { "Green" }
+      elseif ($sportsCalibrationStatus -eq "warming_up") { "Info" }
+      else { "Blocked" }
+    notes = if ($null -ne $sportsCalibrationSummary) {
+      "status=$sportsCalibrationStatus, sample_size=$($sportsCalibrationSummary.sample_size), brier_score=$($sportsCalibrationSummary.brier_score), log_loss=$($sportsCalibrationSummary.log_loss), no_bet_rate=$($sportsCalibrationSummary.no_bet_rate)"
+    } else {
+      "Sports calibration artifact status=$sportsCalibrationStatus."
     }
   },
   [pscustomobject]@{
@@ -388,10 +440,26 @@ $report = [ordered]@{
   }
   gates = [ordered]@{
     sports_parity_closed = $parityGreen
+    sports_probe_artifact = if (Test-Path $sportsProbeJsonFullPath) { $sportsProbeJsonFullPath } else { $null }
+    sports_calibration_artifact = if (Test-Path $sportsCalibrationJsonFullPath) { $sportsCalibrationJsonFullPath } else { $null }
+    sports_calibration_status = $sportsCalibrationStatus
     sports_probe_ready = $sportsProbeReady
     sports_probability_probe_ready = $sportsProbabilityProbeReady
     winner_mismatch_rate = if ($winnerMismatchRate -lt 0) { $null } else { $winnerMismatchRate }
     missing_binary_contract_rate = if ($missingBinaryContractRate -lt 0) { $null } else { $missingBinaryContractRate }
+    sports_local_remote_green = if ($null -ne $sportsProbeSummary) { [bool]$sportsProbeSummary.local_remote_green } else { $null }
+    sports_fixture_resolution_failures = if ($null -ne $sportsProbeSummary) { [int]$sportsProbeSummary.fixture_resolution_failures } else { $null }
+    sports_entity_alignment_failures = if ($null -ne $sportsProbeSummary) { [int]$sportsProbeSummary.entity_alignment_failures } else { $null }
+    sports_stale_evidence_failures = if ($null -ne $sportsProbeSummary) { [int]$sportsProbeSummary.stale_evidence_failures } else { $null }
+    sports_calibration_sample_size = if ($null -ne $sportsCalibrationSummary) { [int]$sportsCalibrationSummary.sample_size } else { $null }
+    sports_calibration_brier_score = if ($null -ne $sportsCalibrationSummary) { $sportsCalibrationSummary.brier_score } else { $null }
+    sports_calibration_log_loss = if ($null -ne $sportsCalibrationSummary) { $sportsCalibrationSummary.log_loss } else { $null }
+    sports_no_bet_rate = if ($null -ne $sportsCalibrationSummary) { $sportsCalibrationSummary.no_bet_rate } else { $null }
+    sports_favorite_vs_edge_confusion_rate = if ($null -ne $sportsCalibrationSummary) { $sportsCalibrationSummary.favorite_vs_edge_confusion_rate } else { $null }
+    sports_calibration_statistically_mature =
+      if ($null -ne $sportsCalibrationSummary -and $null -ne $sportsCalibrationSummary.statistically_mature) { [bool]$sportsCalibrationSummary.statistically_mature }
+      elseif ($sportsCalibrationStatus -eq "active") { $true }
+      else { $false }
     fred_api_available = $fredAvailable
     gtfs_static_ready = $gtfsStaticReady
     gtfs_realtime_ready = $gtfsRealtimeReady

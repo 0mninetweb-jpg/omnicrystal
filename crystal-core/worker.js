@@ -18,14 +18,20 @@ const runtime = createCrystalCoreRuntime({
 async function main() {
   const mode = process.env.CRYSTAL_CORE_EVAL_MODE || "resolution";
   const lookbackDays = process.env.CRYSTAL_CORE_EVAL_LOOKBACK_DAYS ? Number(process.env.CRYSTAL_CORE_EVAL_LOOKBACK_DAYS) : undefined;
+  const backfillLookbackDays = process.env.CRYSTAL_CORE_EVAL_BACKFILL_LOOKBACK_DAYS
+    ? Number(process.env.CRYSTAL_CORE_EVAL_BACKFILL_LOOKBACK_DAYS)
+    : undefined;
   const limit = process.env.CRYSTAL_CORE_EVAL_LIMIT ? Number(process.env.CRYSTAL_CORE_EVAL_LIMIT) : undefined;
   const reportType = process.env.CRYSTAL_CORE_EVAL_REPORT_TYPE || undefined;
+  const outputDate = process.env.CRYSTAL_CORE_EVAL_OUTPUT_DATE || undefined;
 
   const result = await runtime.runOfflineEvaluationMode({
     mode,
     lookbackDays,
+    backfillLookbackDays,
     limit,
     reportType,
+    outputDate,
   });
 
   console.log(JSON.stringify(result, null, 2));
