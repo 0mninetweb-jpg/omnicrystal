@@ -1,7 +1,7 @@
 # Appwrite Parity Gate
 
-- Generated: 2026-04-10T16:47:46.456Z
-- Site URL: https://69d8df7baadccbb43130.appwrite.network
+- Generated: 2026-04-10T22:29:54.130Z
+- Site URL: https://69d9343a6fc9370d8893.appwrite.network
 - Site smoke: green
 - Health: green
 - WorldSim lifecycle: green
@@ -26,21 +26,21 @@
 
 ## Forecast Rows
 
-- governance_referendum: appwrite=completed, legacy=completed, winner=Si vs Si, delta=0
+- governance_referendum: appwrite=completed, legacy=completed, winner=No vs No, delta=0
 - sports_a29_probe: appwrite=completed, legacy=completed, winner=Inter Milan vs Inter Milan, delta=0
 - sports_b36_probe: appwrite=completed, legacy=completed, winner=Inter Milan vs Inter Milan, delta=0
 - sports_hold_regression: appwrite=completed, legacy=completed, winner=n/a vs n/a, delta=n/a
 - bitcoin_regime: appwrite=completed, legacy=completed, winner=n/a vs n/a, delta=n/a
 - startup_survival: appwrite=completed, legacy=completed, winner=Survive vs Survive, delta=0
 - housing_wait: appwrite=completed, legacy=completed, winner=Wait vs Wait, delta=0
-- governance_referendum: appwrite=completed, legacy=completed, winner=Si vs Si, delta=0
+- governance_referendum: appwrite=completed, legacy=completed, winner=No vs No, delta=0
 - sports_a29_probe: appwrite=completed, legacy=completed, winner=Inter Milan vs Inter Milan, delta=0
 - sports_b36_probe: appwrite=completed, legacy=completed, winner=Inter Milan vs Inter Milan, delta=0
 - sports_hold_regression: appwrite=completed, legacy=completed, winner=n/a vs n/a, delta=n/a
 - bitcoin_regime: appwrite=completed, legacy=completed, winner=n/a vs n/a, delta=n/a
 - startup_survival: appwrite=completed, legacy=completed, winner=Survive vs Survive, delta=0
 - housing_wait: appwrite=completed, legacy=completed, winner=Wait vs Wait, delta=0
-- governance_referendum: appwrite=completed, legacy=completed, winner=Si vs Si, delta=0
+- governance_referendum: appwrite=completed, legacy=completed, winner=No vs No, delta=0
 - sports_a29_probe: appwrite=completed, legacy=completed, winner=Inter Milan vs Inter Milan, delta=0
 - sports_b36_probe: appwrite=completed, legacy=completed, winner=Inter Milan vs Inter Milan, delta=0
 - sports_hold_regression: appwrite=completed, legacy=completed, winner=n/a vs n/a, delta=n/a

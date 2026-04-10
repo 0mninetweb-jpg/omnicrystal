@@ -22,6 +22,7 @@ const SHARED_IMPLEMENTED_SOURCE_IDS = [
   "rss_allowlist",
   "google_trends",
   "yahoo_finance",
+  "timegpt",
   "fred_api",
   "nominatim",
   "overpass",
@@ -200,6 +201,7 @@ function buildPublicProviderStatus(sourceId, overrides = {}) {
     open_meteo: "weather",
     google_trends: "attention",
     yahoo_finance: "markets",
+    timegpt: "forecasting",
     gdelt: "news_attention",
     rss_allowlist: "news_attention",
     wikidata: "entity_resolution",
@@ -262,6 +264,21 @@ function getProviderRuntimeStatus(sourceId) {
       available: configured,
       status: configured ? "available" : "config_missing",
       notes: configured ? [] : ["FRED_API_KEY is required to activate FRED in runtime."],
+    };
+  }
+
+  if (sourceId === "timegpt") {
+    const configured = Boolean(readConfiguredCredential(process.env.NIXTLA_API_KEY));
+    return {
+      source_id: sourceId,
+      title: "TimeGPT",
+      category: "forecasting",
+      access_profile: "optional_private",
+      implementation_status: "implemented",
+      configured,
+      available: configured,
+      status: configured ? "available" : "optional_source_missing",
+      notes: configured ? [] : ["NIXTLA_API_KEY is optional; without it Crystal records timegpt_unavailable and continues."],
     };
   }
 
@@ -869,6 +886,8 @@ function buildRequiredSourcesForQuery({
       optionalSources.push("opensky");
     }
   }
+
+  optionalSources.push("timegpt");
 
   return {
     geo_like: geoLike,

@@ -685,7 +685,16 @@ function looksLikeSportsMatchQuery(queryText = "") {
 }
 
 function extractFixtureDate(queryText = "", queryPlan = {}) {
+  const queryPlanDate = safeText(queryPlan?.event_date || queryPlan?.fixture?.fixture_date || queryPlan?.fixture?.date_hint);
+  const normalizedPlanDate = queryPlanDate.match(/\b\d{4}-\d{2}-\d{2}\b/)?.[0];
+  if (normalizedPlanDate) {
+    return normalizedPlanDate;
+  }
   const source = `${safeText(queryText)} ${JSON.stringify(queryPlan?.entities || [])}`;
+  const isoMatch = source.match(/\b(\d{4}-\d{2}-\d{2})\b/);
+  if (isoMatch) {
+    return isoMatch[1];
+  }
   const match = source.match(/\b(\d{1,2})\s+(gen(?:naio)?|feb(?:braio)?|mar(?:zo)?|apr(?:ile)?|mag(?:gio)?|giu(?:gno)?|lug(?:lio)?|ago(?:sto)?|set(?:tembre)?|ott(?:obre)?|nov(?:embre)?|dic(?:embre)?)(?:\s+(\d{4}))?/i);
   if (!match) return null;
 
@@ -793,11 +802,37 @@ function inferSportsFixtureCandidates(queryText = "", queryPlan = {}) {
     });
   };
 
+  const fixturePayload = queryPlan?.fixture && typeof queryPlan.fixture === "object" ? queryPlan.fixture : null;
+  if (fixturePayload) {
+    const homeTeam = safeText(fixturePayload.home_team || fixturePayload.homeTeam || fixturePayload.question_side_a);
+    const awayTeam = safeText(fixturePayload.away_team || fixturePayload.awayTeam || fixturePayload.question_side_b);
+    if (homeTeam && awayTeam) {
+      pushCandidate(buildFixtureCandidateLabel(homeTeam, awayTeam, safeText(fixturePayload.date || fixturePayload.event_date, date)));
+    }
+  }
+
+  const explicitTeams = Array.isArray(queryPlan?.teams)
+    ? queryPlan.teams.map((team) => (typeof team === "string" ? safeText(team) : safeText(team?.label || team?.name || team?.team))).filter(Boolean)
+    : [];
+  if (explicitTeams.length >= 2) {
+    pushCandidate(buildFixtureCandidateLabel(explicitTeams[0], explicitTeams[1], date));
+  }
+
   const queryPlanEntities = Array.isArray(queryPlan?.entities)
     ? queryPlan.entities.filter((entity) => entity?.entity_type === "fixture" || looksLikeFixtureLabel(entity?.label))
     : [];
   for (const entity of queryPlanEntities) {
     pushCandidate(safeText(entity?.label, safeText(entity?.entity_id)));
+  }
+
+  const teamEntities = Array.isArray(queryPlan?.entities)
+    ? queryPlan.entities
+        .filter((entity) => ["team", "club", "sports_team"].includes(safeText(entity?.entity_type).toLowerCase()))
+        .map((entity) => safeText(entity?.label, safeText(entity?.entity_id)))
+        .filter(Boolean)
+    : [];
+  if (teamEntities.length >= 2) {
+    pushCandidate(buildFixtureCandidateLabel(teamEntities[0], teamEntities[1], date));
   }
 
   const sideALabel = safeText(queryPlan?.question_side_a);
@@ -825,6 +860,18 @@ function inferSportsFixtureCandidates(queryText = "", queryPlan = {}) {
     const originalBinary = parseWillBeatFixture(originalQuery) || parseBackOrFixture(originalQuery);
     if (originalBinary) {
       pushCandidate(buildFixtureCandidateLabel(originalBinary.homeTeam, originalBinary.awayTeam, date));
+    }
+  }
+
+  const canonicalQuery = safeText(queryPlan?.canonical_query);
+  if (canonicalQuery && canonicalQuery !== queryText && canonicalQuery !== originalQuery) {
+    const canonicalSplit = splitFixtureLabel(canonicalQuery);
+    if (canonicalSplit) {
+      pushCandidate(buildFixtureCandidateLabel(canonicalSplit.homeTeam, canonicalSplit.awayTeam, date));
+    }
+    const canonicalBinary = parseWillBeatFixture(canonicalQuery) || parseBackOrFixture(canonicalQuery);
+    if (canonicalBinary) {
+      pushCandidate(buildFixtureCandidateLabel(canonicalBinary.homeTeam, canonicalBinary.awayTeam, date));
     }
   }
 
@@ -3080,6 +3127,13 @@ async function buildSportsForecastContext({ queryText, queryPlan, fetchJson, db,
   );
   const date = extractFixtureDate(queryText, queryPlan);
   const fixtureCandidates = inferSportsFixtureCandidates(queryText, queryPlan);
+  const resolutionPolicy =
+    queryPlan?.resolution_policy && typeof queryPlan.resolution_policy === "object" ? queryPlan.resolution_policy : {};
+  const minFixtureResolutionConfidence = clamp01(resolutionPolicy.min_confidence, 0.72);
+  const enforceAutoFixtureConfidence =
+    !date &&
+    (safeText(resolutionPolicy.fixture_resolution_policy) === "next_available" ||
+      resolutionPolicy.auto_resolve_if_confident === true);
 
   if (!config.configured) {
     return {
@@ -3107,7 +3161,34 @@ async function buildSportsForecastContext({ queryText, queryPlan, fetchJson, db,
     const label = safeText(entity?.label, safeText(entity?.entity_id));
     if (!label) continue;
     try {
-      fixtures.push(await resolveFixtureContext(fetchJson, label, date, { queryText, queryPlan }));
+      const resolvedFixture = await resolveFixtureContext(fetchJson, label, date, { queryText, queryPlan });
+      const fixtureConfidence = Number(
+        resolvedFixture?.grounded_read?.sports_fixture_candidate_score ?? resolvedFixture?.fixture_resolution?.candidate_score
+      );
+      if (
+        enforceAutoFixtureConfidence &&
+        resolvedFixture?.resolved &&
+        Number.isFinite(fixtureConfidence) &&
+        fixtureConfidence < minFixtureResolutionConfidence
+      ) {
+        fixtures.push({
+          ...resolvedFixture,
+          resolved: false,
+          low_confidence_hold: true,
+          note: `Fixture candidate confidence ${fixtureConfidence} is below the ${minFixtureResolutionConfidence} auto-resolve threshold.`,
+          grounded_read: {
+            ...(resolvedFixture.grounded_read || {}),
+            fixture_resolved: false,
+            parity_ready: false,
+            auto_resolve_confidence: fixtureConfidence,
+            auto_resolve_threshold: minFixtureResolutionConfidence,
+            reason: `Fixture candidate confidence ${fixtureConfidence} is below the ${minFixtureResolutionConfidence} auto-resolve threshold.`,
+          },
+          parity_ready: false,
+        });
+      } else {
+        fixtures.push(resolvedFixture);
+      }
     } catch (_error) {
       fixtures.push({
         label,

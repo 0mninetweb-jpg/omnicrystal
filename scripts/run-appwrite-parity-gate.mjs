@@ -186,6 +186,34 @@ async function appwriteApi(route, { method = 'GET', body, headers = {}, key, tim
   return result.payload;
 }
 
+function isTransientParityError(error) {
+  const status = Number(error?.status || 0);
+  const message = safeText(error?.message).toLowerCase();
+  return (
+    status >= 500 ||
+    message.includes('fetch failed') ||
+    message.includes('timed out') ||
+    message.includes('networkerror') ||
+    message.includes('socket hang up')
+  );
+}
+
+async function withTransientRetry(task, { attempts = 3, baseDelayMs = 1200 } = {}) {
+  let lastError = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await task();
+    } catch (error) {
+      lastError = error;
+      if (attempt >= attempts || !isTransientParityError(error)) {
+        throw error;
+      }
+      await sleep(baseDelayMs * attempt);
+    }
+  }
+  throw lastError;
+}
+
 function applyFrozenBaseline(row, baselineRow) {
   if (!baselineRow) return row;
   const legacyOperational = Boolean(baselineRow.operational);
@@ -423,11 +451,15 @@ async function pollForecastCard(initialCard, adminKey, timeoutMs = 180000) {
 
   while (Date.now() - startedAt < timeoutMs) {
     await sleep(pollAfterMs);
-    const response = await appwriteApi(route, {
-      method: 'GET',
-      key: adminKey,
-      timeoutMs: 120000,
-    });
+    const response = await withTransientRetry(
+      () =>
+        appwriteApi(route, {
+          method: 'GET',
+          key: adminKey,
+          timeoutMs: 120000,
+        }),
+      { attempts: 3, baseDelayMs: 1000 }
+    );
     const run = response?.run || null;
     const card = response?.card || null;
 
@@ -459,12 +491,16 @@ async function compareQuery(queryId, query, expectsBinary, adminKey, options = {
   const failures = [];
 
   try {
-    appwriteCompile = await appwriteApi('/public/compile-query', {
-      method: 'POST',
-      body: { query },
-      key: adminKey,
-      timeoutMs: 120000,
-    });
+    appwriteCompile = await withTransientRetry(
+      () =>
+        appwriteApi('/public/compile-query', {
+          method: 'POST',
+          body: { query },
+          key: adminKey,
+          timeoutMs: 120000,
+        }),
+      { attempts: 3, baseDelayMs: 1500 }
+    );
   } catch (error) {
     failures.push(`appwrite compile failed: ${error.message}`);
   }
@@ -482,18 +518,22 @@ async function compareQuery(queryId, query, expectsBinary, adminKey, options = {
 
   if (appwriteCompile) {
     try {
-      appwriteCard = await appwriteApi('/public/predict', {
-        method: 'POST',
-        body: {
-          query,
-          queryPlan: getQueryPlan(appwriteCompile),
-        },
-        headers: {
-          'x-crystal-guest-key': appwriteGuestKey,
-        },
-        key: adminKey,
-        timeoutMs: 180000,
-      });
+      appwriteCard = await withTransientRetry(
+        () =>
+          appwriteApi('/public/predict', {
+            method: 'POST',
+            body: {
+              query,
+              queryPlan: getQueryPlan(appwriteCompile),
+            },
+            headers: {
+              'x-crystal-guest-key': appwriteGuestKey,
+            },
+            key: adminKey,
+            timeoutMs: 180000,
+          }),
+        { attempts: 3, baseDelayMs: 1500 }
+      );
       if (appwriteCard?.pending_run?.run_id) {
         appwriteCard = await pollForecastCard(appwriteCard, adminKey, 180000);
       }

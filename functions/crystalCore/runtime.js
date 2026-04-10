@@ -85,6 +85,7 @@ const JSON_STAGE_MAX_TOKENS = {
 };
 const EXECUTION_BUDGET_MS = 90 * 1000;
 const FORECAST_RESULT_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const FORECAST_CACHE_SCHEMA_VERSION = "2026-04-10-universal-query-v2";
 const STAGE_RETRY_POLICY = {
   planner: { retries: 2, baseDelayMs: 1200, timeoutMs: 18 * 1000 },
   dossier: { retries: 2, baseDelayMs: 1500, timeoutMs: 24 * 1000 },
@@ -117,6 +118,14 @@ const PLANNER_RESPONSE_SCHEMA = {
     },
     intent_shape: { type: "string" },
     resolution_frame: { type: "string" },
+    input_language: { type: "string" },
+    response_language: { type: "string" },
+    canonical_query: { type: "string" },
+    interpretation_confidence: { type: "number" },
+    ambiguity_level: { type: "string" },
+    resolution_policy: { type: "object" },
+    teams: { type: "array", items: { type: "string" } },
+    fixture: { type: "object" },
     confidence_mode: { type: "string" },
     mode: {
       type: "object",
@@ -428,6 +437,7 @@ function createHash(value) {
 
 function buildForecastCacheKey(queryText, normalizedQuery = {}, options = {}) {
   const payload = {
+    cache_schema_version: FORECAST_CACHE_SCHEMA_VERSION,
     query: safeText(queryText).toLowerCase(),
     domain_id: safeText(normalizedQuery?.primary_domain_id || normalizedQuery?.domain_id || normalizedQuery?.domain),
     intent_shape: safeText(normalizedQuery?.intent_shape),
@@ -551,6 +561,143 @@ async function fetchTrendSignal(queryText, queryPlan = {}, domainConfig = {}) {
     };
   } catch (_error) {
     return null;
+  }
+}
+
+async function fetchHistoricalSeriesForTimeGpt(fetchJson, queryText, queryPlan = {}, domainConfig = {}) {
+  const domainId = safeText(domainConfig?.domain_id);
+  const corpus = normalizeSignalText([queryText, domainId, queryPlan?.canonical_query, queryPlan?.original_query].filter(Boolean).join(" "));
+
+  if (/bitcoin|btc|crypto/.test(corpus)) {
+    const klines = await fetchJson("https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=90");
+    const series = {};
+    for (const item of Array.isArray(klines) ? klines : []) {
+      series[new Date(item[0]).toISOString().slice(0, 10)] = Number(item[4]);
+    }
+    return { series, label: "BTCUSDT daily close" };
+  }
+
+  if (/weather|climate|temperature|meteo|clima/.test(corpus)) {
+    let lat = 41.9028;
+    let lon = 12.4964;
+    const location = getPrimaryLocationFromPlan(queryPlan);
+    if (location) {
+      const geocode = await fetchJson(
+        `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(location)}&count=1&language=en&format=json`
+      );
+      if (Array.isArray(geocode?.results) && geocode.results[0]) {
+        lat = Number(geocode.results[0].latitude);
+        lon = Number(geocode.results[0].longitude);
+      }
+    }
+    const endDate = new Date();
+    endDate.setUTCDate(endDate.getUTCDate() - 2);
+    const startDate = new Date(endDate);
+    startDate.setUTCDate(startDate.getUTCDate() - 90);
+    const weather = await fetchJson(
+      `https://archive-api.open-meteo.com/v1/archive?latitude=${lat}&longitude=${lon}&start_date=${startDate
+        .toISOString()
+        .slice(0, 10)}&end_date=${endDate.toISOString().slice(0, 10)}&daily=temperature_2m_mean`
+    );
+    const series = {};
+    const times = Array.isArray(weather?.daily?.time) ? weather.daily.time : [];
+    const values = Array.isArray(weather?.daily?.temperature_2m_mean) ? weather.daily.temperature_2m_mean : [];
+    times.forEach((time, index) => {
+      if (values[index] !== null && values[index] !== undefined) {
+        series[time] = Number(values[index]);
+      }
+    });
+    return { series, label: "Open-Meteo daily temperature" };
+  }
+
+  const keyword = buildTrendKeyword(queryText, queryPlan, domainConfig);
+  const trendRaw = await googleTrends.interestOverTime({
+    keyword,
+    startTime: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000),
+  });
+  const trend = JSON.parse(trendRaw);
+  const series = {};
+  for (const item of trend?.default?.timelineData || []) {
+    series[new Date(Number(item.time) * 1000).toISOString().slice(0, 10)] = Number(item.value?.[0] || 0);
+  }
+  return { series, label: `Google Trends proxy for ${keyword}` };
+}
+
+function summarizeTimeGptSignal(forecast, horizonId = "30d", sourceLabel = "TimeGPT") {
+  const values = Array.isArray(forecast?.value)
+    ? forecast.value
+    : Array.isArray(forecast?.forecast)
+      ? forecast.forecast
+      : Array.isArray(forecast?.data)
+        ? forecast.data.map((item) => item?.value ?? item?.yhat ?? item?.TimeGPT)
+        : [];
+  if (values.length < 2) return null;
+  const first = Number(values[0]);
+  const last = Number(values[values.length - 1]);
+  if (!Number.isFinite(first) || !Number.isFinite(last)) return null;
+  const delta = last - first;
+  const lean = delta > 0 ? "up" : delta < 0 ? "down" : "flat";
+  const pct = first !== 0 ? ((delta / Math.abs(first)) * 100).toFixed(1) : "0.0";
+  return {
+    source_id: "timegpt",
+    label: "TimeGPT directional projection",
+    summary: `${sourceLabel} projects a ${lean === "up" ? "higher" : lean === "down" ? "lower" : "flat"} path over ${horizonId} (${pct}% across the projected window).`,
+    lean,
+    freshness_score: 0.72,
+    trust_score: 0.7,
+  };
+}
+
+async function fetchTimeGptSignal(fetchJson, queryText, queryPlan = {}, domainConfig = {}) {
+  const domainId = safeText(domainConfig?.domain_id);
+  if (domainId === SPORTS_MATCH_OUTCOMES_DOMAIN || domainId === SPORTS_PROBABILITY_MODE_DOMAIN) {
+    return { available: false, reason: "timegpt_skipped_for_sports" };
+  }
+  const nixtlaKey = safeText(process.env.NIXTLA_API_KEY);
+  if (!nixtlaKey) {
+    return { available: false, reason: "timegpt_unavailable" };
+  }
+
+  try {
+    const { series, label } = await fetchHistoricalSeriesForTimeGpt(fetchJson, queryText, queryPlan, domainConfig);
+    if (!series || Object.keys(series).length < 8) {
+      return { available: false, reason: "timegpt_insufficient_history" };
+    }
+    const horizonId = safeText(queryPlan?.horizon?.horizon_id || queryPlan?.horizons?.[0]?.horizon_id, "30d");
+    const forecast = await fetchJson("https://api.nixtla.io/forecast", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${nixtlaKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "timegpt-1",
+        y: series,
+        fh: horizonId === "7d" ? 7 : horizonId === "90d" ? 90 : 30,
+        level: [80, 90],
+      }),
+    });
+    const signal = summarizeTimeGptSignal(forecast, horizonId, label);
+    if (!signal) return { available: false, reason: "timegpt_empty_forecast" };
+    return {
+      available: true,
+      signals: [signal],
+      source_trust_map: [
+        {
+          source_id: "timegpt",
+          trust_score: 0.7,
+          note: `${label} projected through TimeGPT/Nixtla.`,
+        },
+      ],
+      conflict_map: [],
+      timegpt_metrics: {
+        source_label: label,
+        horizon_id: horizonId,
+        point_count: Object.keys(series).length,
+      },
+    };
+  } catch (_error) {
+    return { available: false, reason: "timegpt_unavailable" };
   }
 }
 
@@ -965,6 +1112,189 @@ function buildHistoricalBundle(mainBaseline, supportingBaselines = []) {
   return sections.join("\n\n");
 }
 
+const LOCALIZED_FALLBACKS = {
+  en: {
+    sports_blocked: "Crystal has the match grounded, but the sports publish gate is still waiting on enough fresh lineup, injury, and preview confirmation.",
+    coverage_gap: "Crystal sees early signal here, but required coverage is still too thin for a stronger public read.",
+    watchlist_directional: "Crystal has orientation here, but the signals are not converged enough to publish a stronger directional card yet.",
+    watchlist_conflict: "Crystal has real signal here, but the live stack is still too conflicted to treat this as decision-ready.",
+    watchlist_thin: "Crystal has a readable thesis here, but the evidence stack is still too thin to sharpen it into a stronger public call.",
+    binary_watchlist: "Crystal still leans {{side}}, but the edge remains partial and should be treated as a watchlist read.",
+    directional_read: "Crystal has a directional read here, but the evidence is still only partially converged.",
+    publishable_regime: "Crystal sees a publishable regime read here, with enough convergence to describe the active range and break risk.",
+    publishable_binary: "Crystal has a publishable binary edge on {{side}}, with the caveats pushed into the evidence notes.",
+    thin_signal: "Crystal has directional evidence here, but it is not yet converged enough to be treated as a clean public call.",
+    default_summary: "Crystal built a directional read for \"{{query}}\".",
+    verdict_blocked_sports: "Blocked pending sports publish gate",
+    verdict_grounded_lean: "Grounded lean: fixture resolved, edge still partial",
+    verdict_coverage_gap: "Coverage gap: hold as watchlist",
+    verdict_watchlist_directional: "Watchlist: directional read not publish-ready",
+    verdict_watchlist_conflict: "Watchlist: live signals still conflict",
+    verdict_watchlist: "Watchlist: directional read remains tentative",
+    action_blocked_sports: "Treat this as a grounded matchup read only. Wait for fresher lineup, injury, and preview confirmation before using it as a publishable sports pick.",
+    action_grounded_lean: "Use this as a grounded lean, not a max-confidence pick. Watch lineups, late injuries, and market divergence before acting more aggressively.",
+    action_coverage_gap: "Treat this as a watchlist item and wait for stronger source coverage before acting with conviction.",
+    action_watchlist_directional: "Use this as a watchlist thesis only. Wait for stronger convergence before treating it as a public-grade directional call.",
+    action_watchlist_conflict: "Treat this as a conflict watchlist and wait for the strongest live signals to resolve before acting with conviction.",
+    action_watchlist: "Use this as a bounded scenario read and monitor the invalidation triggers before sizing up any action.",
+    action_default: "Use this as a live directional read and keep monitoring the invalidation triggers.",
+  },
+  it: {
+    sports_blocked: "Crystal ha agganciato la partita, ma il gate sportivo aspetta ancora conferme fresche su formazioni, infortuni e preview prima di pubblicare un pick pieno.",
+    coverage_gap: "Crystal vede un primo segnale, ma la copertura richiesta e ancora troppo sottile per una lettura pubblica piu forte.",
+    watchlist_directional: "Crystal ha un orientamento, ma i segnali non sono ancora abbastanza convergenti per una card direzionale piu forte.",
+    watchlist_conflict: "Crystal vede segnale reale, ma lo stack live e ancora troppo in conflitto per trattarlo come decision-ready.",
+    watchlist_thin: "Crystal ha una tesi leggibile, ma lo stack di evidenze e ancora troppo sottile per renderla piu netta.",
+    binary_watchlist: "Crystal resta orientato su {{side}}, ma il margine e parziale e va trattato come watchlist.",
+    directional_read: "Crystal ha una lettura direzionale, ma le evidenze sono ancora solo parzialmente convergenti.",
+    publishable_regime: "Crystal vede una lettura di regime pubblicabile, con abbastanza convergenza per descrivere range attivo e rischio di rottura.",
+    publishable_binary: "Crystal ha un edge binario pubblicabile su {{side}}, con le cautele nelle note di evidenza.",
+    thin_signal: "Crystal ha evidenza direzionale, ma non e ancora abbastanza convergente per una chiamata pubblica pulita.",
+    default_summary: "Crystal ha costruito una lettura direzionale per \"{{query}}\".",
+    verdict_blocked_sports: "Bloccato: gate sportivo in attesa",
+    verdict_grounded_lean: "Lean grounded: fixture risolta, edge ancora parziale",
+    verdict_coverage_gap: "Coverage gap: tienilo in watchlist",
+    verdict_watchlist_directional: "Watchlist: lettura direzionale non ancora pronta",
+    verdict_watchlist_conflict: "Watchlist: i segnali live sono ancora in conflitto",
+    verdict_watchlist: "Watchlist: lettura direzionale ancora provvisoria",
+    action_blocked_sports: "Trattala come lettura di matchup grounded. Aspetta segnali piu freschi su formazioni, infortuni e preview prima di usarla come pick sportivo pieno.",
+    action_grounded_lean: "Usala come lean grounded, non come pick a massima confidenza. Monitora formazioni, infortuni tardivi e divergenze di mercato.",
+    action_coverage_gap: "Trattala come watchlist e aspetta copertura piu forte prima di agire con convinzione.",
+    action_watchlist_directional: "Usala solo come tesi da watchlist. Aspetta convergenza piu forte prima di trattarla come call pubblica.",
+    action_watchlist_conflict: "Trattala come watchlist in conflitto e aspetta che i segnali live piu forti si risolvano.",
+    action_watchlist: "Usala come lettura di scenario limitata e monitora gli invalidatori prima di aumentare esposizione.",
+    action_default: "Usala come lettura direzionale live e continua a monitorare gli invalidatori.",
+  },
+  es: {
+    sports_blocked: "Crystal tiene el partido identificado, pero el gate deportivo espera confirmacion fresca de alineaciones, lesiones y previa antes de publicar un pick completo.",
+    coverage_gap: "Crystal ve una senal inicial, pero la cobertura requerida sigue siendo demasiado fina para una lectura publica mas fuerte.",
+    watchlist_directional: "Crystal tiene orientacion, pero las senales aun no convergen lo suficiente para una card direccional mas fuerte.",
+    watchlist_conflict: "Crystal ve senal real, pero el stack live sigue demasiado conflictivo para tratarlo como decision-ready.",
+    watchlist_thin: "Crystal tiene una tesis legible, pero el stack de evidencia sigue demasiado fino para afinarla.",
+    binary_watchlist: "Crystal sigue inclinandose por {{side}}, pero la ventaja es parcial y debe tratarse como watchlist.",
+    directional_read: "Crystal tiene una lectura direccional, pero la evidencia aun converge solo parcialmente.",
+    publishable_regime: "Crystal ve una lectura de regimen publicable, con suficiente convergencia para describir el rango activo y el riesgo de ruptura.",
+    publishable_binary: "Crystal tiene una ventaja binaria publicable en {{side}}, con las cautelas en las notas de evidencia.",
+    thin_signal: "Crystal tiene evidencia direccional, pero aun no converge lo suficiente para una llamada publica limpia.",
+    default_summary: "Crystal construyo una lectura direccional para \"{{query}}\".",
+    verdict_blocked_sports: "Bloqueado: gate deportivo pendiente",
+    verdict_grounded_lean: "Lean grounded: fixture resuelta, ventaja parcial",
+    verdict_coverage_gap: "Coverage gap: mantener en watchlist",
+    verdict_watchlist_directional: "Watchlist: lectura direccional no lista",
+    verdict_watchlist_conflict: "Watchlist: las senales live aun chocan",
+    verdict_watchlist: "Watchlist: lectura direccional tentativa",
+    action_blocked_sports: "Tratalo como lectura de matchup grounded. Espera alineaciones, lesiones y previa mas frescas antes de usarlo como pick deportivo completo.",
+    action_grounded_lean: "Usalo como lean grounded, no como pick de maxima confianza. Vigila alineaciones, lesiones tardias y divergencia de mercado.",
+    action_coverage_gap: "Tratalo como watchlist y espera mejor cobertura antes de actuar con conviccion.",
+    action_watchlist_directional: "Usalo solo como tesis de watchlist hasta que la convergencia sea mas fuerte.",
+    action_watchlist_conflict: "Tratalo como watchlist en conflicto y espera que se resuelvan las senales live mas fuertes.",
+    action_watchlist: "Usalo como lectura de escenario limitada y monitorea invalidadores.",
+    action_default: "Usalo como lectura direccional live y sigue monitoreando invalidadores.",
+  },
+  fr: {
+    sports_blocked: "Crystal a bien ancre le match, mais le gate sportif attend encore des confirmations fraiches sur les compos, blessures et previews avant un pick complet.",
+    coverage_gap: "Crystal voit un signal initial, mais la couverture requise reste trop fine pour une lecture publique plus forte.",
+    watchlist_directional: "Crystal a une orientation, mais les signaux ne convergent pas encore assez pour une card directionnelle plus forte.",
+    watchlist_conflict: "Crystal voit un signal reel, mais le stack live reste trop conflictuel pour etre decision-ready.",
+    watchlist_thin: "Crystal a une these lisible, mais le stack de preuves reste trop fin pour la renforcer.",
+    binary_watchlist: "Crystal penche encore vers {{side}}, mais l'avantage reste partiel et doit etre traite comme watchlist.",
+    directional_read: "Crystal a une lecture directionnelle, mais les preuves ne convergent encore que partiellement.",
+    publishable_regime: "Crystal voit une lecture de regime publiable, avec assez de convergence pour decrire le range actif et le risque de rupture.",
+    publishable_binary: "Crystal a un edge binaire publiable sur {{side}}, avec les reserves dans les notes de preuve.",
+    thin_signal: "Crystal a une preuve directionnelle, mais elle ne converge pas encore assez pour un appel public net.",
+    default_summary: "Crystal a construit une lecture directionnelle pour \"{{query}}\".",
+    verdict_blocked_sports: "Bloque: gate sportif en attente",
+    verdict_grounded_lean: "Lean grounded: fixture resolue, edge partiel",
+    verdict_coverage_gap: "Coverage gap: garder en watchlist",
+    verdict_watchlist_directional: "Watchlist: lecture directionnelle pas encore prete",
+    verdict_watchlist_conflict: "Watchlist: les signaux live restent en conflit",
+    verdict_watchlist: "Watchlist: lecture directionnelle encore tentative",
+    action_blocked_sports: "Traite cela comme une lecture de matchup grounded. Attends des infos plus fraiches sur compos, blessures et previews avant un pick sportif complet.",
+    action_grounded_lean: "Utilise-le comme lean grounded, pas comme pick a confiance maximale. Surveille compos, blessures tardives et divergence de marche.",
+    action_coverage_gap: "Traite cela comme watchlist et attends une couverture plus forte avant d'agir avec conviction.",
+    action_watchlist_directional: "Utilise cela seulement comme these de watchlist jusqu'a une convergence plus forte.",
+    action_watchlist_conflict: "Traite cela comme watchlist en conflit et attends que les signaux live les plus forts se resolvent.",
+    action_watchlist: "Utilise cela comme lecture de scenario limitee et surveille les invalidateurs.",
+    action_default: "Utilise cela comme lecture directionnelle live et continue de surveiller les invalidateurs.",
+  },
+  pt: {
+    sports_blocked: "Crystal ancorou o jogo, mas o gate esportivo ainda espera confirmacoes recentes de escalacoes, lesoes e previa antes de publicar um pick completo.",
+    coverage_gap: "Crystal ve um sinal inicial, mas a cobertura exigida ainda e fina demais para uma leitura publica mais forte.",
+    watchlist_directional: "Crystal tem orientacao, mas os sinais ainda nao convergem o bastante para uma card direcional mais forte.",
+    watchlist_conflict: "Crystal ve sinal real, mas o stack live ainda esta conflitado demais para ser decision-ready.",
+    watchlist_thin: "Crystal tem uma tese legivel, mas o stack de evidencias ainda e fino demais para afina-la.",
+    binary_watchlist: "Crystal ainda inclina para {{side}}, mas a vantagem e parcial e deve ser tratada como watchlist.",
+    directional_read: "Crystal tem uma leitura direcional, mas as evidencias ainda convergem apenas parcialmente.",
+    publishable_regime: "Crystal ve uma leitura de regime publicavel, com convergencia suficiente para descrever o range ativo e o risco de ruptura.",
+    publishable_binary: "Crystal tem uma vantagem binaria publicavel em {{side}}, com as cautelas nas notas de evidencia.",
+    thin_signal: "Crystal tem evidencia direcional, mas ela ainda nao converge o bastante para uma chamada publica limpa.",
+    default_summary: "Crystal construiu uma leitura direcional para \"{{query}}\".",
+    verdict_blocked_sports: "Bloqueado: gate esportivo pendente",
+    verdict_grounded_lean: "Lean grounded: fixture resolvida, vantagem parcial",
+    verdict_coverage_gap: "Coverage gap: manter em watchlist",
+    verdict_watchlist_directional: "Watchlist: leitura direcional ainda nao pronta",
+    verdict_watchlist_conflict: "Watchlist: os sinais live ainda conflitam",
+    verdict_watchlist: "Watchlist: leitura direcional ainda tentativa",
+    action_blocked_sports: "Trate como leitura de matchup grounded. Espere dados mais recentes de escalacoes, lesoes e previa antes de usar como pick esportivo completo.",
+    action_grounded_lean: "Use como lean grounded, nao como pick de maxima confianca. Monitore escalacoes, lesoes tardias e divergencia de mercado.",
+    action_coverage_gap: "Trate como watchlist e espere cobertura mais forte antes de agir com conviccao.",
+    action_watchlist_directional: "Use apenas como tese de watchlist ate haver convergencia mais forte.",
+    action_watchlist_conflict: "Trate como watchlist em conflito e espere os sinais live mais fortes se resolverem.",
+    action_watchlist: "Use como leitura de cenario limitada e monitore invalidadores.",
+    action_default: "Use como leitura direcional live e continue monitorando invalidadores.",
+  },
+};
+
+function localizedFallback(language = "en", key = "", replacements = {}) {
+  const dictionary = LOCALIZED_FALLBACKS[normalizeLanguageCode(language, "en")] || LOCALIZED_FALLBACKS.en;
+  const template = safeText(dictionary[key], safeText(LOCALIZED_FALLBACKS.en[key], ""));
+  return Object.entries(replacements).reduce(
+    (text, [name, value]) => text.replaceAll(`{{${name}}}`, safeText(value)),
+    template
+  );
+}
+
+function localizeReasonToken(value = "", language = "en") {
+  const token = safeText(value).replace(/_/g, " ");
+  if (!token || normalizeLanguageCode(language, "en") === "en") return token;
+  const map = {
+    it: {
+      "sports publish gate pending": "gate sportivo in attesa",
+      "sports market context thin": "contesto mercato sportivo sottile",
+      "sports fixture resolution partial": "risoluzione fixture parziale",
+      "live evidence is still light": "evidenza live ancora leggera",
+      "missing required sources": "fonti richieste mancanti",
+    },
+    es: {
+      "sports publish gate pending": "gate deportivo pendiente",
+      "sports market context thin": "contexto de mercado deportivo fino",
+      "sports fixture resolution partial": "resolucion parcial de fixture",
+      "live evidence is still light": "evidencia live aun ligera",
+      "missing required sources": "faltan fuentes requeridas",
+    },
+    fr: {
+      "sports publish gate pending": "gate sportif en attente",
+      "sports market context thin": "contexte marche sportif fin",
+      "sports fixture resolution partial": "resolution de fixture partielle",
+      "live evidence is still light": "preuve live encore legere",
+      "missing required sources": "sources requises manquantes",
+    },
+    pt: {
+      "sports publish gate pending": "gate esportivo pendente",
+      "sports market context thin": "contexto de mercado esportivo fino",
+      "sports fixture resolution partial": "resolucao parcial de fixture",
+      "live evidence is still light": "evidencia live ainda leve",
+      "missing required sources": "fontes exigidas ausentes",
+    },
+  };
+  const normalized = token.toLowerCase();
+  return safeText(map[normalizeLanguageCode(language, "en")]?.[normalized], token);
+}
+
+function localizeReasonList(values = [], language = "en") {
+  return normalizeTextList(values, 4).map((item) => localizeReasonToken(item, language));
+}
+
 function buildEvidenceSignalsText(evidenceBundle = {}) {
   const signals = Array.isArray(evidenceBundle.live_signals) ? evidenceBundle.live_signals : [];
   if (!signals.length) {
@@ -1110,9 +1440,10 @@ function normalizeDossierStagePayload(payload = {}, options = {}) {
 }
 
 function normalizeVerbalizerStagePayload(payload = {}, options = {}) {
-  const fallbackWhatToWatch = normalizeTextList(options?.scorecard?.invalidators, 4);
+  const responseLanguage = normalizeLanguageCode(options?.normalizedQuery?.response_language, "en");
+  const fallbackWhatToWatch = localizeReasonList(options?.scorecard?.invalidators, responseLanguage);
   const fallbackConfidence = Array.isArray(options?.verifiedEvidencePack?.missingness_map)
-    ? options.verifiedEvidencePack.missingness_map.map((item) => safeText(item).replace(/_/g, " ")).filter(Boolean).slice(0, 4)
+    ? localizeReasonList(options.verifiedEvidencePack.missingness_map, responseLanguage)
     : [];
   const fallbackCoverage = uniqueStrings(
     normalizeTextList(options?.scorecard?.publication_basis?.notes, 4).concat(
@@ -1121,8 +1452,7 @@ function normalizeVerbalizerStagePayload(payload = {}, options = {}) {
         : []
     )
   ).slice(0, 4);
-
-  return {
+  const normalizedPayload = {
     title: safeText(payload?.title),
     summary: safeText(payload?.summary),
     verdict: safeText(payload?.verdict),
@@ -1135,8 +1465,33 @@ function normalizeVerbalizerStagePayload(payload = {}, options = {}) {
       : fallbackConfidence,
       coverage_notes: normalizeTextList(payload?.coverage_notes, 4).length
         ? normalizeTextList(payload?.coverage_notes, 4)
-        : fallbackCoverage,
+        : localizeReasonList(fallbackCoverage, responseLanguage),
     };
+
+  if (hasVoicePayloadLanguageMismatch(normalizedPayload, responseLanguage)) {
+    return {
+      title: safeText(options?.queryText),
+      summary: buildQualityAwareFallbackSummary({
+        queryText: safeText(options?.queryText),
+        scorecard: options?.scorecard || {},
+        binaryContract: options?.scorecard?.binary_contract || null,
+        normalizedQuery: options?.normalizedQuery || {},
+      }),
+      verdict: buildQualityAwareFallbackVerdict({
+        queryText: safeText(options?.queryText),
+        scorecard: options?.scorecard || {},
+        binaryContract: options?.scorecard?.binary_contract || null,
+        normalizedQuery: options?.normalizedQuery || {},
+      }),
+      recommended_action: buildQualityAwareRecommendedAction(options?.scorecard || {}, options?.normalizedQuery || {}),
+      what_to_watch: fallbackWhatToWatch,
+      how_to_raise_confidence: fallbackConfidence,
+      coverage_notes: localizeReasonList(fallbackCoverage, responseLanguage),
+      language_fallback_used: true,
+    };
+  }
+
+  return normalizedPayload;
 }
 
 function extractHistoricalAnchorLines(text, maxItems = 4) {
@@ -1382,29 +1737,40 @@ function buildFallbackDossierPrediction({
 
 function buildFallbackVoicePayload({ queryText, normalizedQuery, scorecard, verifiedEvidencePack }) {
   const domainConfig = getDomain(normalizedQuery?.primary_domain_id, GENERAL_FORECAST_DOMAIN);
-  const drivers = normalizeTextList(scorecard?.key_drivers, 4);
   const invalidators = normalizeTextList(scorecard?.invalidators, 4);
   const binaryDisplayCall = safeText(scorecard?.binary_contract?.display_call);
+  const binaryContract = scorecard?.binary_contract || null;
+  const responseLanguage = normalizeLanguageCode(normalizedQuery?.response_language, inferInputLanguage(queryText));
   const payload = {
     title:
       safeText(binaryDisplayCall || scorecard?.primary_call).slice(0, 92) ||
       safeText(queryText) ||
       safeText(domainConfig?.short_label || "Crystal Forecast"),
-    summary:
-      safeText(scorecard?.why_this_side) ||
-      (drivers.length ? `Crystal is leaning on ${drivers.slice(0, 2).join(" and ")}.` : "Crystal generated a directional read from the verified evidence stack."),
-    verdict: safeText(binaryDisplayCall || scorecard?.primary_call),
-    recommended_action:
-      safeText(scorecard?.recommended_posture) ||
-      "Use this as a directional read and keep watching the invalidation triggers.",
-    what_to_watch: invalidators,
-    how_to_raise_confidence: Array.isArray(verifiedEvidencePack?.missingness_map) ? verifiedEvidencePack.missingness_map.slice(0, 4) : [],
-    coverage_notes: normalizeTextList(scorecard?.publication_basis?.notes, 4),
+    summary: buildQualityAwareFallbackSummary({
+      queryText,
+      scorecard,
+      binaryContract,
+      normalizedQuery,
+    }),
+    verdict: buildQualityAwareFallbackVerdict({
+      queryText,
+      scorecard,
+      binaryContract,
+      normalizedQuery,
+    }),
+    recommended_action: buildQualityAwareRecommendedAction(scorecard, normalizedQuery),
+    what_to_watch: localizeReasonList(invalidators, responseLanguage),
+    how_to_raise_confidence: Array.isArray(verifiedEvidencePack?.missingness_map)
+      ? localizeReasonList(verifiedEvidencePack.missingness_map, responseLanguage)
+      : [],
+    coverage_notes: localizeReasonList(normalizeTextList(scorecard?.publication_basis?.notes, 4), responseLanguage),
   };
 
   return normalizeVerbalizerStagePayload(payload, {
+    queryText,
     scorecard,
     verifiedEvidencePack,
+    normalizedQuery,
   });
 }
 
@@ -2095,6 +2461,115 @@ function shouldUseDeterministicDossierFallback({ normalizedQuery = {}, verifiedE
   return domainId === "B.3.8.personal_decisions_and_tradeoffs" || domainId === "B.3.5.business_idea_outcomes";
 }
 
+const LANGUAGE_ALIASES = {
+  it: "it",
+  ita: "it",
+  italian: "it",
+  italiano: "it",
+  en: "en",
+  eng: "en",
+  english: "en",
+  es: "es",
+  spa: "es",
+  spanish: "es",
+  espanol: "es",
+  "espanol": "es",
+  fr: "fr",
+  fre: "fr",
+  french: "fr",
+  francais: "fr",
+  "francais": "fr",
+  pt: "pt",
+  por: "pt",
+  portuguese: "pt",
+  portugues: "pt",
+  "portugues": "pt",
+};
+
+const RESPONSE_LANGUAGE_NAMES = {
+  it: "Italian",
+  en: "English",
+  es: "Spanish",
+  fr: "French",
+  pt: "Portuguese",
+};
+
+function normalizeLanguageCode(value = "", fallback = "en") {
+  const normalized = safeText(value)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z]+/g, "");
+  const prefix = normalized.slice(0, 2);
+  if (["it", "en", "es", "fr", "pt"].includes(prefix)) return prefix;
+  return LANGUAGE_ALIASES[normalized] || LANGUAGE_ALIASES[safeText(fallback).toLowerCase()] || "en";
+}
+
+function inferInputLanguage(queryText = "") {
+  const normalized = safeText(queryText)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  if (!normalized) return "en";
+  if (/\b(el|la|los|las|que|pronostico|resultado|partido|gana|ganar|proximo|proxima)\b/.test(normalized)) return "es";
+  if (/\b(le|la|les|des|que|pronostic|resultat|match|gagne|prochain|prochaine)\b/.test(normalized)) return "fr";
+  if (/\b(o|a|os|as|que|palpite|resultado|jogo|vence|ganhar|proximo|proxima)\b/.test(normalized)) return "pt";
+  if (/\b(il|lo|la|gli|le|che|pronostico|risultato|partita|vince|vincere|prossim[oa]|contro)\b/.test(normalized)) return "it";
+  return "en";
+}
+
+function detectVoicePayloadLanguage(payload = {}) {
+  const text = [
+    safeText(payload?.title),
+    safeText(payload?.summary),
+    safeText(payload?.verdict),
+    safeText(payload?.recommended_action),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+  if (text.split(/\s+/).filter(Boolean).length < 4) return "";
+  return inferInputLanguage(text);
+}
+
+function hasVoicePayloadLanguageMismatch(payload = {}, expectedLanguage = "en") {
+  const expected = normalizeLanguageCode(expectedLanguage, "en");
+  if (!["it", "en", "es", "fr", "pt"].includes(expected)) return false;
+  const detected = detectVoicePayloadLanguage(payload);
+  return Boolean(detected && detected !== expected);
+}
+
+function normalizeAmbiguityLevel(value = "", confidence = 0.62) {
+  const normalized = safeText(value).toLowerCase();
+  if (["low", "medium", "high"].includes(normalized)) return normalized;
+  if (confidence >= 0.72) return "low";
+  if (confidence <= 0.44) return "high";
+  return "medium";
+}
+
+function normalizeFixtureResolutionPolicy(value = "", fallback = "") {
+  const normalized = safeText(value, fallback).toLowerCase();
+  if (!normalized) return "";
+  if (normalized === "fixed_date") return "exact_date";
+  if (normalized === "nearest_date") return "closest_date";
+  return normalized;
+}
+
+function buildResolutionPolicy(payload = {}, { sportsLike = false } = {}) {
+  const rawPolicy = payload?.resolution_policy && typeof payload.resolution_policy === "object" ? payload.resolution_policy : {};
+  const explicitFixtureDate = safeText(payload?.event_date || payload?.fixture?.fixture_date || payload?.fixture?.date_hint);
+  const fixturePolicy = normalizeFixtureResolutionPolicy(
+    rawPolicy.fixture_resolution_policy || payload.fixture_resolution_policy || payload?.fixture?.fixture_resolution_policy,
+    explicitFixtureDate ? "exact_date" : sportsLike ? "next_available" : ""
+  );
+  return {
+    fixture_resolution_policy: fixturePolicy,
+    auto_resolve_if_confident: rawPolicy.auto_resolve_if_confident === false ? false : sportsLike,
+    min_confidence: clamp01(rawPolicy.min_confidence ?? payload.fixture_resolution_min_confidence, 0.72),
+    ambiguity_handling: safeText(rawPolicy.ambiguity_handling, "hold_when_uncertain"),
+  };
+}
+
 function normalizeQueryPlanPayload(payload = {}, options = {}) {
   const routingHints = options?.routingHints || {};
   const fallbackDomain = safeText(options?.fallbackDomain, GENERAL_FORECAST_DOMAIN);
@@ -2134,8 +2609,52 @@ function normalizeQueryPlanPayload(payload = {}, options = {}) {
   const normalizedResolutionFrame = allowedResolutionFrames.has(resolutionFrame)
     ? resolutionFrame
     : routingHints.resolutionFrame || "trend";
-  const questionSideA = normalizedIntentShape === "binary_outcome" ? safeText(mergedPayload?.question_side_a) : "";
-  const questionSideB = normalizedIntentShape === "binary_outcome" ? safeText(mergedPayload?.question_side_b) : "";
+  let questionSideA = normalizedIntentShape === "binary_outcome" ? safeText(mergedPayload?.question_side_a) : "";
+  let questionSideB = normalizedIntentShape === "binary_outcome" ? safeText(mergedPayload?.question_side_b) : "";
+  const originalQuery = safeText(options?.queryText, safeText(mergedPayload?.original_query));
+  const languageHint = normalizeLanguageCode(options?.languageHint || options?.requestLanguage, inferInputLanguage(originalQuery));
+  const inputLanguage = normalizeLanguageCode(mergedPayload?.input_language || mergedPayload?.source_language, languageHint);
+  const responseLanguage = normalizeLanguageCode(
+    mergedPayload?.response_language || mergedPayload?.output_language || mergedPayload?.target_language,
+    inputLanguage
+  );
+  const interpretationConfidence = clamp01(
+    mergedPayload?.interpretation_confidence ?? mergedPayload?.confidence ?? mergedPayload?.query_confidence,
+    0.62
+  );
+  const sportsLike =
+    normalizedDomain === SPORTS_MATCH_OUTCOMES_DOMAIN ||
+    normalizedDomain === SPORTS_PROBABILITY_MODE_DOMAIN ||
+    looksLikeSportsMatchQuery(originalQuery);
+  const resolutionPolicy = buildResolutionPolicy(mergedPayload, { sportsLike });
+  const normalizedTeams = Array.isArray(mergedPayload?.teams)
+    ? mergedPayload.teams
+        .map((team) => (typeof team === "string" ? safeText(team) : safeText(team?.label || team?.name || team?.team)))
+        .filter(Boolean)
+    : [];
+  const normalizedFixture =
+    mergedPayload?.fixture && typeof mergedPayload.fixture === "object"
+      ? mergedPayload.fixture
+      : {
+          home_team: safeText(mergedPayload?.home_team || mergedPayload?.fixture_home_team),
+          away_team: safeText(mergedPayload?.away_team || mergedPayload?.fixture_away_team),
+          fixture_date: safeText(mergedPayload?.event_date || mergedPayload?.fixture_date),
+          competition_hint: safeText(mergedPayload?.competition_hint),
+          date_hint: safeText(mergedPayload?.date_hint || mergedPayload?.event_date),
+        };
+  if (sportsLike && (!questionSideA || !questionSideB)) {
+    const teamEntityLabels = entities
+      .filter((entity) => ["team", "club", "sports_team"].includes(safeText(entity?.entity_type).toLowerCase()))
+      .map((entity) => safeText(entity?.label || entity?.entity_id))
+      .filter(Boolean);
+    const fallbackTeams = normalizedTeams.length >= 2 ? normalizedTeams : teamEntityLabels;
+    questionSideA = questionSideA || safeText(normalizedFixture?.home_team || normalizedFixture?.homeTeam) || fallbackTeams[0] || "";
+    questionSideB = questionSideB || safeText(normalizedFixture?.away_team || normalizedFixture?.awayTeam) || fallbackTeams[1] || "";
+  }
+  if (sportsLike) {
+    questionSideA = safeText(questionSideA.replace(/\b\d{4}-\d{2}-\d{2}\b/g, "").trim(), questionSideA);
+    questionSideB = safeText(questionSideB.replace(/\b\d{4}-\d{2}-\d{2}\b/g, "").trim(), questionSideB);
+  }
   const temporalContext = buildTemporalContext(safeText(options?.queryText), {
     timeZone: options?.timeZone,
     asOfUtc: options?.asOfUtc,
@@ -2158,6 +2677,8 @@ function normalizeQueryPlanPayload(payload = {}, options = {}) {
     entity_set: Array.isArray(mergedPayload?.entity_set) ? mergedPayload.entity_set : [],
     entities,
     entity_map: entities,
+    teams: normalizedTeams,
+    fixture: normalizedFixture,
     horizons,
     horizon,
     geography,
@@ -2176,7 +2697,14 @@ function normalizeQueryPlanPayload(payload = {}, options = {}) {
     supporting_domains: Array.isArray(mergedPayload?.supporting_domains) ? mergedPayload.supporting_domains : [],
     subdomain_map: subdomainMap,
     research_depth_preference: "deep",
-    original_query: safeText(options?.queryText),
+    original_query: originalQuery,
+    canonical_query: safeText(mergedPayload?.canonical_query || mergedPayload?.normalized_query || mergedPayload?.query_english, originalQuery),
+    input_language: inputLanguage,
+    response_language: responseLanguage,
+    response_language_name: RESPONSE_LANGUAGE_NAMES[responseLanguage] || "English",
+    interpretation_confidence: interpretationConfidence,
+    ambiguity_level: normalizeAmbiguityLevel(mergedPayload?.ambiguity_level, interpretationConfidence),
+    resolution_policy: resolutionPolicy,
   };
 }
 
@@ -2190,8 +2718,10 @@ function buildGenericQueryPlanPrompt(queryText, routingHints = {}) {
   const policyHint = Boolean(routingHints?.policyLike);
   const temporalContext = routingHints?.temporalContext || null;
   const resolvedWindowLabel = safeText(temporalContext?.resolved_time_window?.label);
+  const inferredLanguage = normalizeLanguageCode(routingHints?.languageHint, inferInputLanguage(queryText));
 
   return `Query: "${safeText(queryText)}"
+Detected input language hint: ${inferredLanguage}
 Preferred domain: ${safeText(routingHints.primaryDomainId, GENERAL_FORECAST_DOMAIN)}
 Intent hint: ${safeText(routingHints.intentShape, "directional_range")}
 Resolution frame hint: ${safeText(routingHints.resolutionFrame, "trend")}
@@ -2212,15 +2742,20 @@ Candidate domains:
 ${candidateLines || "- none"}
 
 Return one JSON object only with keys:
-primary_domain_id, intent_shape, resolution_frame, mode, question_side_a, question_side_b, event_date, jurisdiction, governing_entity.
+input_language, response_language, canonical_query, primary_domain_id, intent_shape, resolution_frame, mode, entities, teams, fixture, question_side_a, question_side_b, event_date, jurisdiction, governing_entity, interpretation_confidence, ambiguity_level, resolution_policy.
 
 Rules:
+- Act as Crystal's Universal Query Interpreter. Understand the user query in any language, then emit a canonical QueryPlan for the existing prediction pipeline.
+- Set input_language and response_language as ISO-like short codes such as "it", "en", "es", "fr", or "pt"; response_language must match the user's input language.
+- canonical_query should be an English, provider-friendly rewrite that preserves all user intent and entities.
 - Choose a concrete domain whenever possible.
 - Use ${GENERAL_FORECAST_DOMAIN} only as a last resort.
+- If the query is sports shorthand such as "Roma Inter", infer that it asks about the next available fixture between those teams, fill entities with team records, set teams ["Roma","Inter"], set fixture.home_team, fixture.away_team, fixture_resolution_policy to "next_available", auto_resolve_if_confident to true, and min_confidence to 0.72.
 - If the question is binary, fill question_side_a, question_side_b, event_date, jurisdiction and governing_entity whenever the query implies them.
 - If this is a policy/governance or public timeline question, preserve event_date, jurisdiction, governing_entity, and the policy route unless the hints are clearly wrong.
 - For policy/governance questions, do not return ${GENERAL_FORECAST_DOMAIN} when a plausible institutional outcome, jurisdiction, or governing actor is already present in the hints.
 - Leave question_side_a and question_side_b empty only when the question is not binary.
+- Set interpretation_confidence from 0 to 1 and ambiguity_level to low, medium, or high.
 - Use mode {"type":"forecast"}.
 - No markdown. No commentary. No wrapper keys.`;
 }
@@ -2286,8 +2821,13 @@ function buildForecastVerbalizationPrompt({ queryText, normalizedQuery, verified
     ? normalizedQuery.entities.map((entity) => safeText(entity?.label)).filter(Boolean).slice(0, 4)
     : [];
   const temporalContext = normalizedQuery?.temporal_context || null;
+  const responseLanguage = normalizeLanguageCode(normalizedQuery?.response_language, inferInputLanguage(queryText));
+  const responseLanguageName = RESPONSE_LANGUAGE_NAMES[responseLanguage] || "English";
 
   return `Query: "${safeText(queryText)}"
+Canonical query: "${safeText(normalizedQuery?.canonical_query)}"
+Input language: ${safeText(normalizedQuery?.input_language)}
+Response language: ${responseLanguage} (${responseLanguageName})
 Domain: ${safeText(normalizedQuery?.primary_domain_id)}
 Intent: ${safeText(normalizedQuery?.intent_shape)}
 Resolution frame: ${safeText(normalizedQuery?.resolution_frame)}
@@ -2313,9 +2853,10 @@ Quality verdict: ${safeText(compactScorecard.publication_basis?.quality_verdict)
 Blocker reason: ${safeText(compactScorecard.publication_basis?.blocker_reason)}
 
 Return one JSON object only with keys:
-title, summary, verdict, recommended_action.
+title, summary, verdict, recommended_action, what_to_watch, how_to_raise_confidence, coverage_notes.
 
 Rules:
+- Write every user-facing field in ${responseLanguageName}. Preserve team names, tickers, people, places, and provider names verbatim.
 - State the call first.
 - If the scorecard is binary, keep the compact verdict aligned with binary_contract.display_call.
 - Keep every field short, precise, and product-like.
@@ -2329,93 +2870,105 @@ function buildQualityAwareFallbackSummary({ queryText, scorecard = {}, binaryCon
   const qualityVerdict = safeText(scorecard?.publication_basis?.quality_verdict, publicationState === "published" ? "publishable" : "watchlist");
   const blockerReason = safeText(scorecard?.publication_basis?.blocker_reason);
   const intentShape = safeText(normalizedQuery?.intent_shape, binaryContract ? "binary_outcome" : "directional_range");
+  const responseLanguage = normalizeLanguageCode(normalizedQuery?.response_language, inferInputLanguage(queryText));
 
   if (qualityVerdict === "blocked_no_pick") {
-    return "Crystal has the match grounded, but the sports publish gate is still waiting on enough fresh lineup, injury, and preview confirmation.";
+    return localizedFallback(responseLanguage, "sports_blocked");
   }
   if (qualityVerdict === "coverage_gap") {
-    return "Crystal sees early signal here, but required coverage is still too thin for a stronger public read.";
+    return localizedFallback(responseLanguage, "coverage_gap");
   }
   if (qualityVerdict === "watchlist") {
     if (blockerReason === "directional_signal_not_publish_ready") {
-      return "Crystal has orientation here, but the signals are not converged enough to publish a stronger directional card yet.";
+      return localizedFallback(responseLanguage, "watchlist_directional");
     }
     if (blockerReason === "conflicting_live_signals") {
-      return "Crystal has real signal here, but the live stack is still too conflicted to treat this as decision-ready.";
+      return localizedFallback(responseLanguage, "watchlist_conflict");
     }
     if (blockerReason === "thin_evidence_coverage") {
-      return "Crystal has a readable thesis here, but the evidence stack is still too thin to sharpen it into a stronger public call.";
+      return localizedFallback(responseLanguage, "watchlist_thin");
     }
     return binaryContract
-      ? `Crystal still leans ${safeText(binaryContract.winning_side, "the current leader")}, but the edge remains partial and should be treated as a watchlist read.`
-      : "Crystal has a directional read here, but the evidence is still only partially converged.";
+      ? localizedFallback(responseLanguage, "binary_watchlist", { side: safeText(binaryContract.winning_side, "the current leader") })
+      : localizedFallback(responseLanguage, "directional_read");
   }
   if (intentShape === "range_regime") {
-    return "Crystal sees a publishable regime read here, with enough convergence to describe the active range and break risk.";
+    return localizedFallback(responseLanguage, "publishable_regime");
   }
   if (binaryContract) {
-    return `Crystal has a publishable binary edge on ${safeText(binaryContract.winning_side, "the leading side")}, with the caveats pushed into the evidence notes.`;
+    return localizedFallback(responseLanguage, "publishable_binary", { side: safeText(binaryContract.winning_side, "the leading side") });
   }
   if (blockerReason === "thin_signal_convergence") {
-    return "Crystal has directional evidence here, but it is not yet converged enough to be treated as a clean public call.";
+    return localizedFallback(responseLanguage, "thin_signal");
   }
-  return safeText(scorecard?.why_this_side, `Crystal built a directional read for "${safeText(queryText, "this query")}".`);
+  return safeText(
+    scorecard?.why_this_side,
+    localizedFallback(responseLanguage, "default_summary", { query: safeText(queryText, "this query") })
+  );
 }
 
 function buildQualityAwareFallbackVerdict({ queryText, scorecard = {}, binaryContract = null, normalizedQuery = {} }) {
   const publicationState = safeText(scorecard?.publication_state, "limited");
   const qualityVerdict = safeText(scorecard?.publication_basis?.quality_verdict, publicationState === "published" ? "publishable" : "watchlist");
+  const responseLanguage = normalizeLanguageCode(normalizedQuery?.response_language, inferInputLanguage(queryText));
 
   if (binaryContract?.display_call && qualityVerdict !== "blocked_no_pick") {
     return binaryContract.display_call;
   }
   if (qualityVerdict === "blocked_no_pick") {
-    return "Blocked pending sports publish gate";
+    return localizedFallback(responseLanguage, "verdict_blocked_sports");
   }
   if (qualityVerdict === "grounded_lean") {
-    return safeText(scorecard?.primary_call, "Grounded lean: fixture resolved, edge still partial");
+    return safeText(scorecard?.primary_call, localizedFallback(responseLanguage, "verdict_grounded_lean"));
   }
   if (qualityVerdict === "coverage_gap") {
-    return "Coverage gap: hold as watchlist";
+    return localizedFallback(responseLanguage, "verdict_coverage_gap");
   }
   if (qualityVerdict === "watchlist") {
     if (scorecard?.publication_basis?.blocker_reason === "directional_signal_not_publish_ready") {
-      return safeText(scorecard?.primary_call, "Watchlist: directional read not publish-ready");
+      return safeText(scorecard?.primary_call, localizedFallback(responseLanguage, "verdict_watchlist_directional"));
     }
     if (scorecard?.publication_basis?.blocker_reason === "conflicting_live_signals") {
-      return safeText(scorecard?.primary_call, "Watchlist: live signals still conflict");
+      return safeText(scorecard?.primary_call, localizedFallback(responseLanguage, "verdict_watchlist_conflict"));
     }
-    return safeText(scorecard?.primary_call, "Watchlist: directional read remains tentative");
+    return safeText(scorecard?.primary_call, localizedFallback(responseLanguage, "verdict_watchlist"));
   }
   if (safeText(normalizedQuery?.intent_shape) === "range_regime") {
-    return safeText(scorecard?.primary_call, "Publishable range/regime read");
+    return safeText(scorecard?.primary_call, localizedFallback(responseLanguage, "publishable_regime"));
   }
-  return safeText(scorecard?.primary_call, `Crystal directional read: ${safeText(queryText, "forecast")}`);
+  if (binaryContract?.winning_side) {
+    return safeText(
+      binaryContract.display_call,
+      localizedFallback(responseLanguage, "publishable_binary", { side: binaryContract.winning_side })
+    );
+  }
+  return safeText(scorecard?.primary_call, localizedFallback(responseLanguage, "directional_read"));
 }
 
-function buildQualityAwareRecommendedAction(scorecard = {}) {
+function buildQualityAwareRecommendedAction(scorecard = {}, normalizedQuery = {}) {
   const qualityVerdict = safeText(scorecard?.publication_basis?.quality_verdict);
+  const responseLanguage = normalizeLanguageCode(normalizedQuery?.response_language || scorecard?.response_language, "en");
   if (qualityVerdict === "blocked_no_pick") {
-    return "Treat this as a grounded matchup read only. Wait for fresher lineup, injury, and preview confirmation before using it as a publishable sports pick.";
+    return localizedFallback(responseLanguage, "action_blocked_sports");
   }
   if (qualityVerdict === "grounded_lean") {
-    return "Use this as a grounded lean, not a max-confidence pick. Watch lineups, late injuries, and market divergence before acting more aggressively.";
+    return localizedFallback(responseLanguage, "action_grounded_lean");
   }
   if (qualityVerdict === "coverage_gap") {
-    return "Treat this as a watchlist item and wait for stronger source coverage before acting with conviction.";
+    return localizedFallback(responseLanguage, "action_coverage_gap");
   }
   if (qualityVerdict === "watchlist") {
     if (scorecard?.publication_basis?.blocker_reason === "directional_signal_not_publish_ready") {
-      return "Use this as a watchlist thesis only. Wait for stronger convergence before treating it as a public-grade directional call.";
+      return localizedFallback(responseLanguage, "action_watchlist_directional");
     }
     if (scorecard?.publication_basis?.blocker_reason === "conflicting_live_signals") {
-      return "Treat this as a conflict watchlist and wait for the strongest live signals to resolve before acting with conviction.";
+      return localizedFallback(responseLanguage, "action_watchlist_conflict");
     }
-    return "Use this as a bounded scenario read and monitor the invalidation triggers before sizing up any action.";
+    return localizedFallback(responseLanguage, "action_watchlist");
   }
   return safeText(
     scorecard?.recommended_posture,
-    "Use this as a live directional read and keep monitoring the invalidation triggers."
+    localizedFallback(responseLanguage, "action_default")
   );
 }
 
@@ -2587,6 +3140,7 @@ function buildFinalCard({
   const runAsOfUtc = safeText(temporalContext?.as_of_utc, now);
   const runAsOfTimezone = safeText(temporalContext?.as_of_timezone, "Europe/Rome");
   const runAsOfLocalDate = safeText(temporalContext?.as_of_local_date);
+  const responseLanguage = normalizeLanguageCode(normalizedQuery?.response_language, inferInputLanguage(queryText));
   const rawSportsbookReadinessState =
     safeText(
       verifiedEvidencePack?.sports_grounding?.sportsbook_readiness_state,
@@ -2616,7 +3170,7 @@ function buildFinalCard({
   const howToRaiseConfidence = uniqueStrings(
     normalizeTextList(voicePayload?.how_to_raise_confidence, 4).concat(
       Array.isArray(verifiedEvidencePack?.missingness_map)
-        ? verifiedEvidencePack.missingness_map.map((item) => item.replace(/_/g, " "))
+        ? localizeReasonList(verifiedEvidencePack.missingness_map, responseLanguage)
         : []
     )
   ).slice(0, 4);
@@ -2630,6 +3184,10 @@ function buildFinalCard({
     domain: domainConfig.domain_id,
     stakes_level: buildStakeLevel(domainConfig.domain_id),
     risk_band: publicationState === "published" ? "medium" : "high",
+    query_origin: safeText(queryText),
+    canonical_query: safeText(normalizedQuery?.canonical_query, safeText(queryText)),
+    input_language: safeText(normalizedQuery?.input_language, responseLanguage),
+    response_language: responseLanguage,
     title: safeText(voicePayload?.title, safeText(queryText, "Crystal Forecast")),
     summary: safeText(
       voicePayload?.summary,
@@ -2651,7 +3209,7 @@ function buildFinalCard({
     why_this_side: safeText(scorecard?.why_this_side),
     personal_output: safeText(
       voicePayload?.recommended_action,
-      buildQualityAwareRecommendedAction(scorecard)
+      buildQualityAwareRecommendedAction(scorecard, normalizedQuery)
     ),
     scenario_set: scenarioSet,
     so_what: [],
@@ -2836,9 +3394,18 @@ function buildFinalCard({
   };
 }
 
-function buildPendingRunCard({ runId, queryText, queryPlan = {}, visibility = "private", accessToken = null, pollAfterMs = 2500 }) {
+function buildPendingRunCard({
+  runId,
+  queryText,
+  queryPlan = {},
+  visibility = "private",
+  accessToken = null,
+  pollAfterMs = 2500,
+  languageHint = "",
+}) {
   const domainId = resolveDomainId(queryPlan?.primary_domain_id || queryPlan?.domain_id || queryPlan?.domain || GENERAL_FORECAST_DOMAIN);
   const domainConfig = getDomain(domainId, GENERAL_FORECAST_DOMAIN);
+  const responseLanguage = normalizeLanguageCode(queryPlan?.response_language, normalizeLanguageCode(languageHint, inferInputLanguage(queryText)));
   const temporalContext =
     queryPlan?.temporal_context && typeof queryPlan.temporal_context === "object"
       ? queryPlan.temporal_context
@@ -2855,9 +3422,40 @@ function buildPendingRunCard({ runId, queryText, queryPlan = {}, visibility = "p
     domain: domainId,
     stakes_level: buildStakeLevel(domainId),
     risk_band: "high",
-    title: "Crystal is running a deeper forecast",
-    summary: "The deep prediction pipeline is still assembling the final card. Crystal will update this result as soon as the run closes.",
-    verdict: `Deep run in progress for: ${safeText(queryText, domainConfig.short_label || "forecast")}`,
+    query_origin: safeText(queryText),
+    canonical_query: safeText(queryPlan?.canonical_query, safeText(queryText)),
+    input_language: safeText(queryPlan?.input_language, responseLanguage),
+    response_language: responseLanguage,
+    title:
+      responseLanguage === "it"
+        ? "Crystal sta elaborando una previsione piu profonda"
+        : responseLanguage === "es"
+          ? "Crystal esta ejecutando una prevision mas profunda"
+          : responseLanguage === "fr"
+            ? "Crystal lance une prevision plus profonde"
+            : responseLanguage === "pt"
+              ? "Crystal esta rodando uma previsao mais profunda"
+              : "Crystal is running a deeper forecast",
+    summary:
+      responseLanguage === "it"
+        ? "La pipeline predittiva profonda sta assemblando la card finale. Crystal aggiornera il risultato appena la run si chiude."
+        : responseLanguage === "es"
+          ? "La pipeline predictiva profunda esta armando la card final. Crystal actualizara el resultado cuando cierre la run."
+          : responseLanguage === "fr"
+            ? "La pipeline predictive profonde assemble la card finale. Crystal mettra le resultat a jour des que la run sera terminee."
+            : responseLanguage === "pt"
+              ? "A pipeline preditiva profunda esta montando a card final. Crystal atualizara o resultado quando a run terminar."
+              : "The deep prediction pipeline is still assembling the final card. Crystal will update this result as soon as the run closes.",
+    verdict:
+      responseLanguage === "it"
+        ? `Run profonda in corso per: ${safeText(queryText, domainConfig.short_label || "forecast")}`
+        : responseLanguage === "es"
+          ? `Run profunda en curso para: ${safeText(queryText, domainConfig.short_label || "forecast")}`
+          : responseLanguage === "fr"
+            ? `Run profonde en cours pour: ${safeText(queryText, domainConfig.short_label || "forecast")}`
+            : responseLanguage === "pt"
+              ? `Run profunda em curso para: ${safeText(queryText, domainConfig.short_label || "forecast")}`
+              : `Deep run in progress for: ${safeText(queryText, domainConfig.short_label || "forecast")}`,
     temporal_context: temporalContext,
     run_as_of_utc: runAsOfUtc,
     run_as_of_timezone: safeText(temporalContext?.as_of_timezone, "Europe/Rome"),
@@ -2865,7 +3463,16 @@ function buildPendingRunCard({ runId, queryText, queryPlan = {}, visibility = "p
     relative_time_phrase: safeText(temporalContext?.relative_phrase),
     resolved_time_window: temporalContext?.resolved_time_window || null,
     primary_call: "",
-    personal_output: "Stay on this screen. Crystal will replace this limited placeholder with the final forecast when the run completes.",
+    personal_output:
+      responseLanguage === "it"
+        ? "Resta su questa schermata. Crystal sostituira questo placeholder con la previsione finale quando la run sara completata."
+        : responseLanguage === "es"
+          ? "Quedate en esta pantalla. Crystal reemplazara este placeholder con la prevision final cuando termine la run."
+          : responseLanguage === "fr"
+            ? "Reste sur cet ecran. Crystal remplacera ce placeholder par la prevision finale quand la run sera terminee."
+            : responseLanguage === "pt"
+              ? "Fique nesta tela. Crystal substituira este placeholder pela previsao final quando a run terminar."
+              : "Stay on this screen. Crystal will replace this limited placeholder with the final forecast when the run completes.",
     scenario_set: [],
     so_what: [],
     drivers: [],
@@ -3154,6 +3761,7 @@ async function buildVerifiedEvidencePack(context, { runId, queryText, normalized
     typeof context.getPredictionMarketPulse === "function" ? context.getPredictionMarketPulse : getPolymarketPulse;
   const resolveSportsForecastContext =
     typeof context.buildSportsForecastContext === "function" ? context.buildSportsForecastContext : buildSportsForecastContext;
+  const resolveTimeGptSignal = typeof context.fetchTimeGptSignal === "function" ? context.fetchTimeGptSignal : fetchTimeGptSignal;
 
   const mainBaseline = await get20YearHistoricalContext({
     db,
@@ -3218,6 +3826,16 @@ async function buildVerifiedEvidencePack(context, { runId, queryText, normalized
     }
   }
 
+  const timeGptPack = !sportsLike
+    ? await Promise.resolve(resolveTimeGptSignal(fetchJson, queryText, normalizedQuery, domainConfig)).catch(() => ({
+        available: false,
+        reason: "timegpt_unavailable",
+      }))
+    : { available: false, reason: "timegpt_skipped_for_sports" };
+  if (Array.isArray(timeGptPack?.signals)) {
+    liveSignals.push(...timeGptPack.signals);
+  }
+
   const searchPayload = sportsLike
     ? {
         signals: [],
@@ -3253,7 +3871,8 @@ async function buildVerifiedEvidencePack(context, { runId, queryText, normalized
     )
   )
     .filter(Boolean)
-    .concat(locationPack ? [locationPack] : []);
+    .concat(locationPack ? [locationPack] : [])
+    .concat(timeGptPack?.available ? [timeGptPack] : []);
 
   const connectorSignals = connectorPacks.flatMap((pack) => (Array.isArray(pack?.signals) ? pack.signals : []));
   const connectorTrustMap = connectorPacks.flatMap((pack) => (Array.isArray(pack?.source_trust_map) ? pack.source_trust_map : []));
@@ -3452,6 +4071,7 @@ async function buildVerifiedEvidencePack(context, { runId, queryText, normalized
       sourceUsage.missing_optional_sources.length > 0
         ? `Optional source coverage is still missing ${sourceUsage.missing_optional_sources.join(", ")}.`
         : "",
+      !sportsLike && !timeGptPack?.available ? safeText(timeGptPack?.reason) : "",
       locationStructure ? "" : geoLike ? "Location-aware grounding remains thin because the shared geography pack did not fully resolve." : "",
       mobilityStructure ? "" : mobilityLike || travelLike ? "Mobility/travel grounding remains partial because shared transit or flight feeds are still thin." : "",
       publicDataStructure ? "" : macroPublicLike || energyLike || environmentLike ? "Public-data grounding remains partial because one or more macro, energy, or environment providers did not return a usable signal." : "",
@@ -3491,10 +4111,13 @@ async function buildVerifiedEvidencePack(context, { runId, queryText, normalized
 
 async function compileQueryEdge(context, queryText, options = {}) {
   const { llmRuntime, withRetry } = context;
-  const routingHints = buildRoutingHints(queryText, {
-    timeZone: options?.timeZone,
-    asOfUtc: options?.asOfUtc,
-  });
+  const routingHints = {
+    ...buildRoutingHints(queryText, {
+      timeZone: options?.timeZone,
+      asOfUtc: options?.asOfUtc,
+    }),
+    languageHint: options?.languageHint || options?.requestLanguage,
+  };
   const generatePlannerPayload = () =>
     llmRuntime.generateJson({
       modelKind: "query",
@@ -3521,6 +4144,7 @@ async function compileQueryEdge(context, queryText, options = {}) {
     queryText,
     timeZone: options?.timeZone,
     asOfUtc: options?.asOfUtc,
+    languageHint: options?.languageHint || options?.requestLanguage,
   });
 }
 
@@ -3535,6 +4159,7 @@ async function executeForecastRun(context, payload = {}) {
   const runtimeTransport = safeText(payload.runtimeTransport, "local_core");
   const rolloutBucket = safeText(payload.rolloutBucket);
   const requestTimeZone = normalizeTimeZone(payload.requestTimeZone || payload.timeZone, "Europe/Rome");
+  const requestLanguage = normalizeLanguageCode(payload.requestLanguage || payload.languageHint, inferInputLanguage(queryText));
   const runAsOfUtc = safeText(payload.runAsOfUtc, nowIso());
   const runDeadlineAt = Date.now() + EXECUTION_BUDGET_MS;
   const clearField = deleteSentinel(admin);
@@ -3555,6 +4180,7 @@ async function executeForecastRun(context, payload = {}) {
     engine,
     plan,
     request_time_zone: requestTimeZone,
+    request_language: requestLanguage,
     run_as_of_utc: runAsOfUtc,
     runtime_transport: runtimeTransport,
     rollout_bucket: rolloutBucket || null,
@@ -3589,6 +4215,7 @@ async function executeForecastRun(context, payload = {}) {
             ),
             queryText,
             timeZone: requestTimeZone,
+            languageHint: requestLanguage,
             asOfUtc: runAsOfUtc,
           })
         : null;
@@ -3601,6 +4228,7 @@ async function executeForecastRun(context, payload = {}) {
           compileQueryEdge(context, queryText, {
             disableRetry: true,
             timeZone: requestTimeZone,
+            languageHint: requestLanguage,
             asOfUtc: runAsOfUtc,
           }),
         {
@@ -4135,8 +4763,10 @@ async function executeForecastRun(context, payload = {}) {
         });
       }
       const voicePayload = normalizeVerbalizerStagePayload(voicePayloadRaw, {
+        queryText,
         scorecard: finalizedScorecard,
         verifiedEvidencePack,
+        normalizedQuery,
       });
       if (voiceFallbackActivated) {
         voicePayload.fallback_used = true;

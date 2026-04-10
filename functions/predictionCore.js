@@ -3428,7 +3428,7 @@ function finalizeScorecard(rawScorecard = {}, evidenceBundle = {}, queryPlan = {
   const normalizedSportsbookReadinessState =
     domainId === SPORTS_PROBABILITY_MODE_DOMAIN
       ? sportsPublishGateReady
-        ? sportsB36LiveEnabled()
+        ? rawSportsbookReadinessState === "probability_mode_live" || sportsB36LiveEnabled()
           ? "probability_mode_live"
           : "probability_mode_preview"
         : sportsGrounded && sportsPickState === "grounded_lean"

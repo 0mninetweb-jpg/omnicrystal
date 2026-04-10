@@ -39,6 +39,12 @@ function getClientTimeZone() {
   }
 }
 
+function getClientLanguage() {
+  if (typeof navigator === 'undefined') return '';
+  const languages = Array.isArray(navigator.languages) ? navigator.languages : [];
+  return languages[0] || navigator.language || '';
+}
+
 function getFriendlyServerErrorMessage(
   status: number,
   payload: {
@@ -142,6 +148,11 @@ async function requestServer<T>(
   const clientTimeZone = getClientTimeZone();
   if (clientTimeZone) {
     headers['X-Crystal-Timezone'] = clientTimeZone;
+  }
+
+  const clientLanguage = getClientLanguage();
+  if (clientLanguage) {
+    headers['X-Crystal-Language'] = clientLanguage;
   }
 
   if (requireAuth) {

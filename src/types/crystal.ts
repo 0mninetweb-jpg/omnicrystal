@@ -514,6 +514,9 @@ export interface CardData {
   public_forecast_ref?: string | null;
   public_slug?: string | null;
   query_origin?: string;
+  canonical_query?: string;
+  input_language?: string;
+  response_language?: string;
   ranked_list?: {
     item_id: string;
     label: string;

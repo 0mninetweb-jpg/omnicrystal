@@ -581,6 +581,7 @@ export async function enqueueForecastRun(payload = {}) {
   const visibility = safeText(payload.visibility) === 'public' ? 'public' : 'private';
   const publicAccessToken = visibility === 'public' ? safeText(payload.publicAccessToken) || `pub_${Math.random().toString(36).slice(2, 12)}` : null;
   const requestTimeZone = safeText(payload.requestTimeZone, 'Europe/Rome');
+  const requestLanguage = safeText(payload.requestLanguage);
   const runAsOfUtc = safeText(payload.runAsOfUtc, new Date().toISOString());
   const runtimeTransport = safeText(payload.runtimeTransport, 'appwrite_jobs');
   const pendingCard = getCrystalRuntime().buildPendingRunCard({
@@ -590,6 +591,7 @@ export async function enqueueForecastRun(payload = {}) {
     visibility,
     accessToken: publicAccessToken,
     pollAfterMs: 2500,
+    languageHint: requestLanguage,
   });
 
   const target = resolveDocumentTarget(['forecast_runs', runId]);
@@ -618,6 +620,7 @@ export async function enqueueForecastRun(payload = {}) {
       engine: safeText(payload.engine, 'extended'),
       plan: safeText(payload.plan, 'free'),
       request_time_zone: requestTimeZone,
+      request_language: requestLanguage || null,
       run_as_of_utc: runAsOfUtc,
       runtime_transport: runtimeTransport,
       rollout_bucket: safeText(payload.rolloutBucket) || null,
@@ -638,6 +641,7 @@ export async function enqueueForecastRun(payload = {}) {
         visibility,
         publicAccessToken,
         requestTimeZone,
+        requestLanguage,
         runAsOfUtc,
         runtimeTransport,
       },
@@ -651,6 +655,7 @@ export async function enqueueForecastRun(payload = {}) {
       visibility,
       publicAccessToken,
       requestTimeZone,
+      requestLanguage,
       runAsOfUtc,
       runtimeTransport: 'appwrite_in_process_fallback',
       transportFallbackReason: error instanceof Error ? error.message : String(error),

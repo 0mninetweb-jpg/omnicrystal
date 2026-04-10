@@ -39,7 +39,7 @@ const LLM_API_KEY = process.env.LLM_API_KEY || '';
 function buildCorsHeaders(extra = {}) {
   return {
     'access-control-allow-origin': '*',
-    'access-control-allow-headers': 'authorization, content-type, x-crystal-source-view, x-crystal-metered-action, x-crystal-timezone, x-crystal-guest-key',
+    'access-control-allow-headers': 'authorization, content-type, x-crystal-source-view, x-crystal-metered-action, x-crystal-timezone, x-crystal-language, x-crystal-guest-key',
     'access-control-allow-methods': 'GET,POST,OPTIONS',
     'content-type': 'application/json; charset=utf-8',
     ...extra,
@@ -74,7 +74,16 @@ function getHeader(req, name) {
 
 function normalizeRoute(req) {
   const raw = safeText(req.path || req.url || '/', '/');
-  return raw.startsWith('/api/') ? raw.slice(4) : raw;
+  const pathOnly = raw.split('?')[0] || '/';
+  return pathOnly.startsWith('/api/') ? pathOnly.slice(4) : pathOnly;
+}
+
+function getQueryParam(req, name) {
+  const direct = req?.query?.[name];
+  if (typeof direct === 'string' && direct.trim()) return direct.trim();
+  const raw = safeText(req.path || req.url || '/', '/');
+  const queryString = raw.includes('?') ? raw.slice(raw.indexOf('?') + 1) : '';
+  return safeText(new URLSearchParams(queryString).get(name) || '');
 }
 
 function getTables() {
@@ -305,6 +314,7 @@ async function handleForecastRoute(route, req, user) {
         ok: true,
         query_plan: await getCrystalRuntime().compileQuery(safeText(body.query), {
           timeZone: getHeader(req, 'x-crystal-timezone'),
+          languageHint: getHeader(req, 'x-crystal-language') || safeText(body.languageHint || body.requestLanguage || body.language),
           asOfUtc: new Date().toISOString(),
         }),
       },
@@ -319,6 +329,7 @@ async function handleForecastRoute(route, req, user) {
         ok: true,
         query_plan: await getCrystalRuntime().compileQuery(safeText(body.query), {
           timeZone: getHeader(req, 'x-crystal-timezone'),
+          languageHint: getHeader(req, 'x-crystal-language') || safeText(body.languageHint || body.requestLanguage || body.language),
           asOfUtc: new Date().toISOString(),
         }),
       },
@@ -336,6 +347,7 @@ async function handleForecastRoute(route, req, user) {
       routeOrigin: 'public/predict',
       userContext: null,
       requestTimeZone: getHeader(req, 'x-crystal-timezone'),
+      requestLanguage: getHeader(req, 'x-crystal-language') || safeText(body.languageHint || body.requestLanguage || body.language),
       runAsOfUtc: new Date().toISOString(),
     });
     return { status: 200, body: response.card || response };
@@ -352,6 +364,7 @@ async function handleForecastRoute(route, req, user) {
       routeOrigin: 'predict',
       userContext: body.userContext || null,
       requestTimeZone: getHeader(req, 'x-crystal-timezone'),
+      requestLanguage: getHeader(req, 'x-crystal-language') || safeText(body.languageHint || body.requestLanguage || body.language),
       runAsOfUtc: new Date().toISOString(),
     });
     return { status: 200, body: response.card || response };
@@ -377,7 +390,7 @@ async function handleForecastRoute(route, req, user) {
 
   if (req.method === 'GET' && /^\/public\/forecast-runs\/[^/]+$/.test(route)) {
     const runId = decodeURIComponent(route.split('/')[3] || '');
-    const token = safeText(req.query?.token);
+    const token = getQueryParam(req, 'token');
     const runDoc = await readRun(runId);
     if (!runDoc || safeText(runDoc.visibility) !== 'public' || safeText(runDoc.access_token) !== token) {
       return { status: 404, body: { error: 'Forecast run not available.' } };
