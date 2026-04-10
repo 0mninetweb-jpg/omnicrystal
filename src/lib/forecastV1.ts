@@ -19,8 +19,6 @@ export const FORECAST_EXAMPLES = [
   'Should I wait before renting in Rome?',
 ];
 
-export const GUEST_FORECAST_SESSION_KEY = 'crystal-v1-guest-forecast-used';
-
 export const GEOGRAPHY_OPTIONS: Record<
   ForecastGeography,
   { label: string; level?: 'world' | 'country' | 'city'; location?: string }
@@ -481,32 +479,9 @@ export function buildForecastStack(card: CardData, context: ForecastResolvedCont
 
 export function normalizeForecastFailure(
   error: unknown,
-  context: ForecastResolvedContext,
-  reason: 'runtime' | 'guest_limit' = 'runtime'
+  context: ForecastResolvedContext
 ): ForecastCoverageStackItem[] {
   const message = error instanceof Error ? error.message : 'Crystal could not complete the request.';
-
-  if (reason === 'guest_limit') {
-    return [
-      {
-        id: `guest-limit-${Date.now()}`,
-        kind: 'coverage',
-        state: 'coverage_gap',
-        domainId: context.domainId,
-        entity: context.entity,
-        geography: context.geography,
-        horizon: context.horizon,
-        versionId: context.versionId,
-        title: 'Guest forecast used',
-        primaryOutcome: 'Crystal can publish one real guest forecast before sign-in.',
-        explanation:
-          'Your first public forecast worked. To keep forecasting, save cards, follow entities, and revisit versions, sign in and continue from the same surface.',
-        missingSignals: [],
-        refinementHints: ['Sign in to unlock the next forecast without losing the current query.'],
-        alternateSuggestions: ['Keep the same query and continue after sign-in.'],
-      },
-    ];
-  }
 
   return [
     {

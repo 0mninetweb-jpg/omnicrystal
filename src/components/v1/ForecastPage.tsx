@@ -10,7 +10,6 @@ import {
   buildForecastStack,
   DEFAULT_FORECAST_FILTERS,
   FORECAST_EXAMPLES,
-  GUEST_FORECAST_SESSION_KEY,
   normalizeForecastFailure,
   patchQueryPlanWithFilters,
   resolveForecastContext,
@@ -237,16 +236,6 @@ export function ForecastPage({ user, onLogin }: ForecastPageProps) {
           return;
         }
 
-        const guestUsed = typeof window !== 'undefined' && window.sessionStorage.getItem(GUEST_FORECAST_SESSION_KEY);
-        if (guestUsed) {
-          const guestItems = normalizeForecastFailure(null, baseContext, 'guest_limit');
-          setItems(guestItems);
-          setContext(baseContext);
-          setCurrentCard(null);
-          setIsSubmitting(false);
-          return;
-        }
-
         if (actionSpec.requiredPlan !== 'free') {
           const lockedItems = normalizeForecastFailure(
             new Error('Guest mode currently supports one standard forecast. Sign in for longer horizons or rigorous mode.'),
@@ -260,9 +249,6 @@ export function ForecastPage({ user, onLogin }: ForecastPageProps) {
         }
 
         card = await predictPublic(activeQuery, patchedPlan);
-        if (typeof window !== 'undefined') {
-          window.sessionStorage.setItem(GUEST_FORECAST_SESSION_KEY, '1');
-        }
       }
 
       const nextContext = resolveForecastContext(activeQuery, patchedPlan, filters, card);
