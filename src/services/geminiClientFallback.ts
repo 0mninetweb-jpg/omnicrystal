@@ -16,7 +16,7 @@ async function getClientAI() {
 
   if (!apiKey || apiKey === 'undefined') {
     throw new Error(
-      'No Gemini key is available. Configure VITE_GEMINI_API_KEY or enable the Firebase Functions backend.'
+      'No Gemini key is available. Configure VITE_GEMINI_API_KEY or the Appwrite runtime environment.'
     );
   }
 

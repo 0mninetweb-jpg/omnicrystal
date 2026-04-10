@@ -48,7 +48,7 @@ export async function saveCachedCard(card: any, queryText: string, domain: strin
 
     await setDoc(doc(db, 'cached_cards', domain, city, cardId), cachedCard);
   } catch (error) {
-    console.warn("Failed to save cached card to Firestore:", error);
+    console.warn("Failed to save cached card to the Crystal data layer:", error);
   }
 }
 
@@ -63,7 +63,7 @@ export async function getPipelineStatus(): Promise<any> {
     }
     return null;
   } catch (error) {
-    console.warn("Failed to fetch pipeline status:", error);
+    console.warn("Failed to fetch Crystal pipeline status:", error);
     return null;
   }
 }

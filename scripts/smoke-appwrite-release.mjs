@@ -116,6 +116,7 @@ assert(health.status === 200, `/health returned ${health.status}.`);
 assert(health.payload?.backend === 'appwrite-api', '/health did not report backend=appwrite-api.');
 assert(health.payload?.runtime?.legacy_proxy?.crystal_core_base_url === false, '/health still reports CRYSTAL_CORE_BASE_URL proxy enabled.');
 assert(health.payload?.runtime?.legacy_proxy?.mirofish_base_url === false, '/health still reports MIROFISH_BASE_URL proxy enabled.');
+assert(health.payload?.runtime?.rollout?.source === 'appwrite.system_config/runtime_rollout', '/health did not report Appwrite rollout config as the active source.');
 
 const ownUserRead = await appwriteApi('/data/document/get', {
   method: 'POST',

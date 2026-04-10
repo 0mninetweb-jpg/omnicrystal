@@ -1,5 +1,5 @@
-import { initializeApp } from 'firebase/app';
-import { getFirestore, doc, setDoc, getDocs, collection, query, where, orderBy, limit, serverTimestamp, getDoc } from 'firebase/firestore';
+import { initializeApp } from './src/platform/firebase-shim/app';
+import { getFirestore, doc, setDoc, getDocs, collection, query, where, orderBy, limit, serverTimestamp, getDoc } from './src/platform/firebase-shim/firestore';
 import axios from 'axios';
 import * as crypto from 'crypto-js';
 import fs from 'fs';

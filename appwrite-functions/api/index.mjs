@@ -36,6 +36,10 @@ const APPWRITE_API_KEY = process.env.APPWRITE_API_KEY || '';
 const LLM_BASE_URL = (process.env.LLM_BASE_URL || 'https://openrouter.ai/api/v1').replace(/\/$/, '');
 const LLM_API_KEY = process.env.LLM_API_KEY || '';
 
+function createRequestId() {
+  return `req_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+}
+
 function buildCorsHeaders(extra = {}) {
   return {
     'access-control-allow-origin': '*',
@@ -70,6 +74,10 @@ function parseBody(req) {
 
 function getHeader(req, name) {
   return safeText(req?.headers?.[name.toLowerCase()] || req?.headers?.[name] || '');
+}
+
+function getRequestId(req) {
+  return safeText(getHeader(req, 'x-request-id'), createRequestId());
 }
 
 function normalizeRoute(req) {
@@ -120,6 +128,98 @@ async function getUserFromJwt(req) {
   } catch (_error) {
     return null;
   }
+}
+
+function getUserMode(user) {
+  if (!user) return 'guest';
+  if (user?.prefs?.isAnonymous === true || user?.email === 'guest@anonymous.local') return 'guest';
+  return 'signed_in';
+}
+
+function inferDomainId(body = {}, payload = {}) {
+  return safeText(
+    body?.queryPlan?.primary_domain_id ||
+      body?.queryPlan?.domain_id ||
+      body?.queryPlan?.domain ||
+      payload?.query_plan?.primary_domain_id ||
+      payload?.query_plan?.domain_id ||
+      payload?.query_plan?.domain ||
+      payload?.card?.domain ||
+      payload?.domain
+  );
+}
+
+function extractCardState(payload = {}) {
+  return safeText(payload?.card_state, safeText(payload?.card?.card_state, safeText(payload?.run?.result_card?.card_state)));
+}
+
+function extractHoldReason(payload = {}) {
+  const card = payload?.card && typeof payload.card === 'object' ? payload.card : payload;
+  return safeText(
+    card?.publication_basis?.blocker_reason ||
+      card?.evidence_drawer?.quality_summary?.blocker_reason ||
+      card?.no_action_reason ||
+      card?.decision_reason ||
+      card?.sports_overlay_blocker_reason ||
+      card?.sports_no_bet_reason
+  );
+}
+
+function resolveErrorStatus(error) {
+  if (Number.isFinite(Number(error?.status))) return Number(error.status);
+  const code = safeText(error?.code).toLowerCase();
+  if (['permission-denied', 'forbidden'].includes(code)) return 403;
+  if (['unauthenticated', 'auth-required', 'unauthorized'].includes(code)) return 401;
+  if (['not-found', 'missing'].includes(code)) return 404;
+  if (['invalid-argument', 'failed-precondition', 'bad-request'].includes(code)) return 422;
+  return 500;
+}
+
+async function recordPipelineLog(tables, requestId, payload = {}) {
+  const target = resolveDocumentTarget(['pipeline_logs', requestId]);
+  if (!target) return;
+  await tables.upsertRow({
+    databaseId: APPWRITE_DATABASE_ID,
+    tableId: 'pipeline_logs',
+    rowId: target.rowId,
+    data: buildRowData(target, {
+      request_id: requestId,
+      route: safeText(payload.route),
+      event_type: safeText(payload.event_type, 'api_request'),
+      user_mode: safeText(payload.user_mode, 'guest'),
+      input_language: safeText(payload.input_language),
+      domain_id: safeText(payload.domain_id),
+      run_id: safeText(payload.run_id),
+      job_id: safeText(payload.job_id),
+      cache_hit: payload.cache_hit === true,
+      card_state: safeText(payload.card_state),
+      hold_reason: safeText(payload.hold_reason),
+      error_code: safeText(payload.error_code),
+      duration_ms: Number.isFinite(Number(payload.duration_ms)) ? Number(payload.duration_ms) : null,
+      runtime_transport: safeText(payload.runtime_transport),
+      source_view: safeText(payload.source_view),
+      route_origin: safeText(payload.route_origin),
+      query_text: safeText(payload.query_text),
+      status: safeText(payload.status),
+      visibility: safeText(payload.visibility),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      timestamp: new Date().toISOString(),
+    }),
+  });
+}
+
+function shouldLogRoute(route) {
+  return (
+    route.startsWith('/data/') ||
+    route === '/public/compile-query' ||
+    route === '/compile-query' ||
+    route === '/public/predict' ||
+    route === '/predict' ||
+    route.startsWith('/forecast-runs/') ||
+    route.startsWith('/public/forecast-runs/') ||
+    route.startsWith('/worldsim/')
+  );
 }
 
 function getUserPathAccessFailure(path, user) {
@@ -304,15 +404,17 @@ async function handleDataRoute(tables, route, req, user) {
   return null;
 }
 
-async function handleForecastRoute(route, req, user) {
+async function handleForecastRoute(route, req, user, requestId) {
   const body = parseBody(req);
+  const queryText = safeText(body.query);
 
   if (req.method === 'POST' && route === '/public/compile-query') {
+    if (!queryText) return { status: 422, body: { error: 'Query is required.' } };
     return {
       status: 200,
       body: {
         ok: true,
-        query_plan: await getCrystalRuntime().compileQuery(safeText(body.query), {
+        query_plan: await getCrystalRuntime().compileQuery(queryText, {
           timeZone: getHeader(req, 'x-crystal-timezone'),
           languageHint: getHeader(req, 'x-crystal-language') || safeText(body.languageHint || body.requestLanguage || body.language),
           asOfUtc: new Date().toISOString(),
@@ -323,11 +425,12 @@ async function handleForecastRoute(route, req, user) {
 
   if (req.method === 'POST' && route === '/compile-query') {
     if (!user) return { status: 401, body: { error: 'Authentication required.' } };
+    if (!queryText) return { status: 422, body: { error: 'Query is required.' } };
     return {
       status: 200,
       body: {
         ok: true,
-        query_plan: await getCrystalRuntime().compileQuery(safeText(body.query), {
+        query_plan: await getCrystalRuntime().compileQuery(queryText, {
           timeZone: getHeader(req, 'x-crystal-timezone'),
           languageHint: getHeader(req, 'x-crystal-language') || safeText(body.languageHint || body.requestLanguage || body.language),
           asOfUtc: new Date().toISOString(),
@@ -337,14 +440,16 @@ async function handleForecastRoute(route, req, user) {
   }
 
   if (req.method === 'POST' && route === '/public/predict') {
+    if (!queryText) return { status: 422, body: { error: 'Query is required.' } };
     const response = await enqueueForecastRun({
-      queryText: safeText(body.query),
+      queryText,
       queryPlan: body.queryPlan || null,
       uid: null,
       visibility: 'public',
       publicAccessToken: `pub_${Math.random().toString(36).slice(2, 10)}`,
       sourceView: 'forecast-gallery-guest',
       routeOrigin: 'public/predict',
+      requestId,
       userContext: null,
       requestTimeZone: getHeader(req, 'x-crystal-timezone'),
       requestLanguage: getHeader(req, 'x-crystal-language') || safeText(body.languageHint || body.requestLanguage || body.language),
@@ -355,13 +460,15 @@ async function handleForecastRoute(route, req, user) {
 
   if (req.method === 'POST' && route === '/predict') {
     if (!user) return { status: 401, body: { error: 'Authentication required.' } };
+    if (!queryText) return { status: 422, body: { error: 'Query is required.' } };
     const response = await enqueueForecastRun({
-      queryText: safeText(body.query),
+      queryText,
       queryPlan: body.queryPlan || null,
       uid: user.$id,
       visibility: 'private',
       sourceView: safeText(getHeader(req, 'x-crystal-source-view'), 'search'),
       routeOrigin: 'predict',
+      requestId,
       userContext: body.userContext || null,
       requestTimeZone: getHeader(req, 'x-crystal-timezone'),
       requestLanguage: getHeader(req, 'x-crystal-language') || safeText(body.languageHint || body.requestLanguage || body.language),
@@ -598,8 +705,11 @@ async function handleStaticRoute(route) {
 
 export default async ({ req, res, error }) => {
   const route = normalizeRoute(req);
+  const requestId = getRequestId(req);
   const tables = getTables();
   const user = await getUserFromJwt(req);
+  const requestStartedAt = Date.now();
+  const requestBody = parseBody(req);
 
   try {
     if (req.method === 'OPTIONS') {
@@ -609,16 +719,61 @@ export default async ({ req, res, error }) => {
     const response =
       (await handleStaticRoute(route)) ||
       (await handleDataRoute(tables, route, req, user)) ||
-      (await handleForecastRoute(route, req, user)) ||
+      (await handleForecastRoute(route, req, user, requestId)) ||
       (await handleAiRoute(route, req, tables, user)) ||
       (await handleWorldSimRoute(route, req, user)) || {
         status: 404,
         body: { error: `Unhandled route: ${route}` },
       };
 
+    if (shouldLogRoute(route)) {
+      await recordPipelineLog(tables, requestId, {
+        route,
+        event_type: 'api_request',
+        user_mode: getUserMode(user),
+        input_language: safeText(
+          getHeader(req, 'x-crystal-language'),
+          safeText(requestBody?.languageHint || requestBody?.requestLanguage || requestBody?.language)
+        ),
+        domain_id: inferDomainId(requestBody, response?.body || {}),
+        run_id: safeText(response?.body?.run_id, safeText(response?.body?.run?.run_id)),
+        job_id: safeText(response?.body?.job?.jobId, safeText(response?.body?.job_id)),
+        cache_hit: response?.body?.run?.cache_hit === true,
+        card_state: extractCardState(response?.body || {}),
+        hold_reason: extractHoldReason(response?.body || {}),
+        duration_ms: Date.now() - requestStartedAt,
+        runtime_transport: safeText(response?.body?.run?.runtime_transport, safeText(response?.body?.runtime_transport)),
+        source_view: safeText(getHeader(req, 'x-crystal-source-view'), safeText(requestBody?.sourceView)),
+        route_origin: route,
+        query_text: safeText(requestBody?.query),
+        status: safeText(response?.body?.status, response.status >= 400 ? 'failed' : 'ok'),
+        visibility: route.startsWith('/public/') ? 'public' : safeText(response?.body?.run?.visibility, user ? 'private' : 'guest'),
+      });
+    }
+
     return res.json(response.body, response.status, buildCorsHeaders());
   } catch (caughtError) {
     error(String(caughtError?.stack || caughtError?.message || caughtError));
-    return res.json({ error: safeText(caughtError?.message, 'Crystal Appwrite API failed.') }, 500, buildCorsHeaders());
+    const status = resolveErrorStatus(caughtError);
+    if (shouldLogRoute(route)) {
+      await recordPipelineLog(tables, requestId, {
+        route,
+        event_type: 'api_request_failed',
+        user_mode: getUserMode(user),
+        input_language: safeText(
+          getHeader(req, 'x-crystal-language'),
+          safeText(requestBody?.languageHint || requestBody?.requestLanguage || requestBody?.language)
+        ),
+        domain_id: inferDomainId(requestBody, {}),
+        duration_ms: Date.now() - requestStartedAt,
+        error_code: safeText(caughtError?.code, status === 500 ? 'appwrite-api-error' : `http-${status}`),
+        source_view: safeText(getHeader(req, 'x-crystal-source-view'), safeText(requestBody?.sourceView)),
+        route_origin: route,
+        query_text: safeText(requestBody?.query),
+        status: 'failed',
+        visibility: route.startsWith('/public/') ? 'public' : user ? 'private' : 'guest',
+      });
+    }
+    return res.json({ error: safeText(caughtError?.message, 'Crystal Appwrite API failed.') }, status, buildCorsHeaders());
   }
 };

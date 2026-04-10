@@ -517,6 +517,55 @@ export function getCrystalRuntime() {
   return runtimeSingleton;
 }
 
+function normalizeRolloutConfig(raw = {}) {
+  return {
+    enabled: raw?.enabled !== false,
+    transport: safeText(raw?.transport, 'appwrite') === 'local' ? 'local' : safeText(raw?.transport, 'appwrite'),
+    signed_in_percent: Math.max(0, Math.min(100, Number(raw?.signed_in_percent) || 0)),
+    guest_percent: Math.max(0, Math.min(100, Number(raw?.guest_percent) || 0)),
+    salt: safeText(raw?.salt, 'crystal-appwrite-rollout'),
+    kill_switch: raw?.kill_switch === true,
+    updated_at: serializeApiValue(raw?.updated_at) || null,
+  };
+}
+
+function inferRolloutStage(config = {}) {
+  const normalized = normalizeRolloutConfig(config);
+  const key = `${normalized.signed_in_percent}:${normalized.guest_percent}:${normalized.kill_switch ? 1 : 0}`;
+  const stages = {
+    '0:0:0': 'baseline',
+    '10:0:0': 'canary-10-0',
+    '10:10:0': 'canary-10-10',
+    '25:25:0': 'rollout-25-25',
+    '50:50:0': 'rollout-50-50',
+    '100:100:0': 'rollout-100-100',
+    '0:0:1': 'hard-rollback',
+  };
+  return stages[key] || 'custom';
+}
+
+async function readRuntimeRolloutSnapshot() {
+  try {
+    const snapshot = await getDbCompat().collection('system_config').doc('runtime_rollout').get();
+    const raw = snapshot.exists ? snapshot.data()?.crystal_core || {} : {};
+    const rollout = normalizeRolloutConfig(raw);
+    return {
+      ...rollout,
+      stage: inferRolloutStage(rollout),
+      source: 'appwrite.system_config/runtime_rollout',
+      fetch_error: null,
+    };
+  } catch (error) {
+    const rollout = normalizeRolloutConfig({});
+    return {
+      ...rollout,
+      stage: 'unavailable',
+      source: 'appwrite.system_config/runtime_rollout',
+      fetch_error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
 export async function readRun(runId) {
   const snapshot = await getDbCompat().collection('forecast_runs').doc(runId).get();
   return snapshot.exists ? snapshot.data() || null : null;
@@ -530,13 +579,18 @@ export function sanitizeRun(runDoc = {}) {
     current_stage: safeText(runDoc.current_stage, 'created'),
     query_text: safeText(runDoc.query_text),
     query_plan: serializeApiValue(runDoc.query_plan || null),
+    request_id: safeText(runDoc.request_id),
     request_time_zone: safeText(runDoc.request_time_zone),
+    request_language: safeText(runDoc.request_language),
     source_view: safeText(runDoc.source_view),
+    route_origin: safeText(runDoc.route_origin),
     engine: safeText(runDoc.engine, 'extended'),
     plan: safeText(runDoc.plan, 'free'),
     error_message: safeText(runDoc.error_message),
+    last_error_code: safeText(runDoc.last_error_code),
     runtime_transport: safeText(runDoc.runtime_transport, 'appwrite_in_process'),
     rollout_bucket: safeText(runDoc.rollout_bucket),
+    cache_hit: runDoc.cache_hit === true,
     evaluation_eligible: Boolean(runDoc.evaluation_eligible),
     resolution_status: safeText(runDoc.resolution_status),
     created_at: serializeApiValue(runDoc.created_at),
@@ -584,6 +638,11 @@ export async function enqueueForecastRun(payload = {}) {
   const requestLanguage = safeText(payload.requestLanguage);
   const runAsOfUtc = safeText(payload.runAsOfUtc, new Date().toISOString());
   const runtimeTransport = safeText(payload.runtimeTransport, 'appwrite_jobs');
+  const sourceView = safeText(payload.sourceView, visibility === 'public' ? 'forecast-gallery-guest' : 'search');
+  const routeOrigin = safeText(payload.routeOrigin, visibility === 'public' ? 'public/predict' : 'predict');
+  const requestId =
+    safeText(payload.requestId) ||
+    `req_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
   const pendingCard = getCrystalRuntime().buildPendingRunCard({
     runId,
     queryText: safeText(payload.queryText),
@@ -607,10 +666,12 @@ export async function enqueueForecastRun(payload = {}) {
     data: buildRowData(target, {
       run_id: runId,
       status: 'running',
+      request_id: requestId,
       visibility,
       access_token: publicAccessToken,
       uid: payload.uid || null,
-      source_view: safeText(payload.sourceView, 'search'),
+      source_view: sourceView,
+      route_origin: routeOrigin,
       query_text: safeText(payload.queryText),
       query_plan: payload.queryPlan || null,
       user_context: payload.userContext || null,
@@ -644,6 +705,9 @@ export async function enqueueForecastRun(payload = {}) {
         requestLanguage,
         runAsOfUtc,
         runtimeTransport,
+        sourceView,
+        routeOrigin,
+        requestId,
       },
     });
   } catch (error) {
@@ -672,10 +736,12 @@ export async function enqueueForecastRun(payload = {}) {
       data: buildRowData(target, {
         run_id: runId,
         status: 'failed',
+        request_id: requestId,
         visibility,
         access_token: publicAccessToken,
         uid: payload.uid || null,
-        source_view: safeText(payload.sourceView, 'search'),
+        source_view: sourceView,
+        route_origin: routeOrigin,
         query_text: safeText(payload.queryText),
         query_plan: payload.queryPlan || null,
         user_context: payload.userContext || null,
@@ -707,8 +773,11 @@ export async function enqueueForecastRun(payload = {}) {
       visibility,
       query_text: safeText(payload.queryText),
       query_plan: payload.queryPlan || null,
+      request_id: requestId,
       request_time_zone: requestTimeZone,
-      source_view: safeText(payload.sourceView, 'search'),
+      request_language: requestLanguage,
+      source_view: sourceView,
+      route_origin: routeOrigin,
       engine: safeText(payload.engine, 'extended'),
       plan: safeText(payload.plan, 'free'),
       runtime_transport: runtimeTransport,
@@ -807,6 +876,7 @@ export async function getRuntimeHealth() {
   return {
     ...serializeApiValue(await getCrystalRuntime().getHealth()),
     appwrite_database_id: APPWRITE_DATABASE_ID,
+    rollout: await readRuntimeRolloutSnapshot(),
     legacy_proxy: { crystal_core_base_url: false, mirofish_base_url: false },
   };
 }

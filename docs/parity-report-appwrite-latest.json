@@ -1,11 +1,11 @@
 {
-  "generated_at": "2026-04-10T22:29:54.130Z",
+  "generated_at": "2026-04-10T23:52:02.627Z",
   "endpoint": "https://fra.cloud.appwrite.io/v1",
   "project_id": "crystal",
   "site": {
     "ok": true,
     "status": 200,
-    "url": "https://69d9343a6fc9370d8893.appwrite.network"
+    "url": "https://69d98af258248320e2cf.appwrite.network"
   },
   "health": {
     "ok": true,
@@ -385,6 +385,18 @@
           "api_football_optional"
         ],
         "appwrite_database_id": "crystal",
+        "rollout": {
+          "enabled": true,
+          "transport": "remote",
+          "signed_in_percent": 10,
+          "guest_percent": 0,
+          "salt": "pdmq37s0p01u08v6jvr3vafosthi2zcx",
+          "kill_switch": false,
+          "updated_at": "2026-03-30T12:34:17.178Z",
+          "stage": "canary-10-0",
+          "source": "appwrite.system_config/runtime_rollout",
+          "fetch_error": null
+        },
         "legacy_proxy": {
           "crystal_core_base_url": false,
           "mirofish_base_url": false
@@ -431,17 +443,17 @@
     "ok": true,
     "blockers": [],
     "summary": {
-      "account_id": "parity_mntha9jh1ee80ad0",
+      "account_id": "parity_mntk7ulk532872d4",
       "auth_mode": "temp_email",
-      "session_email": "parity_mntha9jh1ee80ad0@crystal.local",
+      "session_email": "parity_mntk7ulk532872d4@crystal.local",
       "observe": {
-        "job_id": "617845c71f5e0e0c08e99ea9be238994e93f4f83b8f9a871cb32f2fdb700db72",
+        "job_id": "10203ee993352b348d2e87819e07a8682f8941675659a8055c3df8263d36bd90",
         "status": "completed",
         "result_available": true,
         "digest": true
       },
       "matrix": {
-        "job_id": "804794c9c96d137edb16a935e89a467809f2024046c22253b3eddb504754aa62",
+        "job_id": "d10ff819ac21795dff0ba6a6ea989a82d7c580c80f97e71507eca6fd82b461e3",
         "status": "completed",
         "result_available": true,
         "digest": true,

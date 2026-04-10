@@ -4,6 +4,7 @@ const { GoogleGenAI, Type } = require("@google/genai");
 const yahooFinance = require("yahoo-finance2").default;
 
 const { createLlmRuntime, isRetryableRuntimeError } = require("../llmRuntime");
+const { sanitizePublishedArtifactFields, sanitizePublishedText } = require("../publicForecastText");
 const {
   GENERAL_FORECAST_DOMAIN,
   SPORTS_MATCH_OUTCOMES_DOMAIN,
@@ -100,6 +101,16 @@ const SIMULATION_STAGE_POLICY = {
   reserveForFinalizationMs: 14 * 1000,
 };
 const RUNTIME_IMPLEMENTED_SOURCE_IDS = SHARED_IMPLEMENTED_SOURCE_IDS;
+const FORECAST_HORIZON_LABELS = {
+  now: "Now",
+  "72h": "72 hours",
+  "7d": "7 days",
+  "30d": "30 days",
+  "90d": "90 days",
+  "6m": "6 months",
+  "12m": "12 months",
+  season: "Season",
+};
 const PLANNER_RESPONSE_SCHEMA = {
   type: "object",
   properties: {
@@ -511,6 +522,265 @@ function getPrimaryLocationFromPlan(queryPlan = {}) {
 
 function getPrimaryEntityLabel(queryPlan = {}) {
   return safeText((Array.isArray(queryPlan?.entities) ? queryPlan.entities[0] : null)?.label);
+}
+
+function slugifyText(value, fallback = "forecast") {
+  const normalized = String(value || fallback)
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  const slug = normalized.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return slug || fallback;
+}
+
+function getCardStateUi(cardState) {
+  if (cardState === "blocked") return "coverage_gap";
+  if (cardState === "limited") return "limited";
+  return "published";
+}
+
+function getPrimaryForecastEntityLabel(queryPlan = {}, queryText = "") {
+  return safeText(
+    getPrimaryEntityLabel(queryPlan),
+    safeText(getPrimaryLocationFromPlan(queryPlan), safeText(queryText.split(/\s+/).slice(0, 4).join(" "), "General"))
+  );
+}
+
+function getForecastHorizonId(queryPlan = {}) {
+  return safeText(queryPlan?.filters?.horizon, safeText(queryPlan?.horizons?.[0]?.horizon_id, "30d"));
+}
+
+function formatForecastHorizonLabel(horizonId = "30d") {
+  return FORECAST_HORIZON_LABELS[horizonId] || horizonId;
+}
+
+function createForecastLineageId(queryText, queryPlan = {}, card = {}) {
+  const seed = [
+    safeText(queryText).toLowerCase(),
+    resolveDomainId(queryPlan?.primary_domain_id || queryPlan?.domain || queryPlan?.domain_id || card?.domain || ""),
+    slugifyText(getPrimaryForecastEntityLabel(queryPlan, queryText), "general"),
+    slugifyText(getPrimaryLocationFromPlan(queryPlan), "auto"),
+    getForecastHorizonId(queryPlan),
+  ].join("|");
+  return `lineage_${createHash(seed).slice(0, 24)}`;
+}
+
+function buildPublicForecastIds(queryText, queryPlan = {}, card = {}, existingPublicSlug = "") {
+  const lineageId = createForecastLineageId(queryText, queryPlan, card);
+  const domainId = resolveDomainId(queryPlan?.primary_domain_id || queryPlan?.domain || queryPlan?.domain_id || card?.domain || "");
+  const domainConfig = getDomain(domainId);
+  const entityLabel = sanitizePublishedText(getPrimaryForecastEntityLabel(queryPlan, queryText), getPrimaryForecastEntityLabel(queryPlan, queryText));
+  const entitySlug = slugifyText(entityLabel, "general");
+  const geographyLabel = sanitizePublishedText(safeText(getPrimaryLocationFromPlan(queryPlan), "Auto"), "Auto");
+  const geographySlug = slugifyText(geographyLabel, "auto");
+  const topicLabel = sanitizePublishedText(safeText(domainConfig?.short_label || domainConfig?.title, "Forecast"), "Forecast");
+  const topicSlug = slugifyText(topicLabel, "forecast");
+  const publicSlug =
+    safeText(existingPublicSlug) || `${entitySlug}-${topicSlug}-${lineageId.replace(/^lineage_/, "").slice(0, 8)}`;
+
+  return {
+    lineageId,
+    publicSlug,
+    entityLabel,
+    entitySlug,
+    geographyLabel,
+    geographySlug,
+    topicLabel,
+    topicSlug,
+    domainId,
+  };
+}
+
+function buildCanonicalLifecycleFields({ queryText = "", queryPlan = {}, card = {}, publishedAt = "" } = {}) {
+  const temporalContext =
+    card?.temporal_context && typeof card.temporal_context === "object"
+      ? card.temporal_context
+      : queryPlan?.temporal_context && typeof queryPlan.temporal_context === "object"
+        ? queryPlan.temporal_context
+        : buildTemporalContext(queryText, {
+            eventDate: safeText(card?.event_date || queryPlan?.event_date),
+          });
+  const resolvedTimeWindow = card?.resolved_time_window || temporalContext?.resolved_time_window || null;
+  const eventDate = safeText(
+    card?.event_date,
+    safeText(card?.resolution_target?.event_date, safeText(queryPlan?.event_date, safeText(resolvedTimeWindow?.end_date)))
+  );
+  const resolutionDueAt = safeText(
+    card?.resolution_due_at,
+    safeText(card?.resolution_target?.resolution_due_at, safeText(queryPlan?.resolution_due_at))
+  );
+  const resolutionStatus = safeText(card?.resolution_status, card?.evaluation_eligible ? "pending" : "skipped");
+
+  return {
+    temporal_context: temporalContext,
+    resolved_time_window: resolvedTimeWindow,
+    event_date: eventDate || null,
+    resolution_due_at: resolutionDueAt || null,
+    resolution_status: resolutionStatus,
+    published_at: safeText(card?.published_at, safeText(publishedAt, nowIso())),
+  };
+}
+
+function extractHoldReason(card = {}) {
+  return safeText(
+    card?.publication_basis?.blocker_reason,
+    safeText(
+      card?.evidence_drawer?.quality_summary?.blocker_reason,
+      safeText(
+        card?.no_action_reason,
+        safeText(
+          card?.decision_reason,
+          safeText(card?.sports_overlay_blocker_reason, safeText(card?.sports_no_bet_reason))
+        )
+      )
+    )
+  );
+}
+
+async function recordPipelineLog(db, admin, payload = {}) {
+  if (!db) return null;
+  const timestamp = nowIso();
+  const logId = safeText(payload.request_id) || `log_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+  const entry = {
+    request_id: safeText(payload.request_id, logId),
+    route: safeText(payload.route, "forecast"),
+    event_type: safeText(payload.event_type, "runtime"),
+    user_mode: safeText(payload.user_mode, "guest"),
+    input_language: safeText(payload.input_language),
+    domain_id: safeText(payload.domain_id),
+    run_id: safeText(payload.run_id),
+    job_id: safeText(payload.job_id),
+    cache_hit: payload.cache_hit === true,
+    card_state: safeText(payload.card_state),
+    hold_reason: safeText(payload.hold_reason),
+    error_code: safeText(payload.error_code),
+    duration_ms: Number.isFinite(Number(payload.duration_ms)) ? Number(payload.duration_ms) : null,
+    runtime_transport: safeText(payload.runtime_transport),
+    source_view: safeText(payload.source_view),
+    route_origin: safeText(payload.route_origin),
+    query_text: safeText(payload.query_text),
+    status: safeText(payload.status),
+    visibility: safeText(payload.visibility),
+    timestamp,
+    created_at: serverTimestamp(admin),
+    updated_at: serverTimestamp(admin),
+  };
+  await db.collection("pipeline_logs").doc(logId).set(entry, { merge: true });
+  return entry;
+}
+
+async function maybePublishForecastArtifacts({
+  db,
+  admin,
+  queryText,
+  queryPlan,
+  card,
+  sourceView = "search",
+  uid = null,
+}) {
+  if (!db || !card || getCardStateUi(card.card_state) === "coverage_gap") {
+    return card;
+  }
+
+  if (!safeText(card?.title) || !(safeText(card?.summary) || safeText(card?.verdict) || safeText(card?.primary_call))) {
+    return card;
+  }
+
+  const lineageId = createForecastLineageId(queryText, queryPlan, card);
+  const ledgerRef = db.collection("forecast_ledger").doc(lineageId);
+  const ledgerSnapshot = await ledgerRef.get();
+  const existingPublicSlug = safeText(ledgerSnapshot.data()?.public_slug);
+  const ids = buildPublicForecastIds(queryText, queryPlan, card, existingPublicSlug);
+  const publicRef = db.collection("public_forecasts").doc(ids.publicSlug);
+  const publicSnapshot = await publicRef.get();
+  const versionId = safeText(card.card_id, `version_${Date.now()}`);
+  const versionRef = ledgerRef.collection("versions").doc(versionId);
+  const horizonId = getForecastHorizonId(queryPlan);
+  const confidenceScore = Number.isFinite(Number(card?.trust_layer?.confidence_score))
+    ? Number(card.trust_layer.confidence_score)
+    : 0;
+  const publishedAt =
+    safeText(publicSnapshot.data()?.published_at) ||
+    safeText(ledgerSnapshot.data()?.published_at) ||
+    safeText(card?.published_at) ||
+    nowIso();
+  const canonicalLifecycle = buildCanonicalLifecycleFields({
+    queryText,
+    queryPlan,
+    card,
+    publishedAt,
+  });
+  const publicPayload = {
+    ...card,
+    ...canonicalLifecycle,
+    lineage_id: lineageId,
+    ledger_ref: `forecast_ledger/${lineageId}`,
+    public_forecast_ref: `public_forecasts/${ids.publicSlug}`,
+    public_slug: ids.publicSlug,
+    query_origin: safeText(queryText),
+    query_text: safeText(queryText),
+    query_plan: queryPlan || {},
+    entity_label: ids.entityLabel,
+    entity_slug: ids.entitySlug,
+    geography_label: ids.geographyLabel,
+    geography_slug: ids.geographySlug,
+    horizon_id: horizonId,
+    horizon_label: formatForecastHorizonLabel(horizonId),
+    domain_label: safeText(ids.topicLabel, ids.domainId),
+    topic_label: ids.topicLabel,
+    topic_slug: ids.topicSlug,
+    card_state_ui: getCardStateUi(card.card_state),
+    trust_confidence: confidenceScore,
+    public_visibility: "public",
+    source_view: safeText(sourceView, "search"),
+    published_by_uid: uid,
+    updatedAt: serverTimestamp(admin),
+    updated_at: serverTimestamp(admin),
+  };
+  const { sanitized: sanitizedPublicPayload } = sanitizePublishedArtifactFields(publicPayload);
+
+  const createdAt = serverTimestamp(admin);
+  const ledgerPayload = ledgerSnapshot.exists
+    ? sanitizedPublicPayload
+    : {
+        ...sanitizedPublicPayload,
+        createdAt,
+        created_at: createdAt,
+      };
+  const publicDocPayload = publicSnapshot.exists
+    ? sanitizedPublicPayload
+    : {
+        ...sanitizedPublicPayload,
+        createdAt,
+        created_at: createdAt,
+      };
+
+  await Promise.all([
+    ledgerRef.set(ledgerPayload, { merge: true }),
+    versionRef.set(
+      {
+        ...sanitizedPublicPayload,
+        parent_lineage_id: lineageId,
+        version_saved_at: serverTimestamp(admin),
+        createdAt,
+        created_at: createdAt,
+      },
+      { merge: true }
+    ),
+    publicRef.set(publicDocPayload, { merge: true }),
+  ]);
+
+  return {
+    ...card,
+    ...canonicalLifecycle,
+    lineage_id: lineageId,
+    ledger_ref: `forecast_ledger/${lineageId}`,
+    public_forecast_ref: `public_forecasts/${ids.publicSlug}`,
+    public_slug: ids.publicSlug,
+    query_origin: safeText(queryText),
+    query_text: safeText(queryText),
+  };
 }
 
 function buildTrendKeyword(queryText, queryPlan = {}, domainConfig = {}) {
@@ -3141,6 +3411,16 @@ function buildFinalCard({
   const runAsOfTimezone = safeText(temporalContext?.as_of_timezone, "Europe/Rome");
   const runAsOfLocalDate = safeText(temporalContext?.as_of_local_date);
   const responseLanguage = normalizeLanguageCode(normalizedQuery?.response_language, inferInputLanguage(queryText));
+  const resolvedTimeWindow = temporalContext?.resolved_time_window || null;
+  const eventDate = safeText(
+    normalizedQuery?.event_date,
+    safeText(resolutionTarget?.event_date, safeText(resolvedTimeWindow?.end_date))
+  ) || null;
+  const resolutionDueAt = safeText(
+    resolutionTarget?.resolution_due_at,
+    safeText(normalizedQuery?.resolution_due_at)
+  ) || null;
+  const resolutionStatus = evaluationEligible ? "pending" : "skipped";
   const rawSportsbookReadinessState =
     safeText(
       verifiedEvidencePack?.sports_grounding?.sportsbook_readiness_state,
@@ -3203,7 +3483,12 @@ function buildFinalCard({
     run_as_of_timezone: runAsOfTimezone,
     run_as_of_local_date: runAsOfLocalDate,
     relative_time_phrase: safeText(temporalContext?.relative_phrase),
-    resolved_time_window: temporalContext?.resolved_time_window || null,
+    resolved_time_window: resolvedTimeWindow,
+    event_date: eventDate,
+    resolution_due_at: resolutionDueAt,
+    resolution_status: resolutionStatus,
+    published_at: now,
+    updated_at: now,
     binary_contract: binaryContract,
     probability_split: probabilitySplit,
     why_this_side: safeText(scorecard?.why_this_side),
@@ -3413,6 +3698,8 @@ function buildPendingRunCard({
           eventDate: safeText(queryPlan?.event_date),
         });
   const runAsOfUtc = safeText(temporalContext?.as_of_utc, nowIso());
+  const resolvedTimeWindow = temporalContext?.resolved_time_window || null;
+  const eventDate = safeText(queryPlan?.event_date, safeText(resolvedTimeWindow?.end_date)) || null;
   return {
     card_id: `pending_${runId}`,
     card_type: getDomainCardTypes(domainId)[0] || "forecast_band",
@@ -3461,7 +3748,11 @@ function buildPendingRunCard({
     run_as_of_timezone: safeText(temporalContext?.as_of_timezone, "Europe/Rome"),
     run_as_of_local_date: safeText(temporalContext?.as_of_local_date),
     relative_time_phrase: safeText(temporalContext?.relative_phrase),
-    resolved_time_window: temporalContext?.resolved_time_window || null,
+    resolved_time_window: resolvedTimeWindow,
+    event_date: eventDate,
+    resolution_due_at: eventDate,
+    resolution_status: "pending",
+    updated_at: nowIso(),
     primary_call: "",
     personal_output:
       responseLanguage === "it"
@@ -4158,20 +4449,29 @@ async function executeForecastRun(context, payload = {}) {
   const plan = safeText(payload.plan, "free");
   const runtimeTransport = safeText(payload.runtimeTransport, "local_core");
   const rolloutBucket = safeText(payload.rolloutBucket);
+  const sourceView = safeText(payload.sourceView, visibility === "public" ? "forecast-gallery-guest" : "search");
+  const routeOrigin = safeText(payload.routeOrigin, visibility === "public" ? "public/predict" : "predict");
+  const requestId = safeText(
+    payload.requestId,
+    `req_${createHash(`${queryText}|${runId}|${routeOrigin}|${Date.now()}`).slice(0, 18)}`
+  );
   const requestTimeZone = normalizeTimeZone(payload.requestTimeZone || payload.timeZone, "Europe/Rome");
   const requestLanguage = normalizeLanguageCode(payload.requestLanguage || payload.languageHint, inferInputLanguage(queryText));
   const runAsOfUtc = safeText(payload.runAsOfUtc, nowIso());
   const runDeadlineAt = Date.now() + EXECUTION_BUDGET_MS;
+  const startedAtMs = Date.now();
   const clearField = deleteSentinel(admin);
   let cacheKey = "";
 
   await writeRunPatch(db, admin, runId, {
     run_id: runId,
+    request_id: requestId,
     status: "running",
     visibility,
     access_token: publicAccessToken,
     uid: payload.uid || null,
-    source_view: safeText(payload.sourceView, "search"),
+    source_view: sourceView,
+    route_origin: routeOrigin,
     query_text: queryText,
     query_plan: payload.queryPlan || null,
     user_context: payload.userContext || null,
@@ -4195,7 +4495,9 @@ async function executeForecastRun(context, payload = {}) {
     depth_mode: "deep",
     engine,
     plan,
-    source_view: safeText(payload.sourceView, "search"),
+    source_view: sourceView,
+    route_origin: routeOrigin,
+    request_id: requestId,
   });
   logCoreEvent("run_started", {
     runId,
@@ -4267,11 +4569,23 @@ async function executeForecastRun(context, payload = {}) {
     });
     const cachedForecast = await readForecastResultCache(db, cacheKey, FORECAST_RESULT_CACHE_TTL_MS);
     if (cachedForecast?.card) {
+      const cachedCard =
+        visibility === "public"
+          ? await maybePublishForecastArtifacts({
+              db,
+              admin,
+              queryText,
+              queryPlan: normalizedQuery,
+              card: cachedForecast.card,
+              sourceView,
+              uid: payload.uid || null,
+            })
+          : cachedForecast.card;
       await writeRunPatch(db, admin, runId, {
         status: "completed",
         current_stage: "completed",
         completed_at: serverTimestamp(admin),
-        result_card: cachedForecast.card,
+        result_card: cachedCard,
         query_plan: normalizedQuery,
         resolution_target: cachedForecast.resolution_target || null,
         evaluation_eligible: Boolean(cachedForecast.evaluation_eligible),
@@ -4301,11 +4615,30 @@ async function executeForecastRun(context, payload = {}) {
         domain: safeText(cachedForecast?.card?.domain),
         cache_hit: true,
       });
+      await recordPipelineLog(db, admin, {
+        request_id: requestId,
+        route: routeOrigin,
+        event_type: "forecast_completed",
+        user_mode: payload.uid ? "signed_in" : "guest",
+        input_language: safeText(normalizedQuery?.input_language, requestLanguage),
+        domain_id: safeText(normalizedQuery?.primary_domain_id || normalizedQuery?.domain_id || normalizedQuery?.domain),
+        run_id: runId,
+        cache_hit: true,
+        card_state: safeText(cachedCard?.card_state),
+        hold_reason: extractHoldReason(cachedCard),
+        duration_ms: Date.now() - startedAtMs,
+        runtime_transport: runtimeTransport,
+        source_view: sourceView,
+        route_origin: routeOrigin,
+        query_text: queryText,
+        status: "completed",
+        visibility,
+      });
       return {
         run_id: runId,
         status: "completed",
         query_plan: normalizedQuery,
-        card: cachedForecast.card,
+        card: cachedCard,
       };
     }
 
@@ -4773,7 +5106,7 @@ async function executeForecastRun(context, payload = {}) {
       }
       await writeArtifact(db, admin, runId, "voice_payload", voicePayload);
 
-    const card = buildFinalCard({
+    let card = buildFinalCard({
       runId,
       queryText,
       normalizedQuery,
@@ -4787,6 +5120,17 @@ async function executeForecastRun(context, payload = {}) {
       runtimeTransport,
       rolloutBucket,
     });
+    if (visibility === "public") {
+      card = await maybePublishForecastArtifacts({
+        db,
+        admin,
+        queryText,
+        queryPlan: normalizedQuery,
+        card,
+        sourceView,
+        uid: payload.uid || null,
+      });
+    }
 
     await writeRunPatch(db, admin, runId, {
       status: "completed",
@@ -4800,6 +5144,8 @@ async function executeForecastRun(context, payload = {}) {
       runtime_transport: runtimeTransport,
       rollout_bucket: rolloutBucket || null,
       core_version: CRYSTAL_CORE_VERSION,
+      route_origin: routeOrigin,
+      request_id: requestId,
       last_error_code: clearField,
       last_error_message: clearField,
       last_error_stage: clearField,
@@ -4821,6 +5167,25 @@ async function executeForecastRun(context, payload = {}) {
       transport: runtimeTransport,
       publication_state: safeText(card?.card_state),
       domain: safeText(card?.domain),
+    });
+    await recordPipelineLog(db, admin, {
+      request_id: requestId,
+      route: routeOrigin,
+      event_type: "forecast_completed",
+      user_mode: payload.uid ? "signed_in" : "guest",
+      input_language: safeText(card?.input_language, requestLanguage),
+      domain_id: safeText(card?.domain, safeText(normalizedQuery?.primary_domain_id || normalizedQuery?.domain_id || normalizedQuery?.domain)),
+      run_id: runId,
+      cache_hit: false,
+      card_state: safeText(card?.card_state),
+      hold_reason: extractHoldReason(card),
+      duration_ms: Date.now() - startedAtMs,
+      runtime_transport: runtimeTransport,
+      source_view: sourceView,
+      route_origin: routeOrigin,
+      query_text: queryText,
+      status: "completed",
+      visibility,
     });
 
     return {
@@ -4844,6 +5209,8 @@ async function executeForecastRun(context, payload = {}) {
         ""
       ),
       last_attempt_at: serverTimestamp(admin),
+      route_origin: routeOrigin,
+      request_id: requestId,
     });
     logCoreEvent("run_failed", {
       runId,
@@ -4852,6 +5219,24 @@ async function executeForecastRun(context, payload = {}) {
       error_stage: safeText(error?.details?.stage || error?.details?.json_stage || error?.stage, "unknown"),
       provider: safeText(error?.details?.provider || error?.details?.primaryProvider || error?.details?.fallbackProvider),
       message: error instanceof Error ? error.message : String(error),
+    });
+    await recordPipelineLog(db, admin, {
+      request_id: requestId,
+      route: routeOrigin,
+      event_type: "forecast_failed",
+      user_mode: payload.uid ? "signed_in" : "guest",
+      input_language: requestLanguage,
+      domain_id: safeText(payload?.queryPlan?.primary_domain_id || payload?.queryPlan?.domain_id || payload?.queryPlan?.domain),
+      run_id: runId,
+      cache_hit: false,
+      error_code: safeText(error?.code, "crystal-core-error"),
+      duration_ms: Date.now() - startedAtMs,
+      runtime_transport: runtimeTransport,
+      source_view: sourceView,
+      route_origin: routeOrigin,
+      query_text: queryText,
+      status: "failed",
+      visibility,
     });
     throw error;
   }

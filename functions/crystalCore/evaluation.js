@@ -1085,7 +1085,7 @@ async function buildProductSystemSummary({ db, sinceDate, recentRuns = [], domai
     safeCollectionQuery(() => db.collection(PHASE1_DECISION_LEDGER_COLLECTION).limit(800).get()),
   ]);
 
-  const remoteRuns = recentRuns.filter((runDoc) => safeText(runDoc?.runtime_transport).startsWith("remote"));
+  const remoteRuns = recentRuns.filter((runDoc) => getTransportBucket(runDoc?.runtime_transport) === "remote");
   const phase1DecisionEntries = phase1DecisionResult.docs.filter((entry) => {
     const updatedAt = entry?.updated_at?.toDate?.() || (entry?.updated_at ? new Date(entry.updated_at) : null);
     const resolvedAt = entry?.resolved_at ? new Date(entry.resolved_at) : null;
@@ -1139,7 +1139,7 @@ function getParityKey(runDoc = {}) {
 
 function getTransportBucket(runtimeTransport = "") {
   const normalized = safeText(runtimeTransport).toLowerCase();
-  if (normalized.startsWith("remote")) return "remote";
+  if (normalized.startsWith("remote") || normalized.startsWith("appwrite_")) return "remote";
   if (normalized.startsWith("legacy")) return "legacy";
   if (normalized.startsWith("local_fallback")) return "local_core";
   if (normalized.startsWith("local_core")) return "local_core";
@@ -1474,7 +1474,7 @@ async function generateEvaluationReport(context, options = {}) {
     updated_at: toSerializable(doc.data()?.updated_at),
   }));
 
-  const remoteRuns = recentRuns.filter((runDoc) => safeText(runDoc?.runtime_transport).startsWith("remote"));
+  const remoteRuns = recentRuns.filter((runDoc) => getTransportBucket(runDoc?.runtime_transport) === "remote");
   const remoteErrors =
     remoteRuns.length > 0 ? remoteRuns.filter((runDoc) => safeText(runDoc?.status) === "failed").length / remoteRuns.length : null;
   const remotePending =

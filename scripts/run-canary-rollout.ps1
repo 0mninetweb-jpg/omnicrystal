@@ -2,7 +2,7 @@ param(
   [ValidateSet("baseline", "canary-10-0", "canary-10-10", "rollout-25-25", "rollout-50-50", "rollout-100-100", "hard-rollback")]
   [string]$Stage = "canary-10-0",
   [switch]$Apply,
-  [string]$ProjectId = "omnicrystal",
+  [string]$ProjectId = "crystal",
   [string]$OutputMarkdownPath = "",
   [string]$OutputJsonPath = "",
   [int]$CacheWaitSeconds = 35,
@@ -125,7 +125,10 @@ function Invoke-NodeJson {
 
 function Get-HealthSnapshot {
   try {
-    return Invoke-RestMethod -Method Get -Uri "https://omnicrystal.web.app/api/health"
+    return Invoke-NodeJson -Arguments @(
+      (Join-Path $repoRoot "scripts/appwrite-health-snapshot.mjs"),
+      "--project=$ProjectId"
+    )
   } catch {
     return [pscustomobject]@{
       fetch_error = ($_ | Out-String).Trim()

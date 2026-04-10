@@ -1,5 +1,5 @@
-import { GoogleAuthProvider, auth, signInWithPopup, signOut } from 'firebase/auth';
-import { db } from 'firebase/firestore';
+import { GoogleAuthProvider, auth, signInWithPopup, signOut } from './platform/firebase-shim/auth';
+import { db } from './platform/firebase-shim/firestore';
 import { loginWithEmailPassword, registerWithEmailPassword } from './platform/appwriteClient';
 
 export { auth, db };
