@@ -1809,14 +1809,99 @@ function extractBinaryFrame(queryText) {
   };
 }
 
+const SPORTS_TEAM_ALIAS_HINTS = [
+  { label: "Inter Milan", aliases: ["inter milan", "inter", "internazionale"] },
+  { label: "Juventus", aliases: ["juventus", "juve"] },
+  { label: "AC Milan", aliases: ["ac milan", "milan"] },
+  { label: "Roma", aliases: ["as roma", "roma"] },
+  { label: "Pisa", aliases: ["pisa"] },
+  { label: "Napoli", aliases: ["napoli"] },
+  { label: "Lazio", aliases: ["ss lazio", "lazio"] },
+  { label: "Fiorentina", aliases: ["acf fiorentina", "fiorentina"] },
+  { label: "Atalanta", aliases: ["atalanta"] },
+  { label: "Bologna", aliases: ["bologna"] },
+  { label: "Torino", aliases: ["torino fc", "torino"] },
+  { label: "Genoa", aliases: ["genoa"] },
+  { label: "Parma", aliases: ["parma"] },
+  { label: "Udinese", aliases: ["udinese"] },
+  { label: "Verona", aliases: ["verona"] },
+  { label: "Cagliari", aliases: ["cagliari"] },
+  { label: "Lecce", aliases: ["lecce"] },
+  { label: "Sassuolo", aliases: ["sassuolo"] },
+  { label: "Como", aliases: ["como"] },
+  { label: "Cremonese", aliases: ["cremonese"] },
+  { label: "Arsenal", aliases: ["arsenal"] },
+  { label: "Manchester City", aliases: ["manchester city", "man city"] },
+  { label: "Manchester United", aliases: ["manchester united", "man utd"] },
+  { label: "Paris SG", aliases: ["paris saint germain", "paris sg", "psg"] },
+  { label: "Real Madrid", aliases: ["real madrid"] },
+  { label: "Barcelona", aliases: ["fc barcelona", "barcellona", "barca", "barcelona"] },
+];
+
+function escapeRegExp(value = "") {
+  return safeText(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function normalizeTeamAliasText(value = "") {
+  return normalizeText(value)
+    .replace(/[^a-z0-9\s]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function findLooseSportsTeamPair(queryText = "") {
+  const normalized = normalizeTeamAliasText(queryText);
+  if (!normalized) return null;
+
+  const hits = [];
+  for (const team of SPORTS_TEAM_ALIAS_HINTS) {
+    for (const alias of team.aliases) {
+      const normalizedAlias = normalizeTeamAliasText(alias);
+      if (!normalizedAlias) continue;
+      const aliasPattern = escapeRegExp(normalizedAlias).replace(/\s+/g, "\\s+");
+      const match = normalized.match(new RegExp(`(^|\\s)(${aliasPattern})(?=\\s|$)`, "i"));
+      if (!match) continue;
+      const start = match.index + match[1].length;
+      hits.push({
+        label: team.label,
+        start,
+        end: start + match[2].length,
+        length: match[2].length,
+      });
+      break;
+    }
+  }
+
+  const selected = [];
+  for (const hit of hits.sort((left, right) => left.start - right.start || right.length - left.length)) {
+    if (selected.some((item) => item.label === hit.label)) continue;
+    if (selected.some((item) => hit.start < item.end && item.start < hit.end)) continue;
+    selected.push(hit);
+    if (selected.length === 2) break;
+  }
+
+  if (selected.length < 2) return null;
+  return {
+    question_side_a: selected[0].label,
+    question_side_b: selected[1].label,
+  };
+}
+
 function looksLikeSportsFixtureQuery(queryText = "") {
   const normalized = normalizeText(queryText);
   if (!normalized) return false;
+  const hasExplicitFixtureSyntax =
+    /\b(vs|versus|contro)\b/.test(normalized) ||
+    /\bwill\s+.+?\s+beat\s+.+/.test(normalized) ||
+    /\b(?:should i back|bet on|pick|take)\s+.+/.test(normalized);
+  const hasSportsKeyword =
+    /\b(partia|partit[ae]|calcio|serie a|champions|europa|conference|goal|fixture|match|moneyline|to win|risultat[io]|risultato esatto|pronostico|scommett|segno|1x2|under|over|chi vince)\b/.test(
+      normalized
+    );
+  const hasLooseTeamPair = Boolean(findLooseSportsTeamPair(queryText));
   if (
-    !/\b(vs|versus|contro)\b/.test(normalized) &&
-    !/\b(partita|calcio|serie a|champions|goal|fixture|match|moneyline|to win)\b/.test(normalized) &&
-    !/\bwill\s+.+?\s+beat\s+.+/.test(normalized) &&
-    !/\b(?:should i back|bet on|pick|take)\s+.+/.test(normalized)
+    !hasExplicitFixtureSyntax &&
+    !(hasSportsKeyword && hasLooseTeamPair)
   ) {
     return false;
   }
@@ -1830,7 +1915,7 @@ function looksLikeSportsProbabilityQuery(queryText = "") {
   const normalized = normalizeText(queryText);
   if (!normalized) return false;
   if (!looksLikeSportsFixtureQuery(queryText)) return false;
-  return /\b(will\s+.+?\s+beat\s+.+|should i back|bet on|moneyline|to win|pick\s+.+\s+(?:or|vs|versus|contro)\s+.+)\b/.test(
+  return /\b(will\s+.+?\s+beat\s+.+|should i back|bet on|moneyline|to win|pick\s+.+\s+(?:or|vs|versus|contro)\s+.+|risultato esatto|exact score|correct score|1x2|segno)\b/.test(
     normalized
   );
 }
@@ -1846,7 +1931,9 @@ function extractFixtureSides(queryText = "") {
   if (!match) {
     match = raw.match(/^(?:should i back|bet on|pick|take)\s+(.+?)\s+(?:or|vs\.?|versus|contro)\s+(.+?)(?:\s+(?:this|next|on)\b|[?!.]|$)/i);
   }
-  if (!match) return null;
+  if (!match) {
+    return findLooseSportsTeamPair(queryText);
+  }
   const sideA = normalizeDisplayLabel(match[1]);
   const sideB = normalizeDisplayLabel(match[2]);
   if (!sideA || !sideB || normalizeText(sideA) === normalizeText(sideB)) return null;

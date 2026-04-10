@@ -1,11 +1,11 @@
 {
-  "generated_at": "2026-04-10T11:14:36.843Z",
+  "generated_at": "2026-04-10T16:47:46.456Z",
   "endpoint": "https://fra.cloud.appwrite.io/v1",
   "project_id": "crystal",
   "site": {
     "ok": true,
     "status": 200,
-    "url": "https://69d8d506d522680fa06c.appwrite.network"
+    "url": "https://69d8df7baadccbb43130.appwrite.network"
   },
   "health": {
     "ok": true,
@@ -417,17 +417,17 @@
     "ok": true,
     "blockers": [],
     "summary": {
-      "account_id": "parity_mnst586n3b460c14",
+      "account_id": "parity_mnt52aqga0d559e3",
       "auth_mode": "temp_email",
-      "session_email": "parity_mnst586n3b460c14@crystal.local",
+      "session_email": "parity_mnt52aqga0d559e3@crystal.local",
       "observe": {
-        "job_id": "165e110f1215b335b014a2ea4a7f27c143eda03848d5cf3165a93ee2871e9806",
+        "job_id": "6dd7ae6b10ab14b07b375074a59254a2ab9c45c40eee58eef5159525b818d406",
         "status": "completed",
         "result_available": true,
         "digest": true
       },
       "matrix": {
-        "job_id": "64628ab09ac247e020e66abf37cf8f89c3deca9369f8777ce3842f5f77dce11e",
+        "job_id": "14e9b130848c98acbc0e30d8315525dd9a01c8d0eaf4e8df7214c8334cd9eb4b",
         "status": "completed",
         "result_available": true,
         "digest": true,
@@ -442,7 +442,7 @@
     }
   },
   "baseline": {
-    "requested_mode": "frozen",
+    "requested_mode": "auto",
     "effective_mode": "frozen",
     "frozen_available": true,
     "frozen_path": "C:\\Users\\Fiorenza\\OneDrive\\Desktop\\Codex\\crystal-review-0316\\docs\\golden-parity-baseline.json",
@@ -800,7 +800,7 @@
           "expects_binary": true,
           "appwrite_status": "completed",
           "legacy_status": "completed",
-          "appwrite_transport": "appwrite_in_process_fallback",
+          "appwrite_transport": "appwrite_jobs",
           "legacy_transport": "appwrite_jobs",
           "appwrite_winner": "Wait",
           "legacy_winner": "Wait",
@@ -1944,7 +1944,7 @@
       "expects_binary": true,
       "appwrite_status": "completed",
       "legacy_status": "completed",
-      "appwrite_transport": "appwrite_in_process_fallback",
+      "appwrite_transport": "appwrite_jobs",
       "legacy_transport": "appwrite_jobs",
       "appwrite_winner": "Wait",
       "legacy_winner": "Wait",

@@ -1,11 +1,11 @@
 # Appwrite Parity Gate
 
-- Generated: 2026-04-10T11:14:36.843Z
-- Site URL: https://69d8d506d522680fa06c.appwrite.network
+- Generated: 2026-04-10T16:47:46.456Z
+- Site URL: https://69d8df7baadccbb43130.appwrite.network
 - Site smoke: green
 - Health: green
 - WorldSim lifecycle: green
-- Baseline mode: frozen (requested: frozen)
+- Baseline mode: frozen (requested: auto)
 - Gate verdict: green
 
 ## Summary
