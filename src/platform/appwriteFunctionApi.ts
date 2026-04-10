@@ -84,7 +84,7 @@ export async function invokeCrystalApi<T>(
     if (!getCurrentSessionUser()) {
       throw new Error('Devi accedere per usare questa funzione.');
     }
-    nextHeaders.Authorization = `Bearer ${await createCurrentUserJwt()}`;
+    nextHeaders.authorization = `Bearer ${await createCurrentUserJwt()}`;
   }
 
   const execution = await functions.createExecution({
