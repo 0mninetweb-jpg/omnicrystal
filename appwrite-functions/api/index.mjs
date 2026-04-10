@@ -51,7 +51,13 @@ function parseBody(req) {
   if (!bodyText) {
     return {};
   }
-  if (req.bodyJson && typeof req.bodyJson === 'object') return req.bodyJson;
+  try {
+    if (req.bodyJson && typeof req.bodyJson === 'object') return req.bodyJson;
+  } catch (_error) {
+    // Some Appwrite invokers can expose an eager bodyJson getter that throws for
+    // malformed CLI payloads. Fall back to bodyText so a bad parse cannot block
+    // unrelated routes before their handlers run.
+  }
   if (bodyText) {
     try {
       return JSON.parse(bodyText);
@@ -189,6 +195,8 @@ async function callLlmJson(prompt, systemInstruction) {
 }
 
 async function handleDataRoute(tables, route, req, user) {
+  if (!route.startsWith('/data/')) return null;
+
   const body = parseBody(req);
 
   if (route === '/data/document/get') {

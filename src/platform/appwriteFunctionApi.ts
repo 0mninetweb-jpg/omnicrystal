@@ -5,7 +5,7 @@ const functions = new Functions(client);
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || process.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '');
 const API_FUNCTION_ID =
-  import.meta.env.VITE_APPWRITE_API_FUNCTION_ID || process.env.VITE_APPWRITE_API_FUNCTION_ID || '';
+  import.meta.env.VITE_APPWRITE_API_FUNCTION_ID || process.env.VITE_APPWRITE_API_FUNCTION_ID || 'api';
 
 function looksLikeHtml(text: string) {
   return /<!doctype html>|<html[\s>]/i.test(text);
