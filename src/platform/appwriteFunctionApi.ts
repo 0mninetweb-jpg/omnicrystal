@@ -27,6 +27,14 @@ function mapExecutionMethod(method: 'GET' | 'POST') {
   return method === 'GET' ? ExecutionMethod.GET : ExecutionMethod.POST;
 }
 
+function normalizeExecutionHeaders(headers: Record<string, string>) {
+  return Object.fromEntries(
+    Object.entries(headers)
+      .filter(([key, value]) => key.trim() && typeof value === 'string')
+      .map(([key, value]) => [key.toLowerCase(), value])
+  );
+}
+
 async function invokeViaHttp<T>(
   path: string,
   {
@@ -77,7 +85,7 @@ export async function invokeCrystalApi<T>(
     return invokeViaHttp<T>(path, { method, body, headers });
   }
 
-  const nextHeaders = { ...headers };
+  const nextHeaders = normalizeExecutionHeaders(headers);
 
   if (requireAuth) {
     await ensureAuthBootstrap();

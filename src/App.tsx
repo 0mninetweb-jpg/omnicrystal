@@ -373,6 +373,12 @@ function AppRouter() {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (currentUser) {
+        if (currentUser.isAnonymous) {
+          setUser(null);
+          setIsAuthReady(true);
+          return;
+        }
+
         setUser(currentUser);
 
         try {

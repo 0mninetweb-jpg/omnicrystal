@@ -103,6 +103,29 @@ function createFunctionsClient() {
   return functionsSingleton;
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function createForecastJobExecution(body) {
+  let lastError = null;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      return await createFunctionsClient().createExecution({
+        functionId: APPWRITE_JOBS_FUNCTION_ID,
+        async: true,
+        body: JSON.stringify(body),
+      });
+    } catch (error) {
+      lastError = error;
+      if (attempt < 3) {
+        await sleep(350 * attempt);
+      }
+    }
+  }
+  throw lastError || new Error('Unable to enqueue forecast job.');
+}
+
 class TimestampCompat {
   constructor(value = Date.now()) {
     const date = value instanceof Date ? value : new Date(value);
@@ -605,25 +628,38 @@ export async function enqueueForecastRun(payload = {}) {
   });
 
   try {
-    await createFunctionsClient().createExecution({
-      functionId: APPWRITE_JOBS_FUNCTION_ID,
-      async: true,
-      body: JSON.stringify({
-        action: 'run-forecast',
-        payload: {
-          ...payload,
-          runId,
-          queryText: safeText(payload.queryText),
-          queryPlan: payload.queryPlan || null,
-          visibility,
-          publicAccessToken,
-          requestTimeZone,
-          runAsOfUtc,
-          runtimeTransport,
-        },
-      }),
+    await createForecastJobExecution({
+      action: 'run-forecast',
+      payload: {
+        ...payload,
+        runId,
+        queryText: safeText(payload.queryText),
+        queryPlan: payload.queryPlan || null,
+        visibility,
+        publicAccessToken,
+        requestTimeZone,
+        runAsOfUtc,
+        runtimeTransport,
+      },
     });
   } catch (error) {
+    const fallbackResult = await executeForecastRunNow({
+      ...payload,
+      runId,
+      queryText: safeText(payload.queryText),
+      queryPlan: payload.queryPlan || null,
+      visibility,
+      publicAccessToken,
+      requestTimeZone,
+      runAsOfUtc,
+      runtimeTransport: 'appwrite_in_process_fallback',
+      transportFallbackReason: error instanceof Error ? error.message : String(error),
+    });
+
+    if (fallbackResult?.card) {
+      return fallbackResult;
+    }
+
     await tables.upsertRow({
       databaseId: APPWRITE_DATABASE_ID,
       tableId: 'forecast_runs',

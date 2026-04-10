@@ -31,6 +31,7 @@
     "build:appwrite-functions": "node scripts/build-appwrite-function-bundles.mjs",
     "deploy:appwrite-functions": "node scripts/deploy-appwrite-functions.mjs",
     "sync:appwrite-env": "node scripts/sync-appwrite-function-env.mjs",
+    "smoke:appwrite-release": "node scripts/smoke-appwrite-release.mjs",
     "check:appwrite-parity": "node scripts/run-appwrite-parity-gate.mjs",
     "freeze:appwrite-baseline": "node scripts/freeze-appwrite-parity-baseline.mjs",
     "scan:public-forecast-text": "node scripts/backfill-public-forecast-text.mjs --dry-run",

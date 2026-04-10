@@ -6,6 +6,7 @@ import {
   DEFAULT_APPWRITE_ENDPOINT,
   DEFAULT_APPWRITE_PROJECT_ID,
   DEFAULT_APPWRITE_SITE_URL,
+  appwriteJson,
   createAppwriteUser,
   createEmailSession,
   createJwtWithCookie,
@@ -40,10 +41,14 @@ const fixturesPath = path.resolve(repoRoot, readOption('fixtures', 'scripts/fixt
 const outputJsonPath = path.resolve(repoRoot, readOption('output-json', 'docs/parity-report-appwrite-latest.json'));
 const outputMarkdownPath = path.resolve(repoRoot, readOption('output-md', 'docs/parity-report-appwrite-latest.md'));
 const frozenBaselinePath = path.resolve(repoRoot, readOption('frozen-baseline', 'docs/golden-parity-baseline.json'));
-const siteUrl = (readOption('site-url', process.env.CRYSTAL_SITE_URL || DEFAULT_APPWRITE_SITE_URL) || DEFAULT_APPWRITE_SITE_URL).replace(/\/$/, '');
+const siteUrlOption = (readOption('site-url', process.env.CRYSTAL_SITE_URL || '') || '').replace(/\/$/, '');
+const siteId = readOption('site', 'crystal-web') || 'crystal-web';
+const siteDeploymentId = readOption('deployment', '');
 const gateRuns = Math.max(1, Number(readOption('runs', '3')) || 3);
 const strictMode = !readFlag('allow-soft-fail');
 const baselineMode = safeText(readOption('baseline-mode', process.env.CRYSTAL_PARITY_BASELINE_MODE || 'auto'), 'auto').toLowerCase();
+
+let siteUrl = siteUrlOption;
 
 function safeText(value, fallback = '') {
   return typeof value === 'string' && value.trim() ? value.trim() : fallback;
@@ -120,6 +125,39 @@ async function legacyJson(route, { method = 'GET', body, headers = {} } = {}) {
     throw error;
   }
   return payload;
+}
+
+async function resolveActiveSiteDeploymentId({ adminKey }) {
+  const site = await appwriteJson(`/sites/${siteId}`, {
+    endpoint,
+    projectId,
+    key: adminKey,
+  });
+  return site?.deploymentId || site?.latestDeploymentId || '';
+}
+
+async function resolveDeploymentDomain({ adminKey, deploymentId }) {
+  const payload = await appwriteJson('/proxy/rules', {
+    endpoint,
+    projectId,
+    key: adminKey,
+  });
+  const rules = Array.isArray(payload?.rules) ? payload.rules : [];
+  const rule = rules.find(
+    (entry) =>
+      entry.deploymentResourceType === 'site' &&
+      entry.deploymentResourceId === siteId &&
+      (!deploymentId || entry.deploymentId === deploymentId) &&
+      entry.status === 'verified'
+  );
+  return rule?.domain ? `https://${rule.domain}` : '';
+}
+
+async function resolveSiteUrl(adminKey) {
+  if (siteUrl) return siteUrl;
+  const activeDeploymentId = siteDeploymentId || (await resolveActiveSiteDeploymentId({ adminKey }));
+  siteUrl = (await resolveDeploymentDomain({ adminKey, deploymentId: activeDeploymentId })) || DEFAULT_APPWRITE_SITE_URL;
+  return siteUrl;
 }
 
 async function appwriteApi(route, { method = 'GET', body, headers = {}, key, timeoutMs = 120000 } = {}) {
@@ -349,12 +387,13 @@ function buildFailure(message, extra = {}) {
 }
 
 async function fetchSiteSmoke() {
-  const response = await fetch(siteUrl, { redirect: 'follow' });
+  const targetUrl = siteUrl || DEFAULT_APPWRITE_SITE_URL;
+  const response = await fetch(targetUrl, { redirect: 'follow' });
   const html = await response.text();
   return {
     ok: response.ok && /crystal/i.test(html),
     status: response.status,
-    url: siteUrl,
+    url: targetUrl,
   };
 }
 
@@ -928,6 +967,7 @@ async function main() {
   const adminKey = await resolveProjectKey({ endpoint });
   const fixtures = await readJson(fixturesPath);
   const frozenBaseline = await loadFrozenBaseline(frozenBaselinePath);
+  await resolveSiteUrl(adminKey);
   const health = await collectHealth(adminKey);
   const site = await fetchSiteSmoke();
   const runs = [];

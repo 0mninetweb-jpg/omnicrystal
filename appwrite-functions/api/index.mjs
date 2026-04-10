@@ -113,10 +113,17 @@ async function getUserFromJwt(req) {
   }
 }
 
-function assertUserPathAccess(path, user) {
-  if (Array.isArray(path) && path[0] === 'users' && safeText(path[1]) !== safeText(user?.$id)) {
-    throw new Error('Non puoi accedere a questi dati.');
+function getUserPathAccessFailure(path, user) {
+  if (!Array.isArray(path) || path[0] !== 'users') {
+    return null;
   }
+  if (!user) {
+    return { status: 401, body: { error: 'Authentication required.' } };
+  }
+  if (safeText(path[1]) !== safeText(user.$id)) {
+    return { status: 403, body: { error: 'Non puoi accedere a questi dati.' } };
+  }
+  return null;
 }
 
 async function maybeMigrateLegacyUserData(tables, user) {
@@ -204,7 +211,8 @@ async function handleDataRoute(tables, route, req, user) {
     const target = resolveDocumentTarget(path);
     if (!target) return { status: 404, body: { error: 'Document path not supported.' } };
     if (path[0] === 'users') {
-      assertUserPathAccess(path, user);
+      const accessFailure = getUserPathAccessFailure(path, user);
+      if (accessFailure) return accessFailure;
       await maybeMigrateLegacyUserData(tables, user);
     }
     const rows = await listAllRows(tables, target.tableId);
@@ -217,7 +225,8 @@ async function handleDataRoute(tables, route, req, user) {
     const target = resolveDocumentTarget(path);
     if (!target) return { status: 404, body: { error: 'Document path not supported.' } };
     if (path[0] === 'users') {
-      assertUserPathAccess(path, user);
+      const accessFailure = getUserPathAccessFailure(path, user);
+      if (accessFailure) return accessFailure;
       await maybeMigrateLegacyUserData(tables, user);
     }
     const rows = await listAllRows(tables, target.tableId);
@@ -236,7 +245,10 @@ async function handleDataRoute(tables, route, req, user) {
     const path = Array.isArray(body.path) ? body.path : [];
     const target = resolveDocumentTarget(path);
     if (!target) return { status: 404, body: { error: 'Document path not supported.' } };
-    if (path[0] === 'users') assertUserPathAccess(path, user);
+    if (path[0] === 'users') {
+      const accessFailure = getUserPathAccessFailure(path, user);
+      if (accessFailure) return accessFailure;
+    }
     const rows = await listAllRows(tables, target.tableId);
     const existing = rows.find((entry) => entry.path_key === target.pathKey || entry.source_id === target.sourceId);
     if (existing) {
@@ -249,7 +261,8 @@ async function handleDataRoute(tables, route, req, user) {
     const collectionPath = Array.isArray(body.path) ? body.path : [];
     const nextId = safeText(body.id) || `doc_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
     if (collectionPath[0] === 'users') {
-      assertUserPathAccess([...collectionPath, nextId], user);
+      const accessFailure = getUserPathAccessFailure([...collectionPath, nextId], user);
+      if (accessFailure) return accessFailure;
       await maybeMigrateLegacyUserData(tables, user);
     }
     const target = resolveDocumentTarget([...collectionPath, nextId]);
@@ -269,7 +282,8 @@ async function handleDataRoute(tables, route, req, user) {
     const collectionTarget = resolveCollectionTarget(path);
     if (!collectionTarget) return { status: 404, body: { error: 'Collection path not supported.' } };
     if (path[0] === 'users') {
-      assertUserPathAccess([...path, 'placeholder'], user);
+      const accessFailure = getUserPathAccessFailure([...path, 'placeholder'], user);
+      if (accessFailure) return accessFailure;
       await maybeMigrateLegacyUserData(tables, user);
     } else if (!collectionTarget.publicRead && !user && !isPublicCollectionPath(path)) {
       return { status: 401, body: { error: 'Authentication required.' } };
