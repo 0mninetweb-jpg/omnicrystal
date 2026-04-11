@@ -83,6 +83,35 @@ function deriveProbabilitySplit(card: CardData) {
   return null;
 }
 
+function formatPercent(value: unknown) {
+  const num = Number(value);
+  return Number.isFinite(num) ? `${Math.round(num * 100)}%` : '--';
+}
+
+function getSportsModelProbabilities(card: CardData) {
+  return (
+    card.sports_model_probabilities ||
+    card.publication_basis?.sports_model_probabilities ||
+    card.world_sim?.sports_decision?.model_probabilities ||
+    card.sports_grounding?.model_probabilities ||
+    null
+  );
+}
+
+export function getSportsOneXTwoLabel(card: CardData) {
+  const frame = getSportsModelProbabilities(card);
+  if (!frame) return null;
+  const home = Number(frame.home);
+  const draw = Number(frame.draw);
+  const away = Number(frame.away);
+  if (![home, draw, away].every(Number.isFinite)) return null;
+  return [
+    `1 ${safeText(frame.home_label, 'Home')} ${formatPercent(home)}`,
+    `X ${safeText(frame.draw_label, 'Draw')} ${formatPercent(draw)}`,
+    `2 ${safeText(frame.away_label, 'Away')} ${formatPercent(away)}`,
+  ].join(' | ');
+}
+
 export function formatHorizonLabel(horizon: ForecastHorizon) {
   return HORIZON_OPTIONS.find((item) => item.value === horizon)?.label || horizon;
 }

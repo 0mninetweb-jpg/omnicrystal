@@ -86,7 +86,7 @@ const JSON_STAGE_MAX_TOKENS = {
 };
 const EXECUTION_BUDGET_MS = 90 * 1000;
 const FORECAST_RESULT_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
-const FORECAST_CACHE_SCHEMA_VERSION = "2026-04-10-universal-query-v2";
+const FORECAST_CACHE_SCHEMA_VERSION = "2026-04-11-sports-1x2-v2";
 const STAGE_RETRY_POLICY = {
   planner: { retries: 2, baseDelayMs: 1200, timeoutMs: 18 * 1000 },
   dossier: { retries: 2, baseDelayMs: 1500, timeoutMs: 24 * 1000 },
@@ -494,6 +494,43 @@ async function readForecastResultCache(db, cacheKey, maxAgeMs = FORECAST_RESULT_
     ...payload,
     age_ms: ageMs,
   };
+}
+
+function isSportsForecastDomain(normalizedQuery = {}) {
+  const domainId = safeText(normalizedQuery?.primary_domain_id || normalizedQuery?.domain_id || normalizedQuery?.domain);
+  return domainId === SPORTS_MATCH_OUTCOMES_DOMAIN || domainId === SPORTS_PROBABILITY_MODE_DOMAIN;
+}
+
+function shouldReuseCachedForecast(cachedForecast = {}, normalizedQuery = {}) {
+  const cachedCard = cachedForecast?.card;
+  if (!cachedCard || typeof cachedCard !== "object") return false;
+
+  const expectedLanguage = normalizeLanguageCode(
+    normalizedQuery?.response_language || normalizedQuery?.input_language,
+    ""
+  );
+  const cachedLanguage = normalizeLanguageCode(
+    cachedCard?.response_language || cachedCard?.input_language,
+    ""
+  );
+  if (expectedLanguage && cachedLanguage && expectedLanguage !== cachedLanguage) {
+    return false;
+  }
+
+  if (isSportsForecastDomain(normalizedQuery)) {
+    const sportsFrame = getSportsOutcomeFrame(
+      cachedCard,
+      cachedCard?.sports_grounding?.model_probabilities || cachedCard?.publication_basis?.sports_model_probabilities || null,
+      normalizedQuery
+    );
+    const scenarioSet = Array.isArray(cachedCard?.scenario_set) ? cachedCard.scenario_set : [];
+    const primaryCall = safeText(cachedCard?.primary_call);
+    if (!sportsFrame) return false;
+    if (scenarioSet.length < 3) return false;
+    if (!(primaryCall.includes("1 ") && primaryCall.includes("X ") && primaryCall.includes("2 "))) return false;
+  }
+
+  return true;
 }
 
 async function writeForecastResultCache(db, admin, cacheKey, payload = {}) {
@@ -2011,6 +2048,80 @@ function buildFallbackVoicePayload({ queryText, normalizedQuery, scorecard, veri
   const binaryDisplayCall = safeText(scorecard?.binary_contract?.display_call);
   const binaryContract = scorecard?.binary_contract || null;
   const responseLanguage = normalizeLanguageCode(normalizedQuery?.response_language, inferInputLanguage(queryText));
+  const sportsFrame = getSportsOutcomeFrame(
+    scorecard,
+    verifiedEvidencePack?.sports_grounding?.model_probabilities || null,
+    normalizedQuery
+  );
+  const sportsConfidenceHints =
+    responseLanguage === "it"
+      ? [
+          "Aspetta formazioni ufficiali, infortuni tardivi e drift quote per stringere meglio il range.",
+          "Conferma se il mercato si muove verso 1, X o 2 prima di trattare il favorito come edge pieno.",
+        ]
+      : responseLanguage === "es"
+        ? [
+            "Espera alineaciones oficiales, lesiones tardias y drift de cuotas para cerrar mejor el rango.",
+            "Confirma si el mercado se mueve hacia 1, X o 2 antes de tratar al favorito como edge pleno.",
+          ]
+        : responseLanguage === "fr"
+          ? [
+              "Attends les compos officielles, blessures tardives et le drift des cotes pour resserrer le range.",
+              "Confirme si le marche bouge vers 1, X ou 2 avant de traiter le favori comme un edge plein.",
+            ]
+          : responseLanguage === "pt"
+            ? [
+                "Espere escalacoes oficiais, lesoes tardias e drift de odds para apertar melhor o range.",
+                "Confirme se o mercado anda para 1, X ou 2 antes de tratar o favorito como edge cheio.",
+              ]
+            : [
+                "Wait for confirmed lineups, late injuries, and odds drift before tightening the range further.",
+                "Confirm whether the market is moving toward 1, X, or 2 before treating the favorite as a full edge.",
+              ];
+
+  if (sportsFrame) {
+    return normalizeVerbalizerStagePayload(
+      {
+        title: safeText(queryText, safeText(domainConfig?.short_label || "Crystal sports forecast")),
+        summary: buildSportsOutcomeSummary({
+          scorecard,
+          normalizedQuery,
+          sportsFrame,
+        }),
+        verdict: buildQualityAwareFallbackVerdict({
+          queryText,
+          scorecard,
+          binaryContract,
+          normalizedQuery,
+        }),
+        recommended_action: safeText(
+          scorecard?.recommended_posture,
+          buildQualityAwareRecommendedAction(scorecard, normalizedQuery)
+        ),
+        what_to_watch: localizeReasonList(
+          normalizeTextList(
+            (scorecard?.sports_flip_conditions && scorecard.sports_flip_conditions.length > 0
+              ? scorecard.sports_flip_conditions
+              : scorecard?.invalidators) || [],
+            4
+          ),
+          responseLanguage
+        ),
+        how_to_raise_confidence:
+          Array.isArray(verifiedEvidencePack?.missingness_map) && verifiedEvidencePack.missingness_map.length > 0
+            ? localizeReasonList(verifiedEvidencePack.missingness_map, responseLanguage)
+            : sportsConfidenceHints,
+        coverage_notes: localizeReasonList(normalizeTextList(scorecard?.publication_basis?.notes, 4), responseLanguage),
+      },
+      {
+        queryText,
+        scorecard,
+        verifiedEvidencePack,
+        normalizedQuery,
+      }
+    );
+  }
+
   const payload = {
     title:
       safeText(binaryDisplayCall || scorecard?.primary_call).slice(0, 92) ||
@@ -2640,7 +2751,7 @@ function buildSportsGroundedDossierPrediction({
   });
 }
 
-function normalizeScenarioSet(rawScenarioSet = [], probabilitySplit = null) {
+function normalizeScenarioSet(rawScenarioSet = [], probabilitySplit = null, sportsFrame = null) {
   if (Array.isArray(rawScenarioSet) && rawScenarioSet.length > 0) {
     return rawScenarioSet
       .map((scenario, index) => ({
@@ -2667,7 +2778,144 @@ function normalizeScenarioSet(rawScenarioSet = [], probabilitySplit = null) {
     ];
   }
 
+  const sportsScenarioSet = buildSportsScenarioSetFromFrame(sportsFrame);
+  if (sportsScenarioSet.length > 0) {
+    return sportsScenarioSet;
+  }
+
   return [];
+}
+
+function localizeSportsDrawLabel(language = "en") {
+  const responseLanguage = normalizeLanguageCode(language, "en");
+  if (responseLanguage === "it") return "Pareggio";
+  if (responseLanguage === "es") return "Empate";
+  if (responseLanguage === "fr") return "Nul";
+  if (responseLanguage === "pt") return "Empate";
+  return "Draw";
+}
+
+function getSportsOutcomeFrame(scorecard = {}, fallbackFrame = null, normalizedQuery = {}) {
+  const domainId = safeText(normalizedQuery?.primary_domain_id || normalizedQuery?.domain_id || normalizedQuery?.domain);
+  if (domainId !== SPORTS_MATCH_OUTCOMES_DOMAIN && domainId !== SPORTS_PROBABILITY_MODE_DOMAIN) {
+    return null;
+  }
+  const frame =
+    scorecard?.sports_model_probabilities ||
+    scorecard?.publication_basis?.sports_model_probabilities ||
+    fallbackFrame ||
+    null;
+  if (!frame || typeof frame !== "object") return null;
+  const home = Number(frame?.home);
+  const draw = Number(frame?.draw);
+  const away = Number(frame?.away);
+  if (![home, draw, away].every(Number.isFinite)) return null;
+  return {
+    ...frame,
+    home: clamp01(home, 0),
+    draw: clamp01(draw, 0),
+    away: clamp01(away, 0),
+    home_label: safeText(frame?.home_label, safeText(normalizedQuery?.question_side_a, "Home")),
+    draw_label:
+      safeText(frame?.draw_label).toLowerCase() === "draw"
+        ? localizeSportsDrawLabel(normalizedQuery?.response_language)
+        : safeText(frame?.draw_label, localizeSportsDrawLabel(normalizedQuery?.response_language)),
+    away_label: safeText(frame?.away_label, safeText(normalizedQuery?.question_side_b, "Away")),
+    favorite_label: safeText(frame?.favorite_label),
+    favorite_key: safeText(frame?.favorite_key),
+    favorite_probability: Number.isFinite(Number(frame?.favorite_probability))
+      ? clamp01(Number(frame.favorite_probability), 0)
+      : null,
+  };
+}
+
+function formatSportsOutcomePercent(value) {
+  const normalized = Number(value);
+  return Number.isFinite(normalized) ? `${Math.round(clamp01(normalized, 0) * 100)}%` : "--";
+}
+
+function buildSportsOneXTwoLine(frame = null) {
+  if (!frame) return "";
+  return [
+    `1 ${safeText(frame.home_label, "Home")} ${formatSportsOutcomePercent(frame.home)}`,
+    `X ${safeText(frame.draw_label, "Draw")} ${formatSportsOutcomePercent(frame.draw)}`,
+    `2 ${safeText(frame.away_label, "Away")} ${formatSportsOutcomePercent(frame.away)}`,
+  ].join(" | ");
+}
+
+function buildSportsScenarioSetFromFrame(frame = null) {
+  if (!frame) return [];
+  return [
+    {
+      scenario_id: "sports_home_win",
+      label: `1 ${safeText(frame.home_label, "Home")}`,
+      probability: clamp01(frame.home, 0),
+    },
+    {
+      scenario_id: "sports_draw",
+      label: `X ${safeText(frame.draw_label, "Draw")}`,
+      probability: clamp01(frame.draw, 0),
+    },
+    {
+      scenario_id: "sports_away_win",
+      label: `2 ${safeText(frame.away_label, "Away")}`,
+      probability: clamp01(frame.away, 0),
+    },
+  ];
+}
+
+function buildSportsOutcomeSummary({
+  scorecard = {},
+  normalizedQuery = {},
+  sportsFrame = null,
+}) {
+  if (!sportsFrame) return "";
+  const responseLanguage = normalizeLanguageCode(normalizedQuery?.response_language, "en");
+  const favoriteLabel =
+    safeText(sportsFrame.favorite_label) ||
+    [sportsFrame.home_label, sportsFrame.draw_label, sportsFrame.away_label][
+      [sportsFrame.home, sportsFrame.draw, sportsFrame.away].indexOf(
+        Math.max(Number(sportsFrame.home || 0), Number(sportsFrame.draw || 0), Number(sportsFrame.away || 0))
+      )
+    ] ||
+    safeText(sportsFrame.home_label, "Home");
+  const favoriteProbability = formatSportsOutcomePercent(
+    sportsFrame.favorite_probability != null ? sportsFrame.favorite_probability : Math.max(sportsFrame.home, sportsFrame.draw, sportsFrame.away)
+  );
+  const decisionReason = safeText(
+    scorecard?.sports_decision_reason,
+    safeText(scorecard?.publication_basis?.sports_decision_reason)
+  );
+  const noBetReason = safeText(
+    scorecard?.sports_no_bet_reason,
+    safeText(scorecard?.publication_basis?.sports_no_bet_reason)
+  );
+  const state = safeText(
+    scorecard?.sports_decision_state,
+    safeText(scorecard?.publication_basis?.sports_decision_state)
+  );
+  const detail = safeText(noBetReason || decisionReason);
+
+  if (responseLanguage === "it") {
+    const base = `La mappa 1X2 non e piatta: 1 vale ${formatSportsOutcomePercent(sportsFrame.home)}, X vale ${formatSportsOutcomePercent(sportsFrame.draw)} e 2 vale ${formatSportsOutcomePercent(sportsFrame.away)}. L'esito singolo piu probabile resta ${favoriteLabel} a ${favoriteProbability}.`;
+    if (state === "no_bet" && detail) return `${base} ${detail}`;
+    if (detail) return `${base} ${detail}`;
+    return `${base} Favorita non significa esito certo: il pareggio e l'altro lato restano ancora vivi nel range del match.`;
+  }
+  if (responseLanguage === "es") {
+    const base = `El mapa 1X2 no esta colapsado: 1 vale ${formatSportsOutcomePercent(sportsFrame.home)}, X vale ${formatSportsOutcomePercent(sportsFrame.draw)} y 2 vale ${formatSportsOutcomePercent(sportsFrame.away)}. El resultado individual mas probable sigue siendo ${favoriteLabel} con ${favoriteProbability}.`;
+    return detail ? `${base} ${detail}` : `${base} Favorito no significa resultado seguro: el empate y el otro lado siguen vivos.`;
+  }
+  if (responseLanguage === "fr") {
+    const base = `La carte 1X2 n'est pas ecrasee: 1 vaut ${formatSportsOutcomePercent(sportsFrame.home)}, X vaut ${formatSportsOutcomePercent(sportsFrame.draw)} et 2 vaut ${formatSportsOutcomePercent(sportsFrame.away)}. L'issue individuelle la plus probable reste ${favoriteLabel} a ${favoriteProbability}.`;
+    return detail ? `${base} ${detail}` : `${base} Favori ne veut pas dire issue certaine: le nul et l'autre cote restent vivants.`;
+  }
+  if (responseLanguage === "pt") {
+    const base = `O mapa 1X2 nao esta colapsado: 1 vale ${formatSportsOutcomePercent(sportsFrame.home)}, X vale ${formatSportsOutcomePercent(sportsFrame.draw)} e 2 vale ${formatSportsOutcomePercent(sportsFrame.away)}. O resultado individual mais provavel segue sendo ${favoriteLabel} com ${favoriteProbability}.`;
+    return detail ? `${base} ${detail}` : `${base} Favorito nao significa resultado garantido: empate e o outro lado seguem vivos.`;
+  }
+  const base = `The 1X2 map is not collapsed: 1 sits at ${formatSportsOutcomePercent(sportsFrame.home)}, X at ${formatSportsOutcomePercent(sportsFrame.draw)}, and 2 at ${formatSportsOutcomePercent(sportsFrame.away)}. The single most likely outcome remains ${favoriteLabel} at ${favoriteProbability}.`;
+  return detail ? `${base} ${detail}` : `${base} Favorite does not mean certain winner: the draw and the other side are still live.`;
 }
 
 function confidenceTier(score) {
@@ -2781,10 +3029,35 @@ function inferInputLanguage(queryText = "") {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
   if (!normalized) return "en";
-  if (/\b(el|la|los|las|que|pronostico|resultado|partido|gana|ganar|proximo|proxima)\b/.test(normalized)) return "es";
-  if (/\b(le|la|les|des|que|pronostic|resultat|match|gagne|prochain|prochaine)\b/.test(normalized)) return "fr";
-  if (/\b(o|a|os|as|que|palpite|resultado|jogo|vence|ganhar|proximo|proxima)\b/.test(normalized)) return "pt";
-  if (/\b(il|lo|la|gli|le|che|pronostico|risultato|partita|vince|vincere|prossim[oa]|contro)\b/.test(normalized)) return "it";
+
+  const patterns = {
+    it: [
+      { pattern: /\b(cosa|come|dovrei|partita|stasera|domani|vince|vincere|prossim[oa]|contro|tra|fra|affittare|sopravviverebbe|passera|finira|italia|costituzionale)\b/g, weight: 1 },
+      { pattern: /\b(si|no)\b/g, weight: 0.2 },
+    ],
+    es: [
+      { pattern: /\b(como|pronostico|resultado|partido|esta noche|manana|gana|ganar|proximo|proxima|entre|quien|empate)\b/g, weight: 1 },
+      { pattern: /\b(si|no)\b/g, weight: 0.15 },
+    ],
+    fr: [
+      { pattern: /\b(comment|pronostic|resultat|match|ce soir|demain|gagne|prochain|prochaine|entre|nul)\b/g, weight: 1 },
+      { pattern: /\b(oui|non)\b/g, weight: 0.2 },
+    ],
+    pt: [
+      { pattern: /\b(como|palpite|resultado|jogo|hoje|amanha|vence|ganhar|proximo|proxima|entre|empate|nao)\b/g, weight: 1 },
+      { pattern: /\b(sim|nao)\b/g, weight: 0.2 },
+    ],
+  };
+  const scores = Object.fromEntries(
+    Object.entries(patterns).map(([language, matchers]) => [
+      language,
+      matchers.reduce((total, matcher) => total + ((normalized.match(matcher.pattern) || []).length * matcher.weight), 0),
+    ])
+  );
+  const ranked = Object.entries(scores).sort((left, right) => right[1] - left[1]);
+  if ((ranked[0]?.[1] || 0) > 0) {
+    return ranked[0][0];
+  }
   return "en";
 }
 
@@ -3141,6 +3414,15 @@ function buildQualityAwareFallbackSummary({ queryText, scorecard = {}, binaryCon
   const blockerReason = safeText(scorecard?.publication_basis?.blocker_reason);
   const intentShape = safeText(normalizedQuery?.intent_shape, binaryContract ? "binary_outcome" : "directional_range");
   const responseLanguage = normalizeLanguageCode(normalizedQuery?.response_language, inferInputLanguage(queryText));
+  const sportsFrame = getSportsOutcomeFrame(scorecard, null, normalizedQuery);
+
+  if (sportsFrame) {
+    return buildSportsOutcomeSummary({
+      scorecard,
+      normalizedQuery,
+      sportsFrame,
+    });
+  }
 
   if (qualityVerdict === "blocked_no_pick") {
     return localizedFallback(responseLanguage, "sports_blocked");
@@ -3181,6 +3463,15 @@ function buildQualityAwareFallbackVerdict({ queryText, scorecard = {}, binaryCon
   const publicationState = safeText(scorecard?.publication_state, "limited");
   const qualityVerdict = safeText(scorecard?.publication_basis?.quality_verdict, publicationState === "published" ? "publishable" : "watchlist");
   const responseLanguage = normalizeLanguageCode(normalizedQuery?.response_language, inferInputLanguage(queryText));
+  const sportsFrame = getSportsOutcomeFrame(scorecard, null, normalizedQuery);
+
+  if (sportsFrame) {
+    if (responseLanguage === "it") return `1X2 live: ${buildSportsOneXTwoLine(sportsFrame)}`;
+    if (responseLanguage === "es") return `1X2 en vivo: ${buildSportsOneXTwoLine(sportsFrame)}`;
+    if (responseLanguage === "fr") return `1X2 live: ${buildSportsOneXTwoLine(sportsFrame)}`;
+    if (responseLanguage === "pt") return `1X2 ao vivo: ${buildSportsOneXTwoLine(sportsFrame)}`;
+    return `Live 1X2: ${buildSportsOneXTwoLine(sportsFrame)}`;
+  }
 
   if (binaryContract?.display_call && qualityVerdict !== "blocked_no_pick") {
     return binaryContract.display_call;
@@ -3259,9 +3550,11 @@ function buildFinalCard({
   const domainConfig = getDomain(normalizedQuery.primary_domain_id, GENERAL_FORECAST_DOMAIN);
   const binaryContract = scorecard?.binary_contract || null;
   const probabilitySplit = scorecard?.probability_split || null;
+  const sportsOutcomeFrame = getSportsOutcomeFrame(scorecard, null, normalizedQuery);
   const scenarioSet = normalizeScenarioSet(
     Array.isArray(scorecard?.scenario_set) ? scorecard.scenario_set : [],
-    probabilitySplit
+    probabilitySplit,
+    sportsOutcomeFrame
   );
   const evidenceQuality =
     verifiedEvidencePack?.evidence_quality && typeof verifiedEvidencePack.evidence_quality === "object"
@@ -3477,7 +3770,10 @@ function buildFinalCard({
       voicePayload?.verdict,
       buildQualityAwareFallbackVerdict({ queryText, scorecard, binaryContract, normalizedQuery })
     ),
-    primary_call: safeText(binaryContract?.display_call, safeText(scorecard?.primary_call)),
+    primary_call: safeText(
+      buildSportsOneXTwoLine(sportsOutcomeFrame),
+      safeText(scorecard?.primary_call, safeText(binaryContract?.display_call))
+    ),
     temporal_context: temporalContext,
     run_as_of_utc: runAsOfUtc,
     run_as_of_timezone: runAsOfTimezone,
@@ -4568,7 +4864,7 @@ async function executeForecastRun(context, payload = {}) {
       plan,
     });
     const cachedForecast = await readForecastResultCache(db, cacheKey, FORECAST_RESULT_CACHE_TTL_MS);
-    if (cachedForecast?.card) {
+    if (cachedForecast?.card && shouldReuseCachedForecast(cachedForecast, normalizedQuery)) {
       const cachedCard =
         visibility === "public"
           ? await maybePublishForecastArtifacts({
@@ -5006,7 +5302,14 @@ async function executeForecastRun(context, payload = {}) {
       };
     }
 
-    finalizedScorecard.scenario_set = rawPrediction.scenario_set;
+    const sportsScenarioSet = buildSportsScenarioSetFromFrame(
+      getSportsOutcomeFrame(
+        finalizedScorecard,
+        verifiedEvidencePack?.sports_grounding?.model_probabilities || simulationDigest?.sports_decision?.model_probabilities || null,
+        normalizedQuery
+      )
+    );
+    finalizedScorecard.scenario_set = sportsScenarioSet.length > 0 ? sportsScenarioSet : rawPrediction.scenario_set;
     await writeArtifact(db, admin, runId, "calibration_snapshot", calibrationSnapshot);
     await writeArtifact(db, admin, runId, "fusion_scorecard", finalizedScorecard);
 

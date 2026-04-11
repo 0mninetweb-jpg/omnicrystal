@@ -274,6 +274,32 @@ function SportsCrystalCard({
     Number.isFinite(edgePoints) ? `Model vs market delta: ${Math.round(edgePoints * 100)} pts` : '',
     Number.isFinite(simulationConfidence) ? `Simulation confidence: ${Math.round(simulationConfidence * 100)}%` : '',
   ].filter(Boolean);
+  const outcomeRows = [
+    {
+      code: '1',
+      key: 'home',
+      label: modelProbabilities?.home_label || 'Home',
+      modelProbability: modelProbabilities?.home,
+      marketProbability: marketProbabilities?.home,
+      fairPrice: fairPrices?.home,
+    },
+    {
+      code: 'X',
+      key: 'draw',
+      label: modelProbabilities?.draw_label || 'Draw',
+      modelProbability: modelProbabilities?.draw,
+      marketProbability: marketProbabilities?.draw,
+      fairPrice: fairPrices?.draw,
+    },
+    {
+      code: '2',
+      key: 'away',
+      label: modelProbabilities?.away_label || 'Away',
+      modelProbability: modelProbabilities?.away,
+      marketProbability: marketProbabilities?.away,
+      fairPrice: fairPrices?.away,
+    },
+  ].filter((item) => Number.isFinite(Number(item.modelProbability)) || Number.isFinite(Number(item.marketProbability)));
 
   return (
     <motion.div
@@ -351,6 +377,29 @@ function SportsCrystalCard({
           </div>
 
           <p className="mt-4 text-sm leading-7 text-slate-700">{decisionReason}</p>
+
+          {outcomeRows.length > 0 && (
+            <div className="mt-5 grid gap-3 md:grid-cols-3">
+              {outcomeRows.map((outcome) => (
+                <div key={outcome.code} className="rounded-[22px] border border-slate-200 bg-white px-4 py-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">{outcome.code}</div>
+                      <div className="mt-2 text-base font-semibold text-slate-950">{outcome.label}</div>
+                    </div>
+                    <div className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.15em] text-slate-700">
+                      {formatSportsPercent(outcome.modelProbability)}
+                    </div>
+                  </div>
+                  <div className="mt-3 space-y-1 text-xs leading-6 text-slate-600">
+                    <div>Model {formatSportsPercent(outcome.modelProbability)}</div>
+                    <div>Market {formatSportsPercent(outcome.marketProbability)}</div>
+                    <div>Fair {formatSportsPrice(outcome.fairPrice)}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
 
           <div className="mt-5 grid gap-3 md:grid-cols-4">
             <div className="rounded-[22px] border border-slate-200 bg-slate-50 px-4 py-4">

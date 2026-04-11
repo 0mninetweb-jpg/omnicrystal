@@ -1,6 +1,6 @@
 import React from 'react';
 import type { ForecastPrimaryStackItem } from '../../types/forecastV1';
-import { getForecastMetaCopy } from '../../lib/forecastV1';
+import { getForecastMetaCopy, getSportsOneXTwoLabel } from '../../lib/forecastV1';
 import { TrustStrip } from './TrustStrip';
 import { EvidenceDrawer } from './EvidenceDrawer';
 
@@ -11,12 +11,15 @@ type LimitedCardProps = {
 
 export function LimitedCard({ item, onRemix }: LimitedCardProps) {
   const meta = getForecastMetaCopy(item.card);
-  const probabilityLabel = item.binaryContract
-    ? `${item.binaryContract.question_side_a} ${Math.round(item.binaryContract.question_side_a_probability * 100)}% | ${item.binaryContract.question_side_b} ${Math.round(item.binaryContract.question_side_b_probability * 100)}%`
-    : item.probabilitySplit
-      ? `${item.probabilitySplit.primary_label} ${Math.round(item.probabilitySplit.primary_probability * 100)}% | ${item.probabilitySplit.secondary_label} ${Math.round(item.probabilitySplit.secondary_probability * 100)}%`
-      : null;
-  const heroCall = item.binaryContract?.display_call || item.primaryCall || item.primaryOutcome;
+  const sportsOneXTwoLabel = getSportsOneXTwoLabel(item.card);
+  const probabilityLabel = sportsOneXTwoLabel
+    ? null
+    : item.binaryContract
+      ? `${item.binaryContract.question_side_a} ${Math.round(item.binaryContract.question_side_a_probability * 100)}% | ${item.binaryContract.question_side_b} ${Math.round(item.binaryContract.question_side_b_probability * 100)}%`
+      : item.probabilitySplit
+        ? `${item.probabilitySplit.primary_label} ${Math.round(item.probabilitySplit.primary_probability * 100)}% | ${item.probabilitySplit.secondary_label} ${Math.round(item.probabilitySplit.secondary_probability * 100)}%`
+        : null;
+  const heroCall = sportsOneXTwoLabel || item.primaryCall || item.primaryOutcome || item.binaryContract?.display_call;
 
   return (
     <article className="rounded-[32px] border border-amber-200 bg-[linear-gradient(180deg,#fffdf7_0%,#ffffff_100%)] p-6 shadow-[0_18px_44px_rgba(120,53,15,0.06)]">

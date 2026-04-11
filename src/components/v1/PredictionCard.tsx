@@ -1,7 +1,7 @@
 import React from 'react';
 import { Bookmark, GitBranch, Share2, Sparkles } from 'lucide-react';
 import type { ForecastPrimaryStackItem } from '../../types/forecastV1';
-import { getForecastMetaCopy } from '../../lib/forecastV1';
+import { getForecastMetaCopy, getSportsOneXTwoLabel } from '../../lib/forecastV1';
 import { sanitizeDisplayText } from '../../lib/displayText';
 import { TrustStrip } from './TrustStrip';
 import { EvidenceDrawer } from './EvidenceDrawer';
@@ -30,12 +30,15 @@ export function PredictionCard({
   onShare,
 }: PredictionCardProps) {
   const meta = getForecastMetaCopy(item.card);
-  const probabilityLabel = item.binaryContract
-    ? `${item.binaryContract.question_side_a} ${Math.round(item.binaryContract.question_side_a_probability * 100)}% | ${item.binaryContract.question_side_b} ${Math.round(item.binaryContract.question_side_b_probability * 100)}%`
-    : item.probabilitySplit
-      ? `${item.probabilitySplit.primary_label} ${Math.round(item.probabilitySplit.primary_probability * 100)}% | ${item.probabilitySplit.secondary_label} ${Math.round(item.probabilitySplit.secondary_probability * 100)}%`
-      : null;
-  const heroCall = item.binaryContract?.display_call || item.primaryCall || item.primaryOutcome;
+  const sportsOneXTwoLabel = getSportsOneXTwoLabel(item.card);
+  const probabilityLabel = sportsOneXTwoLabel
+    ? null
+    : item.binaryContract
+      ? `${item.binaryContract.question_side_a} ${Math.round(item.binaryContract.question_side_a_probability * 100)}% | ${item.binaryContract.question_side_b} ${Math.round(item.binaryContract.question_side_b_probability * 100)}%`
+      : item.probabilitySplit
+        ? `${item.probabilitySplit.primary_label} ${Math.round(item.probabilitySplit.primary_probability * 100)}% | ${item.probabilitySplit.secondary_label} ${Math.round(item.probabilitySplit.secondary_probability * 100)}%`
+        : null;
+  const heroCall = sportsOneXTwoLabel || item.primaryCall || item.primaryOutcome || item.binaryContract?.display_call;
   const title = sanitizeDisplayText(item.title, 'Crystal forecast');
   const summary = sanitizeDisplayText(item.summary, 'No summary available yet.');
   const heroCallLabel = sanitizeDisplayText(heroCall, summary);
